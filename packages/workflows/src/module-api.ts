@@ -35,7 +35,7 @@ import {
 export interface FoundationModuleProviders {
   readonly discovery: DiscoveryProvider;
   readonly binding: BindingProvider;
-  readonly firmwareUpdate: FirmwareUpdateProvider;
+  readonly firmwareUpdates: readonly FirmwareUpdateProvider[];
 }
 
 /**
@@ -58,7 +58,11 @@ export class FoundationExpressLrsModule {
     readonly clock?: WorkflowClock;
     readonly discoveryEvidencePolicy?: IdentityEvidenceTrustPolicy;
   }) {
-    this.#providers = Object.freeze({ ...input.providers });
+    this.#providers = Object.freeze({
+      discovery: input.providers.discovery,
+      binding: input.providers.binding,
+      firmwareUpdates: Object.freeze([...input.providers.firmwareUpdates]),
+    });
     this.#sessions = input.sessions;
     this.#catalog = input.catalog;
     this.#clock = input.clock;
@@ -134,7 +138,7 @@ export class FoundationExpressLrsModule {
       descriptor,
       artifact,
       userConfirmed,
-      provider: this.#providers.firmwareUpdate,
+      providers: this.#providers.firmwareUpdates,
       sessions: this.#sessions,
       catalog: this.#catalog,
       ...(this.#clock === undefined ? {} : { clock: this.#clock }),

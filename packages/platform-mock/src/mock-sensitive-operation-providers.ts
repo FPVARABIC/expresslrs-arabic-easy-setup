@@ -6,6 +6,7 @@ import {
   type DeviceDescriptor,
   type DeviceIdentityEvidence,
   type DeviceSession,
+  type FirmwareUpdateMethod,
   type OperationErrorCode,
 } from "@elrs-easy/domain";
 import type {
@@ -214,6 +215,7 @@ export class ScriptedBindingProvider implements BindingProvider {
 
 export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
   public readonly id: string;
+  public readonly updateMethod: FirmwareUpdateMethod;
   public readonly updateCapabilityId: string;
   readonly #initial: SyntheticDeviceFixture;
   readonly #reconnected: SyntheticDeviceFixture;
@@ -229,6 +231,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
   public constructor(input: {
     readonly initial: SyntheticDeviceFixture;
     readonly providerId?: string;
+    readonly updateMethod?: FirmwareUpdateMethod;
     readonly updateCapabilityId?: string;
     readonly reconnected?: SyntheticDeviceFixture;
     readonly reconnects?: boolean;
@@ -238,6 +241,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
     readonly fault?: MockFault<UpdateMockStage>;
   }) {
     this.id = input.providerId ?? "mock-wifi";
+    this.updateMethod = input.updateMethod ?? "WIFI_OTA";
     this.updateCapabilityId = input.updateCapabilityId ?? `${this.id}-update`;
     this.#initial = input.initial;
     this.#reconnected = input.reconnected ?? input.initial;

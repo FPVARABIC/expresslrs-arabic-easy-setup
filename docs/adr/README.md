@@ -15,5 +15,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0009: Milestone 1 threat model and trust boundaries — accepted for M1.
 - ADR-0010: read-only Local HTTP discovery — accepted for the M2A technical spike.
 - ADR-0011: GitHub Pages public development preview — accepted with explicit hosting and Hardware limits.
+- ADR-0012: automatic multi-method Firmware update selection — accepted for Core and Synthetic providers only.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

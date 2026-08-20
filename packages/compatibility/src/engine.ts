@@ -1,5 +1,6 @@
 import type {
   DeviceIdentityResolution,
+  FirmwareUpdateMethod,
   OperationErrorCode,
 } from "@elrs-easy/domain";
 
@@ -18,7 +19,7 @@ export const compatibilityReasons = [
   "TARGET_NOT_IN_CATALOG",
   "ARTIFACT_TARGET_MISMATCH",
   "FIRMWARE_MAJOR_UNSUPPORTED",
-  "UPDATE_PROVIDER_UNSUPPORTED",
+  "UPDATE_METHOD_UNSUPPORTED",
   "COMPATIBLE_BY_PINNED_CATALOG",
 ] as const;
 export type CompatibilityReason = (typeof compatibilityReasons)[number];
@@ -69,7 +70,7 @@ function parseFirmwareMajor(version: unknown): number | null {
 export function evaluateFirmwareCompatibility(input: {
   readonly identity: DeviceIdentityResolution;
   readonly artifact: FirmwareArtifactDescriptor;
-  readonly updateProvider: string;
+  readonly updateMethod: FirmwareUpdateMethod;
   readonly catalog: TargetCatalog;
 }): CompatibilityDecision {
   if (input.identity.confidence !== "CONFIRMED") {
@@ -125,10 +126,10 @@ export function evaluateFirmwareCompatibility(input: {
     };
   }
 
-  if (!target.updateProviders.includes(input.updateProvider)) {
+  if (!target.updateMethods.includes(input.updateMethod)) {
     return {
       status: "BLOCKED",
-      reasons: ["UPDATE_PROVIDER_UNSUPPORTED"],
+      reasons: ["UPDATE_METHOD_UNSUPPORTED"],
       target,
       blockingErrorCode: "PROVIDER_UNSUPPORTED",
     };

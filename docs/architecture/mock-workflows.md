@@ -3,12 +3,12 @@
 Status: **Synthetic execution only**. These state machines prove orchestration
 and failure semantics; they do not claim ExpressLRS hardware support.
 
-The workflow boundary snapshots the selected descriptor, operation intent, and
-Firmware artifact before its first observer/await. Adversarial tests mutate the
-caller's original values during progress callbacks and prove that validation,
-write, reconnect, verification, and result metadata keep using one immutable
-snapshot. Cancellation checkpoints are owned by Core rather than delegated to
-Providers.
+The workflow boundary snapshots the selected descriptor, operation intent,
+Firmware artifact, and provider registry before its first observer/await.
+Adversarial tests mutate the caller's original values during progress callbacks
+and prove that method selection, validation, write, reconnect, verification,
+and result metadata keep using one immutable snapshot. Cancellation checkpoints
+are owned by Core rather than delegated to Providers.
 
 ## Easy Binding
 
@@ -58,12 +58,20 @@ Before the synthetic write, the workflow requires:
 - confirmed identity;
 - exact artifact/Target match;
 - supported Firmware major;
-- supported update provider;
+- one automatically selected Target-supported update method and its observed
+  runtime capability;
 - explicit user intent.
 
 After the write, it reacquires and re-identifies the returned device, then
 checks the observed Target and Firmware version. `WRITE_COMPLETED` is an
 intermediate fact, never a success state.
+
+Synthetic Targets now contain an ordered method list rather than a platform
+provider name. The test host registers Wi-Fi and UART providers together. Core
+selects Wi-Fi for the synthetic TX when available, falls back to UART when it
+is the next supported method, and selects UART for the synthetic Sub-GHz RX.
+Provider registration order is deliberately irrelevant, and duplicate or
+ambiguous mappings fail before any provider call.
 
 ## Failure disposition
 
@@ -89,6 +97,8 @@ The Synthetic layer covers:
 - reconnect to the same device, wrong Target, wrong version, or no device;
 - Binding without a link and with Model Mismatch;
 - deterministic clock and complete provider-call histories;
+- automatic Wi-Fi preference, UART fallback, absent-method, ambiguous-provider,
+  accessor-backed metadata, duplicate-provider, and registry-mutation cases;
 - privacy-classified Synthetic discovery replay traces for regression cases;
 - retry as a fresh invocation that always starts by re-reading identity and
   capabilities.

@@ -9,7 +9,7 @@ const definition = {
   displayName: "Synthetic Alpha",
   identity: { "mcu-family": ["esp32"] },
   capabilities: ["read-config"],
-  updateProviders: ["mock-wifi"],
+  updateMethods: ["WIFI_OTA"],
   supportedFirmwareMajors: [4],
 } as const;
 
@@ -46,7 +46,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: "4.1.0",
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 
@@ -62,7 +62,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: "4.1.0",
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 
@@ -78,7 +78,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: "4.1.0",
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 
@@ -93,7 +93,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: "4.1.0",
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 
@@ -114,7 +114,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: version,
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 
@@ -148,7 +148,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: version,
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 
@@ -157,7 +157,7 @@ describe("evaluateFirmwareCompatibility", () => {
     expect(decision.blockingErrorCode).toBe("VERSION_INCOMPATIBLE");
   });
 
-  it("blocks an update provider that the confirmed target does not support", () => {
+  it("blocks an update method that the confirmed target does not support", () => {
     const decision = evaluateFirmwareCompatibility({
       identity: resolution("CONFIRMED"),
       artifact: {
@@ -165,10 +165,11 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: "4.1.0",
         sha256: "abc",
       },
-      updateProvider: "mock-serial",
+      updateMethod: "UART",
       catalog,
     });
 
+    expect(decision.reasons).toEqual(["UPDATE_METHOD_UNSUPPORTED"]);
     expect(decision.blockingErrorCode).toBe("PROVIDER_UNSUPPORTED");
   });
 
@@ -183,7 +184,7 @@ describe("evaluateFirmwareCompatibility", () => {
         firmwareVersion: "4.1.0",
         sha256: "abc",
       },
-      updateProvider: "mock-wifi",
+      updateMethod: "WIFI_OTA",
       catalog,
     });
 

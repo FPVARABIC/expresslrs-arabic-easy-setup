@@ -9,6 +9,32 @@ export const recoveryDispositions = [
 /** A standalone decision; workflows attach it without changing OperationRecord. */
 export type RecoveryDisposition = (typeof recoveryDispositions)[number];
 
+/**
+ * Canonical update mechanisms understood by Core. Platform providers map
+ * browser/native/upstream names onto these values; the UI never needs to ask
+ * an Easy Mode user to choose one.
+ */
+export const firmwareUpdateMethods = [
+  "WIFI_OTA",
+  "UART",
+  "BETAFLIGHT_PASSTHROUGH",
+  "EDGETX_PASSTHROUGH",
+  "XMODEM",
+  "STLINK",
+  "DFU",
+  "EXTERNAL_TOOL",
+] as const;
+
+export type FirmwareUpdateMethod = (typeof firmwareUpdateMethods)[number];
+
+const firmwareUpdateMethodSet = new Set<unknown>(firmwareUpdateMethods);
+
+export function isFirmwareUpdateMethod(
+  value: unknown,
+): value is FirmwareUpdateMethod {
+  return firmwareUpdateMethodSet.has(value);
+}
+
 export interface ArtifactProvenance {
   readonly applicationVersion: string;
   readonly coreVersion: string;

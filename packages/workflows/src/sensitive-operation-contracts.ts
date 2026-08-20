@@ -5,6 +5,7 @@ import type {
   DeviceDescriptor,
   DeviceIdentityEvidence,
   DeviceSession,
+  FirmwareUpdateMethod,
 } from "@elrs-easy/domain";
 
 export interface IdentityReader {
@@ -77,6 +78,8 @@ export type FirmwareVerificationResult =
 
 export interface FirmwareUpdateProvider extends IdentityReader {
   readonly id: string;
+  /** Canonical mechanism; platform-specific provider identity stays separate. */
+  readonly updateMethod: FirmwareUpdateMethod;
   /** Runtime capability that must be observed before this provider may write. */
   readonly updateCapabilityId: string;
   validateArtifact(

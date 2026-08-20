@@ -51,7 +51,7 @@ function run(
     operationId: input?.operationId ?? "update-1",
     descriptor: sensitiveOperationFixtures.initial.descriptor,
     artifact: input?.artifact ?? compatibleFirmwareArtifact,
-    provider,
+    providers: [provider],
     sessions: input?.sessionManager ?? sessions(),
     catalog: syntheticTargetCatalog,
     userConfirmed: input?.userConfirmed ?? true,
@@ -82,6 +82,112 @@ describe("Firmware Update with a synthetic provider", () => {
       "VERIFYING",
       "SUCCESS",
     ]);
+  });
+
+  it("automatically selects the Target-preferred method, not array order", async () => {
+    const serial = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+      providerId: "mock-serial",
+      updateMethod: "UART",
+    });
+    const wifi = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+      providerId: "mock-wifi",
+      updateMethod: "WIFI_OTA",
+    });
+
+    const operation = await runFirmwareUpdate({
+      operationId: "update-auto-method-preference",
+      descriptor: sensitiveOperationFixtures.initial.descriptor,
+      artifact: compatibleFirmwareArtifact,
+      providers: [serial, wifi],
+      sessions: sessions(),
+      catalog: syntheticTargetCatalog,
+      userConfirmed: true,
+      clock: { now: () => "2026-08-20T08:00:00.000Z" },
+    });
+
+    expect(operation.state).toBe("SUCCESS");
+    expect(operation.result).toMatchObject({
+      providerId: "mock-wifi",
+      updateMethod: "WIFI_OTA",
+    });
+    expect(serial.calls).toEqual([]);
+    expect(wifi.calls.some((call) => call.stage === "WRITE_FIRMWARE")).toBe(
+      true,
+    );
+  });
+
+  it("falls back automatically to another Target-supported method", async () => {
+    const serial = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+      providerId: "mock-serial",
+      updateMethod: "UART",
+    });
+
+    const operation = await run(serial, {
+      operationId: "update-auto-method-fallback",
+    });
+
+    expect(operation.state).toBe("SUCCESS");
+    expect(operation.result).toMatchObject({
+      providerId: "mock-serial",
+      updateMethod: "UART",
+    });
+  });
+
+  it("fails before provider calls when no supported method is available", async () => {
+    const dfu = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+      providerId: "mock-dfu",
+      updateMethod: "DFU",
+    });
+
+    const operation = await run(dfu, {
+      operationId: "update-no-supported-method",
+    });
+
+    expect(operation.state).toBe("FAILED");
+    expect(operation.error).toMatchObject({
+      code: "PROVIDER_UNSUPPORTED",
+      reason: "NO_SUPPORTED_UPDATE_METHOD_AVAILABLE",
+    });
+    expect(dfu.calls).toEqual([]);
+  });
+
+  it("snapshots the provider registry before observers can mutate it", async () => {
+    const wifi = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+      providerId: "mock-wifi",
+      updateMethod: "WIFI_OTA",
+    });
+    const injected = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+      providerId: "injected-wifi",
+      updateMethod: "WIFI_OTA",
+      updateCapabilityId: "mock-wifi-update",
+    });
+    const mutableProviders = [wifi];
+
+    const operation = await runFirmwareUpdate({
+      operationId: "update-provider-registry-snapshot",
+      descriptor: sensitiveOperationFixtures.initial.descriptor,
+      artifact: compatibleFirmwareArtifact,
+      providers: mutableProviders,
+      sessions: sessions(),
+      catalog: syntheticTargetCatalog,
+      userConfirmed: true,
+      clock: { now: () => "2026-08-20T08:00:00.000Z" },
+      observer: (snapshot) => {
+        if (snapshot.state === "IDLE") {
+          mutableProviders.push(injected);
+        }
+      },
+    });
+
+    expect(operation.state).toBe("SUCCESS");
+    expect(operation.result?.providerId).toBe("mock-wifi");
+    expect(injected.calls).toEqual([]);
   });
 
   it("blocks an unsupported major version before any write", async () => {
@@ -296,7 +402,7 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-mutated-descriptor",
       descriptor: mutableDescriptor,
       artifact: compatibleFirmwareArtifact,
-      provider,
+      providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       userConfirmed: true,
@@ -331,7 +437,7 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-mutated-artifact",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: mutableArtifact,
-      provider,
+      providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       userConfirmed: true,
@@ -367,7 +473,7 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-cancelled-after-write",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: compatibleFirmwareArtifact,
-      provider,
+      providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       userConfirmed: true,
@@ -491,8 +597,7 @@ describe("Firmware Update with a synthetic provider", () => {
     expect(operation.state).toBe("FAILED");
     expect(operation.error).toMatchObject({
       code: "PROVIDER_UNSUPPORTED",
-      reason: "FIRMWARE_UPDATE_PROVIDER_FAILED_UNEXPECTEDLY",
-      details: {},
+      reason: "INVALID_UPDATE_PROVIDER_REGISTRY",
     });
     expect(provider.calls).toEqual([]);
     expect(getterCalls).toBe(0);

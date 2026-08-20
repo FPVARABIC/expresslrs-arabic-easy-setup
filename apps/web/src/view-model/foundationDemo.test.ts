@@ -26,11 +26,12 @@ describe("scenario-bound Foundation demo", () => {
         errorCode: "PROVIDER_UNSUPPORTED",
         auditEventCount: 0,
         targetId: null,
+        updateMethod: null,
       });
     },
   );
 
-  it("uses the selected scenario Target and update provider", async () => {
+  it("automatically selects the scenario Target's preferred update method", async () => {
     const tx = await runFoundationDemo("update", "rx24", true);
     const rx = await runFoundationDemo("update", "tx-sub-ghz", true);
 
@@ -38,11 +39,13 @@ describe("scenario-bound Foundation demo", () => {
       state: "SUCCESS",
       verificationPassed: true,
       targetId: "fixture.tx.alpha-2g4",
+      updateMethod: "WIFI_OTA",
     });
     expect(rx).toMatchObject({
       state: "SUCCESS",
       verificationPassed: true,
       targetId: "fixture.rx.beta-subghz",
+      updateMethod: "UART",
     });
   });
 

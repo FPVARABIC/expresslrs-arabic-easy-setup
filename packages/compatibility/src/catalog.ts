@@ -1,7 +1,9 @@
 import {
   identityClaims,
+  isFirmwareUpdateMethod,
   normalizeIdentityValue,
   type DeviceIdentityEvidence,
+  type FirmwareUpdateMethod,
   type TargetCandidate,
 } from "@elrs-easy/domain";
 
@@ -20,7 +22,8 @@ export interface TargetDefinition {
   /** Claim/value pairs form a data-driven fingerprint, never model branches. */
   readonly identity: Readonly<Record<string, readonly string[]>>;
   readonly capabilities: readonly string[];
-  readonly updateProviders: readonly string[];
+  /** Ordered safe preference; platform providers remain separate adapters. */
+  readonly updateMethods: readonly FirmwareUpdateMethod[];
   readonly supportedFirmwareMajors: readonly number[];
 }
 
@@ -75,13 +78,24 @@ export class InMemoryTargetCatalog implements TargetCatalog {
           ]),
         ),
       );
+      const updateMethods = [...definition.updateMethods];
+      if (updateMethods.some((method) => !isFirmwareUpdateMethod(method))) {
+        throw new TypeError(
+          `Invalid update method for target: ${definition.targetId}`,
+        );
+      }
+      if (new Set(updateMethods).size !== updateMethods.length) {
+        throw new TypeError(
+          `Duplicate update method for target: ${definition.targetId}`,
+        );
+      }
       byId.set(
         key,
         Object.freeze({
           ...definition,
           identity,
           capabilities: Object.freeze([...definition.capabilities]),
-          updateProviders: Object.freeze([...definition.updateProviders]),
+          updateMethods: Object.freeze(updateMethods),
           supportedFirmwareMajors: Object.freeze([
             ...definition.supportedFirmwareMajors,
           ]),

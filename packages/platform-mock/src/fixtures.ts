@@ -90,8 +90,13 @@ export const syntheticTargetDefinitions: readonly TargetDefinition[] = [
       "mcu-family": ["mcu-a"],
       "radio-family": ["radio-2g4-a"],
     },
-    capabilities: ["read-config", "guided-bind", "mock-wifi-update"],
-    updateProviders: ["mock-wifi"],
+    capabilities: [
+      "read-config",
+      "guided-bind",
+      "mock-wifi-update",
+      "mock-serial-update",
+    ],
+    updateMethods: ["WIFI_OTA", "UART", "BETAFLIGHT_PASSTHROUGH"],
     supportedFirmwareMajors: [4],
   },
   {
@@ -104,7 +109,7 @@ export const syntheticTargetDefinitions: readonly TargetDefinition[] = [
       "radio-family": ["radio-subghz-b"],
     },
     capabilities: ["read-config", "guided-bind", "mock-serial-update"],
-    updateProviders: ["mock-serial"],
+    updateMethods: ["UART", "BETAFLIGHT_PASSTHROUGH", "XMODEM"],
     supportedFirmwareMajors: [4],
   },
   {
@@ -122,7 +127,7 @@ export const syntheticTargetDefinitions: readonly TargetDefinition[] = [
       "band-aware-operation",
       "mock-wifi-update",
     ],
-    updateProviders: ["mock-wifi"],
+    updateMethods: ["WIFI_OTA", "UART"],
     supportedFirmwareMajors: [4],
   },
   {
@@ -134,7 +139,7 @@ export const syntheticTargetDefinitions: readonly TargetDefinition[] = [
       "radio-family": ["radio-shared"],
     },
     capabilities: ["read-config"],
-    updateProviders: ["mock-serial"],
+    updateMethods: ["UART"],
     supportedFirmwareMajors: [4],
   },
   {
@@ -146,7 +151,7 @@ export const syntheticTargetDefinitions: readonly TargetDefinition[] = [
       "radio-family": ["radio-shared"],
     },
     capabilities: ["read-config"],
-    updateProviders: ["mock-serial"],
+    updateMethods: ["UART"],
     supportedFirmwareMajors: [4],
   },
 ];
@@ -154,9 +159,9 @@ export const syntheticTargetDefinitions: readonly TargetDefinition[] = [
 export const syntheticTargetCatalog = new InMemoryTargetCatalog(
   {
     source: "generated-synthetic-fixtures",
-    revision: "fixture-v1",
-    schemaVersion: "1",
-    contentDigest: "sha256:synthetic-fixture-v1",
+    revision: "fixture-v2",
+    schemaVersion: "2",
+    contentDigest: "sha256:synthetic-fixture-v2",
     redistributionApproved: true,
   },
   syntheticTargetDefinitions,
@@ -232,6 +237,7 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
       ),
       capability("guided-bind", ["tx2g4-config-target"]),
       capability("mock-wifi-update", ["tx2g4-config-target"]),
+      capability("mock-serial-update", ["tx2g4-config-target"]),
     ],
   },
   {

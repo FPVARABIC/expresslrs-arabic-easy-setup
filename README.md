@@ -20,6 +20,9 @@ ExpressLRS يبقى مصدر التقنية اللاسلكية الرسمي. ه�
 
 - واجهة عربية وRTL مصممة للمبتدئ، مع Advanced Mode للخبير.
 - Workflows للربط والإعداد والتحديث بدل عرض خيارات تقنية مبعثرة.
+- اختيار تلقائي لطريقة التحديث المناسبة من Catalog الجهاز؛ البنية تدعم
+  Wi-Fi وUART وpassthrough وXMODEM وSTLink وDFU دون تحويل الواجهة إلى قائمة
+  بروتوكولات.
 - اكتشاف الجهاز والـTarget والـBand عندما توجد أدلة كافية، والتوقف عند الغموض.
 - بوابات أمان تمنع Wrong Target ولا تعرض `SUCCESS` قبل Verification.
 - تشخيص واستعادة وسجلات عمليات مفهومة.
@@ -80,6 +83,7 @@ pnpm check
 - [docs/architecture/milestone-2-read-only-device.md](docs/architecture/milestone-2-read-only-device.md): حدود أول اتصال حقيقي للقراءة فقط.
 - [docs/architecture/mock-workflows.md](docs/architecture/mock-workflows.md): Binding/Update والتحقق والاستعادة في Mock.
 - [ADR-0011](docs/adr/ADR-0011-github-pages-preview.md): حدود نشر معاينة GitHub Pages وأمانها.
+- [ADR-0012](docs/adr/ADR-0012-automatic-multi-method-update-selection.md): اختيار طريقة التحديث المتعددة تلقائيًا دون كتابة حقيقية.
 
 ## الترخيص
 

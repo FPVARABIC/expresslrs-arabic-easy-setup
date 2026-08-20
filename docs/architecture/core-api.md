@@ -38,7 +38,8 @@ The constructor receives:
 
 - a shared `DeviceSessionManager`;
 - an injected, versioned `TargetCatalog`;
-- Discovery, Binding, and Firmware Update providers;
+- Discovery and Binding providers plus a snapshotted Firmware Update provider
+  registry;
 - an optional deterministic clock.
 
 `onProgress` receives an immutable `OperationRecord` for `IDLE` and every real
@@ -116,6 +117,14 @@ validate artifact
 A provider receipt proves only that its command/write call completed. It does
 not prove the postcondition and cannot directly create `SUCCESS`.
 
+Firmware Update providers also declare a canonical method independently from
+their platform-specific provider ID. Core currently recognizes Wi-Fi OTA,
+UART, Betaflight/EdgeTX passthrough, XMODEM, STLink, DFU, and external-tool
+paths. The injected Target Catalog orders the supported methods; Core selects
+one provider from that order, never from registry order. Missing, malformed,
+duplicate, or ambiguous provider mappings stop before a provider call. The
+ordinary UI does not choose a method.
+
 ## Platform status
 
 | Provider | Current implementation | Validation |
@@ -123,7 +132,7 @@ not prove the postcondition and cannot directly create `SUCCESS`.
 | Synthetic Discovery | Deterministic fixtures | Synthetic only |
 | Browser Local HTTP Discovery | Explicit, bounded `GET /config` candidate | `UNVALIDATED`; no Hardware |
 | Binding | Scripted Synthetic | No RF/link Hardware |
-| Firmware Update | Scripted Synthetic state transitions | No real artifact or device I/O |
+| Firmware Update | Scripted Synthetic multi-method selection and state transitions | Wi-Fi preference/UART fallback in Mock only; no real artifact or device I/O |
 | Android | None | Deferred to Android real-device spike |
 
 No package contains an actual WebSerial, WebUSB, native USB, Firmware build, or

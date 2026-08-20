@@ -22,7 +22,18 @@ function createModule() {
     providers: {
       discovery,
       binding: new ScriptedBindingProvider({ initial: fixture }),
-      firmwareUpdate: new ScriptedFirmwareUpdateProvider({ initial: fixture }),
+      firmwareUpdates: [
+        new ScriptedFirmwareUpdateProvider({
+          initial: fixture,
+          providerId: "mock-serial",
+          updateMethod: "UART",
+        }),
+        new ScriptedFirmwareUpdateProvider({
+          initial: fixture,
+          providerId: "mock-wifi",
+          updateMethod: "WIFI_OTA",
+        }),
+      ],
     },
     sessions: new ExclusiveDeviceSessionManager({
       clock: { now: () => "2026-08-20T08:00:00.000Z" },
@@ -54,6 +65,8 @@ describe("FoundationExpressLrsModule", () => {
     expect(discovery.state).toBe("SUCCESS");
     expect(binding.state).toBe("SUCCESS");
     expect(update.state).toBe("SUCCESS");
+    expect(update.result?.providerId).toBe("mock-wifi");
+    expect(update.result?.updateMethod).toBe("WIFI_OTA");
     expect(update.auditEvents.at(-1)?.outcome).toBe("SUCCEEDED");
   });
 

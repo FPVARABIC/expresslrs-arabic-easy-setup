@@ -5,15 +5,17 @@ import {
 } from "@elrs-easy/compatibility";
 import {
   rebuildDiscoveryDescriptors,
-  rebuildProviderId,
   type DeviceSessionManager,
 } from "@elrs-easy/device";
 import type {
   CancellationSignal,
   DeviceDescriptor,
   DeviceSession,
+  FirmwareUpdateMethod,
   OperationRecord,
 } from "@elrs-easy/domain";
+
+import { selectFirmwareUpdateProvider } from "./firmware-update-provider-selection.js";
 
 import {
   acquireWorkflowSession,
@@ -34,6 +36,7 @@ import {
 
 export interface FirmwareUpdateResult {
   readonly providerId: string;
+  readonly updateMethod: FirmwareUpdateMethod;
   readonly deviceId: string;
   readonly targetId: string;
   readonly firmwareVersion: string;
@@ -65,7 +68,7 @@ export async function runFirmwareUpdate(input: {
   readonly operationId: string;
   readonly descriptor: DeviceDescriptor;
   readonly artifact: FirmwareArtifactDescriptor;
-  readonly provider: FirmwareUpdateProvider;
+  readonly providers: readonly FirmwareUpdateProvider[];
   readonly sessions: DeviceSessionManager;
   readonly catalog: TargetCatalog;
   readonly userConfirmed: boolean;
@@ -82,7 +85,7 @@ export async function runFirmwareUpdate(input: {
   const artifact: FirmwareArtifactDescriptor = Object.freeze({
     ...input.artifact,
   });
-  const provider = input.provider;
+  const providers = Object.freeze([...input.providers]);
   const sessions = input.sessions;
   const catalog = input.catalog;
   const userConfirmed = input.userConfirmed;
@@ -98,16 +101,14 @@ export async function runFirmwareUpdate(input: {
   let session: DeviceSession | null = null;
   let writeStarted = false;
   let writeCompleted = false;
+  let provider: FirmwareUpdateProvider;
   let providerId: string;
+  let updateMethod: FirmwareUpdateMethod;
   let updateCapabilityId: string;
 
   try {
     assertNotAborted(signal);
     machine.transition("PREPARING");
-    providerId = rebuildProviderId(readProviderDataProperty(provider, "id"));
-    updateCapabilityId = rebuildProviderId(
-      readProviderDataProperty(provider, "updateCapabilityId"),
-    );
     assertNotAborted(signal);
     if (!hasRuntimeArtifactShape(artifact)) {
       return machine.fail({
@@ -117,6 +118,31 @@ export async function runFirmwareUpdate(input: {
         retryable: false,
       });
     }
+    const artifactTarget = catalog.get(artifact.targetId);
+    if (artifactTarget === null) {
+      return machine.fail({
+        code: "TARGET_UNKNOWN",
+        reason: "ARTIFACT_TARGET_NOT_IN_CATALOG",
+        details: { targetId: artifact.targetId },
+        retryable: false,
+      });
+    }
+    const providerSelection = selectFirmwareUpdateProvider({
+      target: artifactTarget,
+      providers,
+    });
+    if (providerSelection.status === "BLOCKED") {
+      return machine.fail({
+        code: "PROVIDER_UNSUPPORTED",
+        reason: providerSelection.reason,
+        details: { targetId: artifactTarget.targetId },
+        retryable: false,
+      });
+    }
+    provider = providerSelection.provider;
+    providerId = providerSelection.providerId;
+    updateMethod = providerSelection.updateMethod;
+    updateCapabilityId = providerSelection.updateCapabilityId;
     const artifactValid = await provider.validateArtifact(artifact, signal);
     assertNotAborted(signal);
     if (artifactValid !== true) {
@@ -153,6 +179,7 @@ export async function runFirmwareUpdate(input: {
         reason: "UPDATE_CAPABILITY_NOT_AVAILABLE",
         details: {
           providerId,
+          updateMethod,
           capabilityId: updateCapabilityId,
         },
         retryable: false,
@@ -161,7 +188,7 @@ export async function runFirmwareUpdate(input: {
     const compatibility = evaluateFirmwareCompatibility({
       identity: initial.identity,
       artifact,
-      updateProvider: providerId,
+      updateMethod,
       catalog,
     });
     if (compatibility.status !== "COMPATIBLE") {
@@ -313,6 +340,7 @@ export async function runFirmwareUpdate(input: {
     return machine.verificationSucceeded(
       Object.freeze({
         providerId,
+        updateMethod,
         deviceId: reconnectedDescriptor.id,
         targetId: expectedTargetId,
         firmwareVersion: artifact.firmwareVersion,

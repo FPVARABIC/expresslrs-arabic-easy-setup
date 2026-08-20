@@ -1,7 +1,10 @@
-import { createIdentityEvidence } from "@elrs-easy/domain";
+import {
+  createIdentityEvidence,
+  type FirmwareUpdateMethod,
+} from "@elrs-easy/domain";
 import { describe, expect, it } from "vitest";
 
-import { InMemoryTargetCatalog } from "./catalog.js";
+import { InMemoryTargetCatalog, type TargetDefinition } from "./catalog.js";
 
 const catalog = new InMemoryTargetCatalog(
   {
@@ -20,7 +23,7 @@ const catalog = new InMemoryTargetCatalog(
         "radio-family": ["radio-a"],
       },
       capabilities: ["read-config"],
-      updateProviders: ["mock-wifi"],
+      updateMethods: ["WIFI_OTA"],
       supportedFirmwareMajors: [4],
     },
     {
@@ -31,7 +34,7 @@ const catalog = new InMemoryTargetCatalog(
         "radio-family": ["radio-b"],
       },
       capabilities: ["read-config"],
-      updateProviders: ["mock-serial"],
+      updateMethods: ["UART"],
       supportedFirmwareMajors: [4],
     },
   ],
@@ -93,12 +96,13 @@ describe("InMemoryTargetCatalog", () => {
   it("copies injected definitions so later caller mutation cannot change decisions", () => {
     const capabilities = ["read-config"];
     const radioFamilies = ["radio-safe"];
-    const definition = {
+    const updateMethods: FirmwareUpdateMethod[] = ["WIFI_OTA"];
+    const definition: TargetDefinition = {
       targetId: "fixture.rx.immutable",
       displayName: "Synthetic Immutable",
       identity: { "radio-family": radioFamilies },
       capabilities,
-      updateProviders: ["mock-wifi"],
+      updateMethods,
       supportedFirmwareMajors: [4],
     };
     const immutableCatalog = new InMemoryTargetCatalog(
@@ -114,14 +118,52 @@ describe("InMemoryTargetCatalog", () => {
 
     capabilities.push("unsafe-later-capability");
     radioFamilies.push("radio-mutated");
+    updateMethods.push("UART");
 
     expect(immutableCatalog.get("fixture.rx.immutable")?.capabilities).toEqual([
       "read-config",
     ]);
+    expect(immutableCatalog.get("fixture.rx.immutable")?.updateMethods).toEqual(
+      ["WIFI_OTA"],
+    );
     expect(
       immutableCatalog.match([
         evidence("mutated", "radio-family", "radio-mutated"),
       ]),
     ).toEqual([]);
+  });
+
+  it("rejects unknown or duplicate canonical update methods", () => {
+    const definition: TargetDefinition = {
+      targetId: "fixture.rx.invalid-method",
+      displayName: "Synthetic Invalid Method",
+      identity: { "radio-family": ["radio-safe"] },
+      capabilities: [],
+      updateMethods: ["WIFI_OTA"],
+      supportedFirmwareMajors: [4],
+    };
+    const metadata = {
+      source: "synthetic-test",
+      revision: "invalid-method-1",
+      schemaVersion: "2",
+      contentDigest: "sha256:invalid-method",
+      redistributionApproved: true,
+    } as const;
+
+    expect(
+      () =>
+        new InMemoryTargetCatalog(metadata, [
+          { ...definition, updateMethods: ["NOT_A_METHOD"] as never },
+        ]),
+    ).toThrowError("Invalid update method");
+    expect(
+      () =>
+        new InMemoryTargetCatalog(metadata, [
+          {
+            ...definition,
+            updateMethods: ["WIFI_OTA", "WIFI_OTA"],
+          },
+        ]),
+    ).toThrowError("Duplicate update method");
   });
 });
