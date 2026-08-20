@@ -346,10 +346,7 @@ export function buildFirmwareUpdatePreview(input: {
     blockers.push(blocker("TARGET_NOT_IN_CATALOG"));
   }
 
-  const capability = updateCapability(
-    input.capabilities,
-    updateCapabilityId,
-  );
+  const capability = updateCapability(input.capabilities, updateCapabilityId);
   if (capability?.available !== true) {
     blockers.push(blocker("UPDATE_CAPABILITY_NOT_AVAILABLE"));
   } else if (capability.sourceEvidenceIds.length === 0) {
@@ -441,7 +438,9 @@ export async function prepareFirmwareUpdatePreview(input: {
   const sessions = input.sessions;
   const catalog = input.catalog;
   const signal = input.signal;
-  const providerId = rebuildProviderId(readProviderDataProperty(provider, "id"));
+  const providerId = rebuildProviderId(
+    readProviderDataProperty(provider, "id"),
+  );
   const updateCapabilityId = rebuildProviderId(
     readProviderDataProperty(provider, "updateCapabilityId"),
   );
@@ -630,10 +629,8 @@ export function approvalMatchesFirmwareUpdatePreview(
       preview.provenance.patchSetVersion &&
     readProviderDataProperty(approval, "provenanceTargetId") ===
       preview.provenance.targetId &&
-    readProviderDataProperty(
-      approval,
-      "provenanceBuildConfigurationDigest",
-    ) === preview.provenance.buildConfigurationDigest &&
+    readProviderDataProperty(approval, "provenanceBuildConfigurationDigest") ===
+      preview.provenance.buildConfigurationDigest &&
     readProviderDataProperty(approval, "provenanceToolchainIdentity") ===
       preview.provenance.toolchainIdentity &&
     readProviderDataProperty(approval, "provenanceBuiltAt") ===

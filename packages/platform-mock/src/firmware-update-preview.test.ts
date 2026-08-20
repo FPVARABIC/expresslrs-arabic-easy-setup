@@ -132,9 +132,7 @@ describe("Firmware Update preview, provenance, and approval", () => {
     });
 
     expect(preview.status).toBe("BLOCKED");
-    expect(blockerCodes(preview)).toContain(
-      "PROVENANCE_ARTIFACT_MISMATCH",
-    );
+    expect(blockerCodes(preview)).toContain("PROVENANCE_ARTIFACT_MISMATCH");
     expect(preview.verificationPlan).toBeNull();
     expect(provider.calls).toEqual([]);
   });
@@ -200,9 +198,7 @@ describe("Firmware Update preview, provenance, and approval", () => {
     });
 
     expect(preview.status).toBe("BLOCKED");
-    expect(blockerCodes(preview)).toContain(
-      "ARTIFACT_INTEGRITY_NOT_CONFIRMED",
-    );
+    expect(blockerCodes(preview)).toContain("ARTIFACT_INTEGRITY_NOT_CONFIRMED");
     expect(provider.calls.map((call) => call.stage)).toEqual([
       "VALIDATE_ARTIFACT",
     ]);
@@ -392,12 +388,12 @@ describe("Firmware Update preview, provenance, and approval", () => {
     expect(operation.error?.reason).toBe(
       "FIRMWARE_APPROVAL_DID_NOT_MATCH_LIVE_PREVIEW",
     );
-    expect(
-      provider.calls.some((call) => call.stage === "PREPARE_UPDATE"),
-    ).toBe(false);
-    expect(
-      provider.calls.some((call) => call.stage === "WRITE_FIRMWARE"),
-    ).toBe(false);
+    expect(provider.calls.some((call) => call.stage === "PREPARE_UPDATE")).toBe(
+      false,
+    );
+    expect(provider.calls.some((call) => call.stage === "WRITE_FIRMWARE")).toBe(
+      false,
+    );
   });
 
   it("cannot approve a blocked preview", async () => {

@@ -43,11 +43,12 @@ export const majorVersionMismatchArtifact: FirmwareArtifactDescriptor =
     sha256: "78f1cd5204bfa17cd4bcab089755335057f1258fced4f6fb79e791e4f53a9c40",
   });
 
-export const majorVersionMismatchProvenance: ArtifactProvenance =
-  Object.freeze({
+export const majorVersionMismatchProvenance: ArtifactProvenance = Object.freeze(
+  {
     ...compatibleFirmwareProvenance,
     artifactSha256: majorVersionMismatchArtifact.sha256,
-  });
+  },
+);
 
 const initial = fixtureById("known-tx-2g4");
 
