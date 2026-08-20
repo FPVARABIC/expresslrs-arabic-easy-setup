@@ -59,4 +59,10 @@ describe("Arabic-first message catalogs", () => {
       "English fallback verified",
     );
   });
+
+  it("keeps interface copy direct and free of question phrasing", () => {
+    const messages = [...Object.values(ar), ...Object.values(en)];
+
+    expect(messages.filter((message) => /[؟?]/u.test(message))).toEqual([]);
+  });
 });

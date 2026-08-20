@@ -2,11 +2,11 @@
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-08-20 |
+| Date | 2026-08-21 |
 | Phase | Milestone 2A — Hardened read-only real-device candidate |
 | Local branch | `feat/read-only-device-foundation` |
 | Remote repository | `https://github.com/FPVARABIC/expresslrs-arabic-easy-setup`; public repository with M2A [Draft PR #3](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/3) |
-| Public Web preview | [Live GitHub Pages preview](https://fpvarabic.github.io/expresslrs-arabic-easy-setup/) from reviewed app SHA `8889381e9f60e93b647efa02117ae0bf513970f4`; [deployment run #1](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32419758878) passed |
+| Public Web preview | [Live GitHub Pages preview](https://fpvarabic.github.io/expresslrs-arabic-easy-setup/); the deployment workflow checks out and revalidates an explicitly reviewed app SHA before publishing |
 | Stable upstream | ExpressLRS 4.1.0 / `a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6` |
 | Development reference | `73ce820ba51437f73f31686233b607c58e188e7b` |
 | Hardware validation | None |
@@ -58,8 +58,10 @@
 - The real-device UI now exposes honest Workflow progress, manual refresh/reconnect snapshot comparison, focus movement, connection guidance, and explicit safe support copy without polling or a live-connection claim.
 - A production `_headers` artifact and deterministic checker restrict CSP connections to self plus the three reviewed ExpressLRS origins and enforce the policy in source/build output.
 - The GitHub Pages preview candidate now derives and verifies the repository base path, injects a partial reviewed CSP meta policy, uses the agreed dark-green/turquoise/pale-yellow direction, keeps Easy tasks first, and ships required runtime/font notices. Official deployment Actions are pinned to immutable SHAs and may upload only the quality-gated Web `dist` artifact.
+- Easy Mode is now a task-first screen with exactly three primary actions: Binding, update to the latest approved version, and essential settings. Its default flow is connect, automatic identification, then execute and verify; no Target or band choice is presented to the ordinary user.
+- The default screen contains no question-form prompts. A localization contract rejects Arabic or English question punctuation, while Mock scenarios, device evidence, Local HTTP reading, logs, and support export remain available only after explicitly opening Advanced Mode.
 - The first public GitHub Pages deployment passed from `main` in [run #1](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32419758878), after checking out and revalidating exact reviewed app SHA `8889381e9f60e93b647efa02117ae0bf513970f4`. The live page was verified at the repository subpath with Arabic/RTL default, English/LTR switching, Easy tasks before the real-device experiment, Advanced Mode off by default, repository-scoped JS/CSS assets, the reviewed meta CSP, and `no-referrer`. This is still not Hardware or trusted-host evidence.
-- The current local M2A candidate passes the complete quality gate: 332/332 Vitest cases across 22 files, 94.46% statement / 88.69% branch / 98.84% function / 94.41% line coverage, TypeScript, ESLint with zero warnings, formatting, nine-project dependency boundaries, 53 local links across 51 Markdown files, the Master Plan contract, production security-header source/build verification, and the Web production build. The frozen offline install passes all 272 lockfile entries, the license policy passes 248 package/version records, and the high-severity advisory audit finds no known vulnerability. This is not Hardware evidence.
+- The current local M2A candidate passes the complete quality gate: 333/333 Vitest cases across 22 files, TypeScript, ESLint with zero warnings, formatting, nine-project dependency boundaries, 54 local links across 52 Markdown files, the Master Plan contract, production security-header source/build verification, and the Web production build. The frozen offline install passes all 272 lockfile entries, the license policy passes 248 package/version records, and the high-severity advisory audit finds no known vulnerability. This is not Hardware evidence.
 - M2A [Draft PR #3](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/pull/3) is open. Candidate commit `79eb37e7298b0e244f0bedf368e84dc1c684c5c4` passed both official [GitHub Actions run #8](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409948903) and [run #9](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409978636), including the frozen install, complete quality/build gate, license inventory/policy, and high-severity advisory audit.
 
 ## In progress

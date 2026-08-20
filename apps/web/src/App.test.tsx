@@ -41,6 +41,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("switch", { name: "الوضع المتقدم" }));
+}
+
 describe("Arabic-first Web foundation", () => {
   it("renders Easy Mode in Arabic and applies RTL from the first app render", () => {
     render(<App />);
@@ -48,25 +52,39 @@ describe("Arabic-first Web foundation", () => {
     expect(document.documentElement).toHaveAttribute("lang", "ar");
     expect(document.documentElement).toHaveAttribute("dir", "rtl");
     expect(
-      screen.getByRole("heading", { name: "ما الذي تريد فعله؟", level: 1 }),
+      screen.getByRole("heading", { name: "إعداد الجهاز", level: 1 }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /ربط جهاز جديد/ }),
+      screen.getByRole("button", { name: /ربط المرسل والمستقبل/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /التحديث إلى أحدث إصدار/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /الإعدادات الضرورية/ }),
     ).toBeInTheDocument();
     expect(
       screen.getByText("العتاد غير مختبر", { exact: false }),
     ).toBeInTheDocument();
     const easyTasks = screen.getByRole("heading", {
-      name: "ما الذي تريد فعله؟",
+      name: "العمليات الأساسية",
       level: 2,
     });
-    const realRead = screen.getByRole("heading", {
-      name: "اقرأ معلومات جهاز ExpressLRS عبر Wi-Fi",
+    const advancedHeading = screen.getByRole("heading", {
+      name: "التفاصيل التقنية",
     });
     expect(
-      easyTasks.compareDocumentPosition(realRead) &
+      easyTasks.compareDocumentPosition(advancedHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", {
+        name: "اقرأ معلومات جهاز ExpressLRS عبر Wi-Fi",
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("أدلة هوية الجهاز")).not.toBeInTheDocument();
+    expect(document.querySelectorAll("button.task-card")).toHaveLength(3);
+    expect(document.body.textContent).not.toMatch(/[؟?]/u);
   });
 
   it("switches direction with the English fallback locale", async () => {
@@ -79,27 +97,30 @@ describe("Arabic-first Web foundation", () => {
     expect(document.documentElement).toHaveAttribute("dir", "ltr");
     expect(
       screen.getByRole("heading", {
-        name: "What would you like to do?",
+        name: "Set up the device",
         level: 1,
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", {
+      screen.queryByRole("heading", {
         name: "Read your ExpressLRS device over Wi-Fi",
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
-  it("does not contact the local network before explicit user intent", () => {
+  it("does not contact the local network before explicit user intent", async () => {
+    const user = userEvent.setup();
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
 
     render(<App />);
 
     expect(fetch).not.toHaveBeenCalled();
+    await openAdvanced(user);
     expect(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
     ).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("reads one official endpoint and presents only unvalidated reported facts", async () => {
@@ -107,6 +128,7 @@ describe("Arabic-first Web foundation", () => {
     const fetch = vi.fn<BrowserFetch>(async () => realDeviceResponse());
     vi.stubGlobal("fetch", fetch);
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -162,6 +184,7 @@ describe("Arabic-first Web foundation", () => {
     );
     vi.stubGlobal("fetch", fetch);
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -253,6 +276,7 @@ describe("Arabic-first Web foundation", () => {
       vi.fn(async () => new Response("missing", { status: 404 })),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -300,6 +324,7 @@ describe("Arabic-first Web foundation", () => {
       ),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -338,6 +363,7 @@ describe("Arabic-first Web foundation", () => {
       vi.fn(async () => realDeviceResponse()),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -397,6 +423,7 @@ describe("Arabic-first Web foundation", () => {
     });
     vi.stubGlobal("fetch", fetch);
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -449,6 +476,7 @@ describe("Arabic-first Web foundation", () => {
     });
     vi.stubGlobal("fetch", fetch);
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -509,6 +537,7 @@ describe("Arabic-first Web foundation", () => {
       }),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -540,6 +569,7 @@ describe("Arabic-first Web foundation", () => {
       ),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -569,6 +599,7 @@ describe("Arabic-first Web foundation", () => {
       vi.fn(async () => realDeviceResponse()),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -608,6 +639,7 @@ describe("Arabic-first Web foundation", () => {
       vi.fn(async () => realDeviceResponse()),
     );
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
@@ -644,13 +676,16 @@ describe("Arabic-first Web foundation", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    expect(screen.getByText("جهاز ExpressLRS")).toBeInTheDocument();
+    expect(screen.getByText("بيانات توضيحية")).toBeInTheDocument();
+    await openAdvanced(user);
     expect(screen.getByText("مرسل TX Alpha 2.4")).toBeInTheDocument();
-    expect(screen.getByText("بيانات جهاز تجريبية")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "English" }));
 
+    expect(screen.getByText("ExpressLRS device")).toBeInTheDocument();
     expect(screen.getByText("TX Alpha 2.4")).toBeInTheDocument();
-    expect(screen.getByText("Synthetic fixture")).toBeInTheDocument();
+    expect(screen.getByText("Demonstration data")).toBeInTheDocument();
   });
 
   it("falls back to English when a non-critical Arabic message is unavailable", () => {
@@ -662,6 +697,7 @@ describe("Arabic-first Web foundation", () => {
   it("blocks sensitive operations when target evidence is ambiguous", async () => {
     const user = userEvent.setup();
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(screen.getByRole("button", { name: "Target غير محسوم" }));
 
@@ -672,9 +708,11 @@ describe("Arabic-first Web foundation", () => {
       screen.getByText("لن يخمّن التطبيق أبدًا", { exact: false }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /ربط جهاز جديد/ }),
+      screen.getByRole("button", { name: /ربط المرسل والمستقبل/ }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: /تحديث جهاز/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /التحديث إلى أحدث إصدار/ }),
+    ).toBeDisabled();
     expect(screen.queryByText(/SUCCESS/u)).not.toBeInTheDocument();
   });
 
@@ -682,19 +720,19 @@ describe("Arabic-first Web foundation", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /ربط جهاز جديد/ }));
-
-    expect(
-      screen.getByRole("button", { name: "تأكيد وتشغيل المحاكاة" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/SUCCESS/u)).not.toBeInTheDocument();
-
     await user.click(
-      screen.getByRole("button", { name: "تأكيد وتشغيل المحاكاة" }),
+      screen.getByRole("button", { name: /ربط المرسل والمستقبل/ }),
     );
 
     expect(
-      await screen.findByText(/نتيجة Core التجريبية: SUCCESS.*أحداث منظمة/u),
+      screen.getByRole("button", { name: "تشغيل المعاينة" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/SUCCESS/u)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "تشغيل المعاينة" }));
+
+    expect(
+      await screen.findByText("اكتملت المعاينة وتم التحقق من النتيجة."),
     ).toBeInTheDocument();
   });
 
@@ -702,10 +740,12 @@ describe("Arabic-first Web foundation", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /إعداد جهاز/ }));
+    await user.click(
+      screen.getByRole("button", { name: /الإعدادات الضرورية/ }),
+    );
 
     expect(
-      screen.getByText("لا يتم تشغيل Workflow للإعداد أو التشخيص", {
+      screen.getByText("هذه العملية قيد التجهيز", {
         exact: false,
       }),
     ).toBeInTheDocument();
@@ -715,7 +755,9 @@ describe("Arabic-first Web foundation", () => {
   it("supports keyboard focus and activation for an Easy Mode task", async () => {
     const user = userEvent.setup();
     render(<App />);
-    const update = screen.getByRole("button", { name: /تحديث جهاز/ });
+    const update = screen.getByRole("button", {
+      name: /التحديث إلى أحدث إصدار/,
+    });
 
     update.focus();
     expect(document.activeElement).toBe(update);
@@ -723,26 +765,29 @@ describe("Arabic-first Web foundation", () => {
 
     expect(screen.queryByText(/SUCCESS/u)).not.toBeInTheDocument();
     const confirm = screen.getByRole("button", {
-      name: "تأكيد وتشغيل المحاكاة",
+      name: "تشغيل المعاينة",
     });
     confirm.focus();
     await user.keyboard("{Enter}");
 
     expect(
-      await screen.findByText(/نتيجة Core التجريبية: SUCCESS/u),
+      await screen.findByText("اكتملت المعاينة وتم التحقق من النتيجة."),
     ).toBeInTheDocument();
   });
 
   it("keeps Bind and Update disabled when no device is connected", async () => {
     const user = userEvent.setup();
     render(<App />);
+    await openAdvanced(user);
 
     await user.click(screen.getByRole("button", { name: "لا يوجد جهاز" }));
 
     expect(
-      screen.getByRole("button", { name: /ربط جهاز جديد/ }),
+      screen.getByRole("button", { name: /ربط المرسل والمستقبل/ }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: /تحديث جهاز/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /التحديث إلى أحدث إصدار/ }),
+    ).toBeDisabled();
     expect(screen.queryByText(/SUCCESS/u)).not.toBeInTheDocument();
   });
 
@@ -825,7 +870,7 @@ describe("Arabic-first Web foundation", () => {
       window.dispatchEvent(new Event("resize"));
       render(<App />);
 
-      expect(document.querySelectorAll("button.task-card")).toHaveLength(4);
+      expect(document.querySelectorAll("button.task-card")).toHaveLength(3);
       expect(document.querySelector(".app-shell")).toHaveAttribute(
         "dir",
         "rtl",

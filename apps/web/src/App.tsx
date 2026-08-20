@@ -47,7 +47,7 @@ import {
   type LocalHttpFactKey,
 } from "./view-model/localHttpDiscovery";
 
-type TaskId = "bind" | "update" | "setup" | "diagnose";
+type TaskId = "bind" | "update" | "setup";
 type CopyState = "idle" | "copied" | "failed";
 
 interface TaskDefinition {
@@ -83,14 +83,6 @@ const taskDefinitions: readonly TaskDefinition[] = [
     actionKey: "task.setup.action",
     icon: <SlidersIcon />,
     tone: "amber",
-  },
-  {
-    id: "diagnose",
-    titleKey: "task.diagnose.title",
-    descriptionKey: "task.diagnose.description",
-    actionKey: "task.diagnose.action",
-    icon: <PulseIcon />,
-    tone: "mint",
   },
 ];
 
@@ -486,7 +478,7 @@ export function App() {
       </div>
 
       <main id="main-content" className="page" tabIndex={-1}>
-        <section className="hero" aria-labelledby="hero-title">
+        <section className="hero simple-hero" aria-labelledby="hero-title">
           <div className="hero-copy">
             <span className="eyebrow">
               <SparkIcon />
@@ -494,62 +486,34 @@ export function App() {
             </span>
             <h1 id="hero-title">{t("home.title")}</h1>
             <p>{t("home.description")}</p>
-          </div>
 
-          <aside className="safety-summary" aria-labelledby="safety-heading">
-            <span className="safety-icon" aria-hidden="true">
-              <ShieldIcon />
-            </span>
-            <div>
-              <h2 id="safety-heading">{t("safety.heading")}</h2>
-              <p>{t("safety.description")}</p>
-            </div>
-          </aside>
+            <ol className="setup-steps" aria-label={t("home.stepsLabel")}>
+              <li>
+                <span>1</span>
+                <strong>{t("home.step.connect")}</strong>
+              </li>
+              <li>
+                <span>2</span>
+                <strong>{t("home.step.identify")}</strong>
+              </li>
+              <li>
+                <span>3</span>
+                <strong>{t("home.step.complete")}</strong>
+              </li>
+            </ol>
+          </div>
         </section>
 
-        <section className="preview-strip" aria-labelledby="preview-heading">
-          <div className="preview-heading">
-            <div>
-              <span className="section-kicker">{t("status.readOnly")}</span>
-              <h2 id="preview-heading">{t("home.mockLabel")}</h2>
-              <p>{t("home.mockHelp")}</p>
-            </div>
-            <span className="mock-badge">{t("status.mockBadge")}</span>
-          </div>
-
-          <div
-            className="scenario-list"
-            role="group"
-            aria-label={t("home.mockHelp")}
+        <div className="simple-workspace">
+          <section
+            className="task-panel primary-actions"
+            aria-labelledby="tasks-heading"
           >
-            {mockScenarios.map((item) => (
-              <button
-                key={item.id}
-                className={
-                  item.id === scenarioId
-                    ? "scenario-chip is-active"
-                    : "scenario-chip"
-                }
-                type="button"
-                onClick={() => selectScenario(item.id)}
-                aria-pressed={item.id === scenarioId}
-              >
-                <span
-                  className={`scenario-indicator confidence-${item.confidence}`}
-                  aria-hidden="true"
-                />
-                {t(item.labelKey)}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <div className="dashboard-grid">
-          <section className="task-panel" aria-labelledby="tasks-heading">
             <div className="section-heading">
               <div>
                 <span className="section-kicker">{t("mode.easy")}</span>
-                <h2 id="tasks-heading">{t("home.title")}</h2>
+                <h2 id="tasks-heading">{t("home.actionsTitle")}</h2>
+                <p>{t("home.actionsDescription")}</p>
               </div>
             </div>
 
@@ -654,69 +618,21 @@ export function App() {
             ) : null}
           </section>
 
-          <section className="device-panel" aria-labelledby="device-heading">
-            <DeviceOverview scenario={scenario} t={t} />
-          </section>
+          <SimpleDeviceSummary scenario={scenario} t={t} />
         </div>
 
-        <section className="details-grid">
-          <DiscoveryProgress scenario={scenario} t={t} />
-          <EvidencePanel scenario={scenario} t={t} />
-        </section>
-
-        <section
-          className={
-            !sensitiveActionsAvailable
-              ? "safety-callout is-blocked"
-              : "safety-callout"
-          }
-          aria-live="polite"
-        >
-          <span className="safety-callout-icon" aria-hidden="true">
-            {!sensitiveActionsAvailable ? <LockIcon /> : <ShieldCheckIcon />}
+        <section className="simple-assurance" aria-label={t("safety.heading")}>
+          <span aria-hidden="true">
+            <ShieldCheckIcon />
           </span>
           <div>
-            <h2>
-              {!sensitiveActionsAvailable
-                ? t("safety.blockedTitle")
-                : t("safety.readOnlyTitle")}
-            </h2>
-            <p>
-              {!sensitiveActionsAvailable
-                ? t("safety.blockedDescription")
-                : t("safety.readOnlyDescription")}
-            </p>
+            <strong>{t("safety.heading")}</strong>
+            <p>{t("safety.description")}</p>
           </div>
         </section>
 
-        <div
-          className="mock-divider"
-          role="separator"
-          aria-label={t("real.mockDivider")}
-        >
-          <span>{t("real.mockDivider")}</span>
-        </div>
-
-        <RealDeviceReadPanel
-          locale={locale}
-          origin={realOrigin}
-          outcome={realOutcome}
-          running={realRunning}
-          progress={realProgress}
-          reconnectState={realReconnectState}
-          copyState={realCopyState}
-          copyRunning={realCopyRunning}
-          t={t}
-          onOriginChange={selectRealOrigin}
-          onRead={() => void readRealDevice()}
-          onCancel={cancelRealDeviceRead}
-          onCopy={() => void copyRealSupportDetails()}
-          cancelButtonRef={realCancelButton}
-          resultSummaryRef={realResultSummary}
-        />
-
         <section
-          className="advanced-section"
+          className="advanced-section simplified-advanced"
           aria-labelledby="advanced-heading"
         >
           <div className="advanced-toggle-row">
@@ -738,56 +654,169 @@ export function App() {
           </div>
 
           {advanced ? (
-            <div className="advanced-content">
-              <dl className="technical-grid">
-                <TechnicalDatum
-                  label={t("advanced.session")}
-                  value={t(scenario.sessionDisplayKey)}
-                />
-                <TechnicalDatum
-                  label={t("advanced.owner")}
-                  value={t("advanced.ownerValue")}
-                />
-                <TechnicalDatum
-                  label={t("advanced.provider")}
-                  value={t("advanced.providerValue")}
-                />
-                <TechnicalDatum
-                  label={t("advanced.operation")}
-                  value={t("advanced.operationValue")}
-                />
-              </dl>
-              <div className="log-row">
-                <div>
-                  <strong>{t("advanced.log")}</strong>
-                  <p>
-                    <code>{t("advanced.logLevel")}</code>{" "}
-                    {t("advanced.logEntry")}
-                  </p>
-                  <p>{t("advanced.exportDescription")}</p>
+            <div className="advanced-content advanced-workspace">
+              <section
+                className="preview-strip"
+                aria-labelledby="preview-heading"
+              >
+                <div className="preview-heading">
+                  <div>
+                    <span className="section-kicker">
+                      {t("status.readOnly")}
+                    </span>
+                    <h2 id="preview-heading">{t("home.mockLabel")}</h2>
+                    <p>{t("home.mockHelp")}</p>
+                  </div>
+                  <span className="mock-badge">{t("status.mockBadge")}</span>
                 </div>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => void copyTechnicalDetails()}
+
+                <div
+                  className="scenario-list"
+                  role="group"
+                  aria-label={t("home.mockHelp")}
                 >
-                  <CopyIcon />
-                  {copyState === "copied"
-                    ? t("advanced.copied")
-                    : t("advanced.copy")}
-                </button>
-              </div>
-              {copyState !== "idle" ? (
-                <p
-                  className={`clipboard-status ${copyState === "failed" ? "is-error" : ""}`}
-                  role="status"
+                  {mockScenarios.map((item) => (
+                    <button
+                      key={item.id}
+                      className={
+                        item.id === scenarioId
+                          ? "scenario-chip is-active"
+                          : "scenario-chip"
+                      }
+                      type="button"
+                      onClick={() => selectScenario(item.id)}
+                      aria-pressed={item.id === scenarioId}
+                    >
+                      <span
+                        className={`scenario-indicator confidence-${item.confidence}`}
+                        aria-hidden="true"
+                      />
+                      {t(item.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <div className="advanced-device-grid">
+                <section
+                  className="device-panel"
+                  aria-labelledby="device-heading"
+                >
+                  <DeviceOverview scenario={scenario} t={t} />
+                </section>
+
+                <section
+                  className={
+                    !sensitiveActionsAvailable
+                      ? "safety-callout is-blocked"
+                      : "safety-callout"
+                  }
                   aria-live="polite"
                 >
-                  {copyState === "failed"
-                    ? t("advanced.copyFailed")
-                    : t("advanced.copied")}
-                </p>
-              ) : null}
+                  <span className="safety-callout-icon" aria-hidden="true">
+                    {!sensitiveActionsAvailable ? (
+                      <LockIcon />
+                    ) : (
+                      <ShieldCheckIcon />
+                    )}
+                  </span>
+                  <div>
+                    <h2>
+                      {!sensitiveActionsAvailable
+                        ? t("safety.blockedTitle")
+                        : t("safety.readOnlyTitle")}
+                    </h2>
+                    <p>
+                      {!sensitiveActionsAvailable
+                        ? t("safety.blockedDescription")
+                        : t("safety.readOnlyDescription")}
+                    </p>
+                  </div>
+                </section>
+              </div>
+
+              <section className="details-grid">
+                <DiscoveryProgress scenario={scenario} t={t} />
+                <EvidencePanel scenario={scenario} t={t} />
+              </section>
+
+              <div
+                className="mock-divider"
+                role="separator"
+                aria-label={t("real.mockDivider")}
+              >
+                <span>{t("real.mockDivider")}</span>
+              </div>
+
+              <RealDeviceReadPanel
+                locale={locale}
+                origin={realOrigin}
+                outcome={realOutcome}
+                running={realRunning}
+                progress={realProgress}
+                reconnectState={realReconnectState}
+                copyState={realCopyState}
+                copyRunning={realCopyRunning}
+                t={t}
+                onOriginChange={selectRealOrigin}
+                onRead={() => void readRealDevice()}
+                onCancel={cancelRealDeviceRead}
+                onCopy={() => void copyRealSupportDetails()}
+                cancelButtonRef={realCancelButton}
+                resultSummaryRef={realResultSummary}
+              />
+
+              <div className="technical-panel">
+                <dl className="technical-grid">
+                  <TechnicalDatum
+                    label={t("advanced.session")}
+                    value={t(scenario.sessionDisplayKey)}
+                  />
+                  <TechnicalDatum
+                    label={t("advanced.owner")}
+                    value={t("advanced.ownerValue")}
+                  />
+                  <TechnicalDatum
+                    label={t("advanced.provider")}
+                    value={t("advanced.providerValue")}
+                  />
+                  <TechnicalDatum
+                    label={t("advanced.operation")}
+                    value={t("advanced.operationValue")}
+                  />
+                </dl>
+                <div className="log-row">
+                  <div>
+                    <strong>{t("advanced.log")}</strong>
+                    <p>
+                      <code>{t("advanced.logLevel")}</code>{" "}
+                      {t("advanced.logEntry")}
+                    </p>
+                    <p>{t("advanced.exportDescription")}</p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void copyTechnicalDetails()}
+                  >
+                    <CopyIcon />
+                    {copyState === "copied"
+                      ? t("advanced.copied")
+                      : t("advanced.copy")}
+                  </button>
+                </div>
+                {copyState !== "idle" ? (
+                  <p
+                    className={`clipboard-status ${copyState === "failed" ? "is-error" : ""}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {copyState === "failed"
+                      ? t("advanced.copyFailed")
+                      : t("advanced.copied")}
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : null}
         </section>
@@ -811,6 +840,82 @@ export function App() {
 }
 
 type Translator = ReturnType<typeof createTranslator>;
+
+function SimpleDeviceSummary({
+  scenario,
+  t,
+}: {
+  scenario: MockScenarioViewModel;
+  t: Translator;
+}) {
+  const device = scenario.device;
+  const latestVersionKey = "scenarioValue.firmware.v410" as const;
+  const isCurrent = device?.firmwareKey === latestVersionKey;
+
+  return (
+    <section
+      className="simple-device-summary"
+      aria-labelledby="simple-device-heading"
+    >
+      <div className="simple-device-heading">
+        <div>
+          <span className="section-kicker">{t("simple.device.kicker")}</span>
+          <h2 id="simple-device-heading">
+            {device ? t("simple.device.connected") : t("device.none")}
+          </h2>
+        </div>
+        <ConnectionBadge state={device?.connection ?? "disconnected"} t={t} />
+      </div>
+
+      {device ? (
+        <>
+          <div className="simple-device-identity">
+            <span aria-hidden="true">
+              {device.kind === "receiver" ? (
+                <ReceiverIcon />
+              ) : (
+                <TransmitterIcon />
+              )}
+            </span>
+            <div>
+              <strong>
+                {device.kind === "receiver"
+                  ? t("device.receiver")
+                  : t("device.transmitter")}
+              </strong>
+              <small>{t("simple.device.demo")}</small>
+            </div>
+          </div>
+
+          <dl className="simple-version-list">
+            <div>
+              <dt>{t("simple.device.installed")}</dt>
+              <dd>{t(device.firmwareKey)}</dd>
+            </div>
+            <div>
+              <dt>{t("simple.device.latest")}</dt>
+              <dd>{t(latestVersionKey)}</dd>
+            </div>
+          </dl>
+
+          <span
+            className={
+              isCurrent
+                ? "simple-update-state is-current"
+                : "simple-update-state"
+            }
+          >
+            {isCurrent
+              ? t("simple.device.upToDate")
+              : t("simple.device.updateAvailable")}
+          </span>
+        </>
+      ) : (
+        <p className="simple-device-empty">{t("simple.device.connect")}</p>
+      )}
+    </section>
+  );
+}
 
 function RealDeviceReadPanel({
   locale,
