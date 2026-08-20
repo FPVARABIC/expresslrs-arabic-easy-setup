@@ -32,12 +32,13 @@
 - All 25 Core cases and all 4 Web/i18n behaviours passed deterministic local compatibility runs.
 - Root CI/tooling configuration created; no publish/release action exists.
 - Draft PR #1 CI now reaches dependency installation; run #2 generated the reviewed bootstrap lockfile artifact and exposed the first source gate at formatting.
+- Draft PR #1 CI run #4 passed frozen dependency installation, ESLint, and TypeScript; 27 of 29 Vitest cases passed, with the two Web failures traced to missing DOM cleanup between tests.
+- The CI-generated Prettier patch was reviewed and applied to 19 source/config files; the generated `pnpm-lock.yaml` keeps pnpm's native format and is excluded from Prettier.
+- Explicit React DOM cleanup now covers both root-workspace and direct Web Vitest runs.
 
 ## In progress
 
-- Add the exact CI-generated `pnpm-lock.yaml`, then make all later installs frozen.
-- Generate and review a Prettier patch in CI while still collecting lint, typecheck, test, and build findings in the same run.
-- Execute the real Vitest/React DOM suite and Vite production bundle after dependency installation.
+- Rerun the complete official quality gate and confirm all 29 Vitest cases before reaching the Vite production bundle.
 - Complete Mock workflow coverage required by the final Milestone 1 exit gate; this checkpoint is not an M1 completion claim.
 
 ## Blocked
@@ -48,12 +49,12 @@
 - Binding/update verification: source model defined; per-provider hardware proof pending.
 - Official 4.1.0 artifact Inputs: exact Targets/toolchain identity not fully known.
 - Performance hardware/controlled RF setup: not selected. This does not block Mock/Foundation.
-- This execution environment cannot reach the npm registry, so dependencies/lockfile and the official formatter/linter/Vitest/Vite gates remain pending. Exact TypeScript 6.0.3 source validation and dependency-free compatibility runners were used instead; they are not presented as a replacement for `pnpm check`.
+- This execution environment cannot reach the npm registry, so official dependency-backed gates run in GitHub CI. Local source checks and dependency-free compatibility runners are not presented as a replacement for CI.
 
 ## Next
 
-- Install the exact pinned dependencies in a network-enabled CI/local environment, commit the generated lockfile, and run `pnpm check`.
-- Fix any official-toolchain findings before an M1 completion review.
+- Commit the reviewed formatting and test-isolation fixes, then rerun all official CI gates through the production bundle.
+- Fix any remaining official-toolchain findings before an M1 completion review.
 - Keep the real Targets adapter synthetic/license-safe until upstream permission is resolved.
 - Do not implement real hardware writes until reference hardware and provider verification exist.
 - Stage/commit/push only after separate explicit authorization for each action.
