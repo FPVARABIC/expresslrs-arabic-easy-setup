@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { defaultLocale, getDirection } from "@elrs-easy/i18n";
 import { App } from "./App";
 import { BindingPreviewLab } from "./BindingPreviewLab";
+import { FirmwarePreviewLab } from "./FirmwarePreviewLab";
 import "./styles.css";
 
 document.documentElement.lang = defaultLocale;
@@ -16,9 +17,13 @@ if (!root) {
 }
 
 const selectedView = new URLSearchParams(window.location.search).get("view");
+const selectedApplication =
+  selectedView === "binding-preview" ? (
+    <BindingPreviewLab />
+  ) : selectedView === "firmware-preview" ? (
+    <FirmwarePreviewLab />
+  ) : (
+    <App />
+  );
 
-createRoot(root).render(
-  <StrictMode>
-    {selectedView === "binding-preview" ? <BindingPreviewLab /> : <App />}
-  </StrictMode>,
-);
+createRoot(root).render(<StrictMode>{selectedApplication}</StrictMode>);
