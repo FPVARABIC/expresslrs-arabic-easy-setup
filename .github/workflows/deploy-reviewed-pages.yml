@@ -1,4 +1,4 @@
-name: Deploy reviewed Pages candidate
+# Publishes only the exact reviewed candidate pinned below.\nname: Deploy reviewed Pages candidate
 
 on:
   push:
