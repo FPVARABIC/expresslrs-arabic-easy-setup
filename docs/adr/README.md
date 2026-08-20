@@ -12,5 +12,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0006: versioned Target Catalog boundary — accepted; real data license-blocked.
 - ADR-0007: model-agnostic device support — accepted.
 - ADR-0008: Cairo typography — accepted.
+- ADR-0009: Milestone 1 threat model and trust boundaries — accepted for M1.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

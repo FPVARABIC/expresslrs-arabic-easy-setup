@@ -2,6 +2,8 @@
 
 Status: **Accepted for implementation on 2026-08-20**. The owner explicitly approved a model-agnostic Foundation without requiring owned hardware. Hardware writes and support claims remain out of scope.
 
+Implementation checkpoint: **candidate implemented locally; official CI and owner acceptance review are pending**. The acceptance gate below is unchanged; see [current evidence](../testing/milestone-1-acceptance.md).
+
 ## Goal
 
 إنشاء Foundation مستقرة تختبر حدود المعمارية باستخدام Mocks وFixtures فقط، دون Flash حقيقي أو RF/Firmware changes:
@@ -57,7 +59,9 @@ flowchart TD
     PROVIDERS["Mock / Browser later"] --> PORTS
 ```
 
-لا يعتمد Core على UI، ولا تعتمد provider interfaces على React/DOM/Arabic strings.
+لا يعتمد Core على UI أو DOM declarations، ولا تعتمد provider interfaces على
+React/DOM/Arabic strings. يستخدم Core `CancellationSignal` structural ويمكن
+للـBrowser/Node تمرير native `AbortSignal` إليه.
 
 ## First domain contracts
 

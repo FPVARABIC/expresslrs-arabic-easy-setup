@@ -26,35 +26,46 @@
 - Device identity resolution is evidence-based and requires independent trust domains for `CONFIRMED`.
 - Exclusive device-session ownership, fail-closed Compatibility, and verified-only operation success are implemented.
 - Read-only discovery handles confirmed, unknown, ambiguous, conflicting, disconnected, and cancelled synthetic cases.
-- Arabic-first responsive Web shell created with local Cairo Variable, English fallback, Easy/Advanced modes, and explicit Mock/read-only labelling.
-- 29 automated test cases authored (25 Core + 4 Web/i18n).
-- Production Core, Web, i18n, and the complete source/test structure pass TypeScript 6.0.3 checking.
-- All 25 Core cases and all 4 Web/i18n behaviours passed deterministic local compatibility runs.
+- Arabic-first responsive Web shell created with local Cairo Variable, English fallback, Easy/Advanced modes, and explicit Mock/no-hardware-write labelling.
+- The published baseline contained 29 automated cases (25 Core + 4 Web); the local M1 candidate now passes 176/176 Vitest cases across 16 files, including adversarial input-mutation, cancellation, malformed/non-string-version, observer-failure, workflow/privacy, and i18n matrices.
+- The full local `pnpm check` gate passes: Prettier, ESLint with zero warnings, TypeScript, dependency boundaries for seven workspace packages, 45 local links across 47 Markdown files, the complete `MASTER_PLAN.md` contract, all 176 tests, and the production Web build.
+- The frozen offline install confirms that the lockfile is current and all 272 lockfile entries pass pnpm's configured supply-chain policies.
+- The dependency license policy passes for 248 package/version records across 11 observed expressions with no exact exception, and the high-severity advisory audit reports no known vulnerability.
 - Root CI/tooling configuration created; no publish/release action exists.
 - Draft PR #1 CI now reaches dependency installation; run #2 generated the reviewed bootstrap lockfile artifact and exposed the first source gate at formatting.
 - Draft PR #1 CI run #4 passed frozen dependency installation, ESLint, and TypeScript; 27 of 29 Vitest cases passed, with the two Web failures traced to missing DOM cleanup between tests.
 - The CI-generated Prettier patch was reviewed and applied to 19 source/config files; the generated `pnpm-lock.yaml` keeps pnpm's native format and is excluded from Prettier.
 - Explicit React DOM cleanup now covers both root-workspace and direct Web Vitest runs.
+- Draft PR #1 CI run #5 passed the complete published baseline: frozen install, Prettier, ESLint, TypeScript, 29/29 tests, and production Web build.
+- Vitest is split into Core/Node and Web/jsdom projects; Core no longer receives React DOM test setup.
+- Dependency direction and Markdown local links now have deterministic CI checkers.
+- Typed Synthetic Easy Binding and Firmware Update workflows now re-identify after reconnect and require independent verification before `SUCCESS`.
+- Interrupted write, no-return, wrong Target/version, no-link, Model Mismatch, permission denial, invalid artifact, major mismatch, retry, and per-stage disconnect fixtures are implemented.
+- A provisional `FoundationExpressLrsModule` proves Discovery/Binding/Update can be invoked outside React and is exercised by the Web Mock preview.
+- Structured Audit events, fail-closed Allowlist privacy scrubbing, threat model, storage registry, and dependency-admission ledger are implemented.
+- `ArtifactProvenance` and `VerificationPlan` are provisional standalone Domain shapes only; they are not yet required/populated by the M1 module or update workflow.
+- CI requires the committed lockfile with frozen installation and has no PR bootstrap fallback. It is also configured for dependency inventory plus a fail-closed license policy, high-severity advisory audit, Core browser/DOM boundary enforcement, Markdown-link checking, and verified immutable Action pins; the expanded candidate still awaits its official run.
 
 ## In progress
 
-- Rerun the complete official quality gate and confirm all 29 Vitest cases before reaching the Vite production bundle.
-- Complete Mock workflow coverage required by the final Milestone 1 exit gate; this checkpoint is not an M1 completion claim.
+- After explicit authorization, Stage/Commit/Push the candidate and run the complete official CI gate.
+- Add the immutable CI run and exact test totals to the M1 acceptance evidence, then conduct owner acceptance review.
 
 ## Blocked
 
 - Web Flasher/Targets reuse: no explicit repository-level license at inspected SHAs.
 - Product repository license and distinct public brand: pending review.
 - Browser/Android support: pending real-device/browser spikes, including Chrome Android 148+.
-- Binding/update verification: source model defined; per-provider hardware proof pending.
+- Real Binding/update verification: Synthetic contract proven; per-provider hardware proof pending.
 - Official 4.1.0 artifact Inputs: exact Targets/toolchain identity not fully known.
 - Performance hardware/controlled RF setup: not selected. This does not block Mock/Foundation.
-- This execution environment cannot reach the npm registry, so official dependency-backed gates run in GitHub CI. Local source checks and dependency-free compatibility runners are not presented as a replacement for CI.
+- Production CSP is documented but not deployed; it remains a trusted-hosting/Release blocker.
+- The public repository does not yet publish a private vulnerability-reporting route. Non-sensitive Issues remain possible, but sensitive exploit details must not be posted publicly.
 
 ## Next
 
-- Commit the reviewed formatting and test-isolation fixes, then rerun all official CI gates through the production bundle.
-- Fix any remaining official-toolchain findings before an M1 completion review.
+- Request explicit Stage/Commit/Push authorization; no Git mutation occurs before it.
+- Run official CI on the exact pushed commits, fix any finding, record immutable evidence, then perform M1 acceptance review.
 - Keep the real Targets adapter synthetic/license-safe until upstream permission is resolved.
 - Do not implement real hardware writes until reference hardware and provider verification exist.
 - Stage/commit/push only after separate explicit authorization for each action.

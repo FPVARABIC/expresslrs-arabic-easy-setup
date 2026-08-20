@@ -15,59 +15,31 @@ concurrency:
 
 jobs:
   check:
-    name: Format, lint, typecheck, test, and build
+    name: Quality, license, and security gates
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Detect dependency lockfile
-        id: lockfile
-        shell: bash
-        run: |
-          if test -f pnpm-lock.yaml; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Require committed dependency lockfile
+        run: test -f pnpm-lock.yaml
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
         with:
           version: 11.19.0
           run_install: false
 
       - name: Set up Node.js with pnpm cache
-        if: steps.lockfile.outputs.present == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
           cache: pnpm
 
-      - name: Set up Node.js without dependency cache
-        if: steps.lockfile.outputs.present != 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
       - name: Install dependencies from lockfile
-        if: steps.lockfile.outputs.present == 'true'
         run: pnpm install --frozen-lockfile
-
-      - name: Bootstrap dependency lockfile
-        if: steps.lockfile.outputs.present != 'true'
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Preserve bootstrap lockfile for review
-        if: steps.lockfile.outputs.present != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pnpm-lock-bootstrap
-          path: pnpm-lock.yaml
-          if-no-files-found: error
-          retention-days: 3
 
       - name: Check formatting
         id: formatting
@@ -82,7 +54,7 @@ jobs:
 
       - name: Preserve formatter patch for review
         if: steps.formatting.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: prettier-fix-${{ github.run_attempt }}
           path: prettier.patch
@@ -90,7 +62,31 @@ jobs:
           retention-days: 3
 
       - name: Run lint, typecheck, test, and build
-        run: pnpm lint && pnpm typecheck && pnpm test && pnpm build
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm test
+          pnpm build
+
+      - name: Generate dependency license inventory
+        run: pnpm licenses:report
+
+      - name: Preserve dependency license inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-licenses-${{ github.run_attempt }}
+          path: dependency-licenses.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce dependency license policy
+        run: pnpm licenses:check
+
+      - name: Audit dependencies for high-severity advisories
+        run: pnpm security:audit
 
       - name: Enforce formatting gate
         if: always() && steps.formatting.outcome == 'failure'

@@ -8,6 +8,7 @@ node_modules/
 .pnpm-store/
 dist/
 coverage/
+dependency-licenses.json
 *.tsbuildinfo
 
 # Editors and operating systems

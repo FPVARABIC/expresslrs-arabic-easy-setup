@@ -19,5 +19,8 @@
 | 2026-08-20 | DEC-013 | Defer hardware/browser gates, not erase them | Lack of devices does not block Core/Foundation, but still blocks support/write/release claims | Phase 0 Exit Review |
 | 2026-08-20 | DEC-014 | Keep every M1 device/model fixture synthetic | Prevent unvalidated commercial-device names from looking like support claims | ADR-0007 |
 | 2026-08-20 | DEC-015 | Treat this implementation as an M1 checkpoint, not the M1 exit | Official dependency, lockfile, CI, browser, and remaining workflow gates are not all complete | STATUS.md |
+| 2026-08-20 | DEC-016 | Adopt the M1 security/governance baseline | Establish explicit trust boundaries, direct-dependency admission, privacy-safe audit rules, and zero application-managed persistent storage before real adapters | ADR-0009; dependency and security policies |
+| 2026-08-20 | DEC-017 | Expose a provisional UI-independent Foundation module over Synthetic providers | Prove Web/Android/future-host reuse and verified Binding/Update state semantics without admitting a real hardware provider | Core API and Mock workflow docs |
+| 2026-08-20 | DEC-018 | Describe M1 as no-real-device-I/O, not globally read-only | Discovery is read-only, while Synthetic Binding/Update providers deliberately simulate sensitive command/write states in memory | Privacy policy; Core API |
 
 New decisions append rows; they do not silently rewrite prior history. If a decision changes, record a new ID and link the superseding ADR where applicable.
