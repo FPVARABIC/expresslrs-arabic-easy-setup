@@ -2,6 +2,11 @@
 
 Status: **Official CI passed; ready for owner acceptance review**.
 
+Historical scope note: this record describes the M1 candidate at `5c543cb` on
+`research/upstream-baseline`. [GitHub Actions run #7](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32390823563)
+passed that evidence-only successor. Later work on the isolated M2A branch does
+not rewrite or imply owner acceptance of this M1 checkpoint.
+
 This file maps the unchanged acceptance gate in
 `docs/architecture/milestone-1-proposal.md` to evidence. It does not itself
 accept the milestone.

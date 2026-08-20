@@ -13,5 +13,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0007: model-agnostic device support — accepted.
 - ADR-0008: Cairo typography — accepted.
 - ADR-0009: Milestone 1 threat model and trust boundaries — accepted for M1.
+- ADR-0010: read-only Local HTTP discovery — accepted for the M2A technical spike.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

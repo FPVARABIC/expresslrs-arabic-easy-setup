@@ -12,9 +12,11 @@ experiment branches and submit changes through Pull Requests.
 4. Do not copy upstream code or Target data whose reuse has not passed the
    documented license gate.
 
-Milestone 1 permits only Foundation, Synthetic providers, and Mock workflows.
-It does not permit real device writes, Firmware/RF changes, Hardware support
-claims, release publishing, or performance claims.
+M2A additionally permits only the isolated Local HTTP read defined by ADR-0010:
+an explicit `GET /config` to one fixed official origin. It does not permit any
+other endpoint, network scan, Binding/configuration/reboot/update request, real
+device write, Firmware/RF change, Hardware support claim, release publishing,
+or performance claim.
 
 ## Branches and commits
 

@@ -1,10 +1,10 @@
-# Privacy and Audit Policy — Milestone 1
+# Privacy and Audit Policy — Foundation + M2A
 
-Status: **Normative for M1 Foundation**. The current implementation is synthetic
-and performs no real-device I/O. Its Mock providers simulate Binding and Firmware
-write state transitions in memory, so the whole Foundation is not described as
-globally read-only. This policy defines the contract that real Web/Android
-adapters must satisfy before their data may enter logs, clipboard exports,
+Status: **Normative for the current Foundation and M2A candidate**. Synthetic
+providers simulate Binding and Firmware-write state transitions in memory.
+Separately, M2A contains one real Local HTTP provider restricted to read-only
+`GET /config`; it has no write surface and is not Hardware validated. This
+policy defines what any provider may allow into Core, logs, clipboard exports,
 support reports, or persistent storage.
 
 ## Local-first rule
@@ -16,6 +16,33 @@ support reports, or persistent storage.
 - A user action to copy/export is not consent to include secrets or stable
   hardware identifiers.
 - No automatic device change is permitted by an audit or diagnostic component.
+
+## M2A Local HTTP data inventory
+
+After explicit user action, the Browser provider may temporarily parse the
+normal ExpressLRS `/config` response. It immediately rebuilds a bounded,
+allowlisted snapshot containing only fields that are useful to the read-only
+identity view:
+
+- product label and reported Target;
+- Firmware version and commit;
+- TX/RX role and radio family;
+- low/high-band capability and regulatory-domain values;
+- a boolean indicating whether custom Hardware is reported.
+
+The raw response and parsed object exist only inside the parser and are not
+returned, logged, persisted, copied to the clipboard, or exposed to UI code.
+The provider excludes by construction:
+
+- `config.uid` and any Binding identity;
+- the complete `options` object;
+- SSID, Wi-Fi password, and other credentials;
+- `lua_name` and other user-customizable identifiers;
+- unknown top-level, `settings`, `config`, or `options` fields.
+
+The sanitized snapshot is in memory only for one provider instance. The current
+real-device panel has no export action, analytics, cloud transport, storage key,
+or path into the separate Synthetic Binding/update lab.
 
 ## Data classes
 
@@ -86,8 +113,9 @@ adapter detail is excluded by default.
 
 ## Retention and deletion
 
-- M1 audit state is volatile and is discarded on reload/process exit.
-- M1 registers no storage key, cookie, service worker cache, IndexedDB database,
+- Current audit and sanitized M2A discovery state are volatile and are discarded
+  on reload/process exit.
+- The current application registers no storage key, cookie, service worker cache, IndexedDB database,
   or local file.
 - Explicit clipboard content is under the operating system/browser after the
   user action; the UI must explain what is copied and must generate it through
@@ -98,7 +126,7 @@ adapter detail is excluded by default.
 
 ## Review gates
 
-- Adding a real provider requires a field-level data inventory.
+- Adding or expanding a real provider requires a field-level data inventory.
 - Adding diagnostic export requires scrubber implementation and tests.
 - Adding telemetry/crash reporting requires a new ADR and explicit privacy UX.
 - Adding Binding or Wi-Fi workflows requires negative tests proving forbidden

@@ -1,15 +1,17 @@
 # Direct-Dependency Admission Policy and Ledger
 
-Status: **M1 Foundation admission only**
+Status: **M1 dependency admission, reused unchanged by M2A**
 
 Inspected: `2026-08-20`. Source of exact versions: committed `package.json`
 files and `pnpm-lock.yaml`. All versions are exact; workspace packages use
 `workspace:*` and are not third-party admissions.
 
 This ledger records why each direct external dependency exists. `M1_ACCEPTED`
-means it may be used in the current public-source, synthetic/no-real-device-I/O
-Foundation. It does **not** mean Release-cleared, vulnerability-free, or a
-substitute for the final license/SBOM/security gates.
+means it may be used by the current public-source Foundation. M2A introduced no
+external dependency: `@elrs-easy/platform-browser` uses only workspace packages
+and browser platform APIs. Dependency admission does **not** mean Hardware
+validation, Release clearance, vulnerability-free status, or a substitute for
+the final license/SBOM/security gates.
 
 ## Admission rules
 

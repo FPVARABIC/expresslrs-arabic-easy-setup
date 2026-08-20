@@ -4,7 +4,8 @@ Registry schema: `1`
 
 ## Current state
 
-**No application-managed persistent storage is used or approved in Milestone 1.**
+**No application-managed persistent storage is used or approved in the current
+Foundation/M2A candidate.**
 
 | Mechanism | Registered keys/databases/caches | Status |
 | --- | --- | --- |
@@ -17,9 +18,12 @@ Registry schema: `1`
 | Native Android preferences/database/files | None | Android not implemented |
 
 React component state and in-memory operation/session maps are intentionally
-ephemeral. The browser's ordinary HTTP cache for versioned static build assets
-is platform-managed and is not an application data store. Clipboard writes are
-explicit exports and remain subject to the privacy scrubber policy.
+ephemeral. Sanitized Local HTTP discovery snapshots are also ephemeral and do
+not register a storage key. The Browser request uses `cache: "no-store"`. The
+browser's ordinary HTTP cache for versioned static build assets is
+platform-managed and is not an application data store. Clipboard writes are
+explicit exports and remain subject to the privacy scrubber policy; the M2A
+real-device result currently has no clipboard/export action.
 
 ## Registration gate
 

@@ -104,3 +104,13 @@ For each candidate browser/OS, record:
 - artifact download/upload and offline cache behavior.
 
 No browser is “supported” until the relevant rows pass on reference hardware.
+
+## M2A implementation follow-up
+
+The isolated M2A candidate implements the first pattern only for an explicit,
+fixed-origin `GET /config` read. It performs no network scan and exposes no
+mutable endpoint. Its automated transport/schema/privacy tests pass, but the
+desktop/mobile Browser, Local Network Access, mixed-content, device-AP,
+disconnect/reconnect, and reference-Hardware matrix above remains unexecuted.
+Implementation availability must therefore not be described as Browser or
+device support.

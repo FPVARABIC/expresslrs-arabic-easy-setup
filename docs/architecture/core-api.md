@@ -1,17 +1,20 @@
-# Milestone 1 Core API Boundary
+# Core API Boundary — Foundation + M2A Read-only Candidate
 
-Status: **Implemented as a provisional Foundation contract**. It is not yet a
-stable external API and has no real-device provider.
+Status: **Implemented as a provisional contract**. It is not yet a stable
+external API. M2A adds one unvalidated, read-only Browser provider; no real
+Binding, update, or Firmware-write provider exists.
 
 ## Dependency direction
 
 ```text
 Web host
-  → FoundationExpressLrsModule
+  → FoundationExpressLrsModule (Synthetic Binding/Update lab)
+  → ReadOnlyExpressLrsModule (real M2A read only)
     → Workflows
       → Device / Compatibility / Domain
         ← injected provider contracts
-          ← Synthetic providers (M1 only)
+          ← Synthetic providers
+          ← Browser Local HTTP provider (`GET /config` only)
 ```
 
 The Core packages compile with the `ES2023` library and no DOM library. They do
@@ -54,6 +57,12 @@ This proves that Web, Android, or a future host can invoke the same logic
 without making the UI the owner of safety decisions. Contract versioning and a
 production `ExpressLrsAdapter` remain later gates.
 
+M2A also exposes `ReadOnlyExpressLrsModule.discover()`. That facade accepts only
+a `DiscoveryProvider`, session manager, Target Catalog, and evidence policy. It
+has no `bind()`, `update()`, generic command, or endpoint-selection method. The
+Web candidate composes it with an empty Target Catalog, so a device-reported
+Target stays `UNKNOWN` and cannot unlock a sensitive workflow.
+
 ## Returned operation contract
 
 Every call returns `OperationRecord<TResult>` with:
@@ -66,7 +75,11 @@ Every call returns `OperationRecord<TResult>` with:
 - privacy-scrubbed, sequenced `AuditEvent` records.
 
 `SUCCESS` is not accepted through the general transition method. The only
-success path is `VERIFYING → verificationSucceeded(result)`.
+success path is `VERIFYING → verificationSucceeded(result)`. In M2A read-only
+Discovery, `verificationPassed` means the bounded response was parsed and the
+allowlisted facts were rebuilt while the session remained held. It does **not**
+mean Target confirmation, authenticated device identity, supported Hardware,
+or permission to write.
 
 `UNKNOWN_STATE` and `RECOVERY_REQUIRED` require a structured error through
 `endUncertain()`. This prevents unexplained terminal states.
@@ -105,14 +118,15 @@ not prove the postcondition and cannot directly create `SUCCESS`.
 
 ## Platform status
 
-| Provider | M1 implementation | Validation |
+| Provider | Current implementation | Validation |
 | --- | --- | --- |
-| Discovery | Deterministic Synthetic | No hardware |
-| Binding | Scripted Synthetic | No RF/link hardware |
+| Synthetic Discovery | Deterministic fixtures | Synthetic only |
+| Browser Local HTTP Discovery | Explicit, bounded `GET /config` candidate | `UNVALIDATED`; no Hardware |
+| Binding | Scripted Synthetic | No RF/link Hardware |
 | Firmware Update | Scripted Synthetic state transitions | No real artifact or device I/O |
-| Browser | None | Deferred to M2+ spike |
 | Android | None | Deferred to Android real-device spike |
 
-No M1 package contains an actual WebSerial, WebUSB, device HTTP, native USB,
-Firmware build, or real-device Flash implementation. Synthetic providers do
-exercise in-memory `writeFirmware`/reconnect/verify contracts.
+No package contains an actual WebSerial, WebUSB, native USB, Firmware build, or
+real-device Flash implementation. The Browser Local HTTP package exposes only
+the pinned read route and discards raw/private fields. Synthetic providers still
+exercise in-memory `writeFirmware`/reconnect/verify contracts separately.

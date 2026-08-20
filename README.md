@@ -4,9 +4,9 @@
 
 ## الحالة الحالية
 
-- المرحلة: `Milestone 1 — Foundation`
-- الفرع المحلي: `research/upstream-baseline`
-- السلوك المسموح حاليًا: Core/Workflow/Mock/RTL Web Foundation واختبارها محليًا؛ مرشح قبول M1 ينتظر CI
+- المرحلة: `Milestone 2A — Read-only real-device candidate`
+- الفرع المحلي: `feat/read-only-device-foundation`
+- السلوك المسموح حاليًا: Foundation وMock، إضافة إلى قراءة Wi-Fi حقيقية تجريبية ومحدودة يبدأها المستخدم عبر `GET /config` فقط
 - السلوك المحظور حاليًا: تعديل upstream، أو Flash أجهزة، أو ادعاء دعم Hardware/تحسين أداء
 - نمط الأجهزة: Model-agnostic عبر Evidence/Capabilities وTarget Catalog قابل للحقن، دون hard-coded models
 - الخط الأساسي للواجهة: Cairo ذاتي الاستضافة
@@ -39,11 +39,14 @@ packages/domain          الحقائق والأخطاء وحالات العمل
 packages/device          الأدلة، حل الهوية، وملكية Device Session
 packages/compatibility   Target Catalog قابل للحقن وقرارات Fail-closed
 packages/workflows       Discovery وEasy Binding وUpdate State Machines وModule API
+packages/platform-browser  موفر Local HTTP للقراءة فقط دون أي write API
 packages/platform-mock   أجهزة/Providers Synthetic ومصفوفة فشل واستعادة
 packages/i18n            العربية وEnglish fallback وربط الأخطاء المنظمة
 ```
 
-الموديلات ليست شروطًا داخل الواجهة أو الـCore. يضيف Adapter أدلة الجهاز، ويطابقها Catalog مثبت الإصدار، ثم يقرر Core مستوى الثقة والقدرات. بيانات العرض الحالية Synthetic فقط ولا تعني دعم أجهزة تجارية بعينها.
+الموديلات ليست شروطًا داخل الواجهة أو الـCore. يضيف Adapter أدلة الجهاز، ويطابقها Catalog مثبت الإصدار، ثم يقرر Core مستوى الثقة والقدرات. توجد الآن قراءة حقيقية تجريبية منفصلة عن مختبر Mock؛ حقائق `/config` ذاتية الإبلاغ و`UNVALIDATED`، ولا تدخل مسارات Binding/Update التجريبية ولا تؤكد Target أو دعم جهاز تجاري بعينه.
+
+المسار الحقيقي الحالي لا يفحص الشبكة تلقائيًا ولا يقرأ إلا من ثلاثة عناوين ExpressLRS محلية مثبتة. ويستبعد الاستجابة الخام وUID وخيارات Wi-Fi وSSID وكلمة المرور قبل عبور البيانات إلى Core. لا توجد كتابة أو إعادة تشغيل أو Binding أو Firmware update في هذا المسار.
 
 الـlockfile مثبت. بوابة التطوير المطلوبة هي:
 
@@ -52,7 +55,7 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-تفاصيل التحقق والبوابات المتبقية موجودة في [STATUS.md](STATUS.md)، وخريطة القبول في [docs/testing/milestone-1-acceptance.md](docs/testing/milestone-1-acceptance.md).
+تفاصيل التحقق والبوابات المتبقية موجودة في [STATUS.md](STATUS.md)، وسجلا القبول في [Milestone 1](docs/testing/milestone-1-acceptance.md) و[مرشح Milestone 2A للقراءة فقط](docs/testing/milestone-2-read-only-acceptance.md).
 
 ## الوثائق الأساسية
 
@@ -66,6 +69,7 @@ pnpm check
 - [docs/upstream/baseline.md](docs/upstream/baseline.md): الـSHAs المثبتة وأدلة الفحص.
 - [docs/research/README.md](docs/research/README.md): مخرجات Milestone 0 المطلوبة.
 - [docs/architecture/core-api.md](docs/architecture/core-api.md): حدود Core/Host التجريبية.
+- [docs/architecture/milestone-2-read-only-device.md](docs/architecture/milestone-2-read-only-device.md): حدود أول اتصال حقيقي للقراءة فقط.
 - [docs/architecture/mock-workflows.md](docs/architecture/mock-workflows.md): Binding/Update والتحقق والاستعادة في Mock.
 
 ## الترخيص

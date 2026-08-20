@@ -22,5 +22,6 @@
 | 2026-08-20 | DEC-016 | Adopt the M1 security/governance baseline | Establish explicit trust boundaries, direct-dependency admission, privacy-safe audit rules, and zero application-managed persistent storage before real adapters | ADR-0009; dependency and security policies |
 | 2026-08-20 | DEC-017 | Expose a provisional UI-independent Foundation module over Synthetic providers | Prove Web/Android/future-host reuse and verified Binding/Update state semantics without admitting a real hardware provider | Core API and Mock workflow docs |
 | 2026-08-20 | DEC-018 | Describe M1 as no-real-device-I/O, not globally read-only | Discovery is read-only, while Synthetic Binding/Update providers deliberately simulate sensitive command/write states in memory | Privacy policy; Core API |
+| 2026-08-20 | DEC-019 | Admit an isolated M2A Local HTTP candidate with no write authority | Fixed origins, explicit `GET /config`, an empty Target Catalog, and `UNVALIDATED` self-reported evidence permit a real read spike without creating a support or Target-confirmation claim | ADR-0010; M2A architecture and acceptance records |
 
 New decisions append rows; they do not silently rewrite prior history. If a decision changes, record a new ID and link the superseding ADR where applicable.

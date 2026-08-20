@@ -3,8 +3,8 @@
 | Field | Value |
 | --- | --- |
 | Date | 2026-08-20 |
-| Phase | Milestone 1 — Foundation |
-| Local branch | `research/upstream-baseline` |
+| Phase | Milestone 2A — Read-only real-device candidate |
+| Local branch | `feat/read-only-device-foundation` |
 | Remote repository | `https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup`; public repository with Draft PR #1 |
 | Stable upstream | ExpressLRS 4.1.0 / `a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6` |
 | Development reference | `73ce820ba51437f73f31686233b607c58e188e7b` |
@@ -22,7 +22,7 @@
 - Reuse matrix, ADR set, Phase 0 exit review, and Mock-only Milestone 1 proposal completed.
 - No upstream/project Firmware source copied or modified.
 - Owner approved model-agnostic M1 Foundation and Cairo typography.
-- TypeScript workspace and six independent packages created: Domain, Device, Compatibility, Workflows, Mock Platform, and i18n.
+- TypeScript workspace and seven independent packages created: Domain, Device, Compatibility, Workflows, Browser Platform, Mock Platform, and i18n (eight workspace projects including Web).
 - Device identity resolution is evidence-based and requires independent trust domains for `CONFIRMED`.
 - Exclusive device-session ownership, fail-closed Compatibility, and verified-only operation success are implemented.
 - Read-only discovery handles confirmed, unknown, ambiguous, conflicting, disconnected, and cancelled synthetic cases.
@@ -46,25 +46,35 @@
 - `ArtifactProvenance` and `VerificationPlan` are provisional standalone Domain shapes only; they are not yet required/populated by the M1 module or update workflow.
 - CI requires the committed lockfile with frozen installation and has no PR bootstrap fallback. It is also configured for dependency inventory plus a fail-closed license policy, high-severity advisory audit, Core browser/DOM boundary enforcement, Markdown-link checking, and verified immutable Action pins.
 - Draft PR #1 GitHub Actions run #6 passed on candidate commit `9db3f268d32732840d475281cd2435acbbe0f7bb`, including the frozen install, all quality/build gates, license inventory/policy, and high-severity advisory audit.
+- The M1 evidence-only successor at `5c543cb` also passed [GitHub Actions run #7](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32390823563); owner acceptance review remains pending.
+- A separate M2A branch now contains a real Browser Local HTTP candidate that performs one explicit `GET /config` against only the three pinned ExpressLRS local origins. It does not scan, redirect, send credentials, or expose any write method.
+- The M2A parser requires a bounded JSON response and rebuilds only allowlisted device-reported facts. Raw response data, UID, Wi-Fi options, SSID, password, `lua_name`, and unknown fields do not cross the adapter boundary.
+- All Local HTTP facts remain `UNVALIDATED` in one self-reported trust domain. Web composition deliberately uses an empty Target Catalog, so the resulting identity remains `UNKNOWN` and cannot authorize Binding or update.
+- Device-session leases now use exact opaque-object ownership, while the Core boundary rebuilds and freezes descriptors, evidence, and capabilities supplied by providers.
+- The current local M2A candidate passes 261/261 Vitest cases across 20 files, TypeScript, ESLint with zero warnings, formatting, eight-project dependency boundaries, Markdown/Master Plan checks, and a production Web build. This is not Hardware evidence.
 
 ## In progress
 
-- Commit and push the immutable CI evidence update, confirm its documentation-only successor check remains green, then conduct the owner acceptance review.
+- Review the isolated M2A implementation candidate and complete the still-pending M1 owner acceptance review.
+- Prepare the reference-hardware/browser matrix for TX and RX Local HTTP reads, disconnect/reconnect, Local Network Access, device-AP switching, and mobile behavior.
+- Keep all Binding, configuration, reboot, update, Firmware, and RF paths disabled in the real-device adapter.
 
 ## Blocked
 
 - Web Flasher/Targets reuse: no explicit repository-level license at inspected SHAs.
 - Product repository license and distinct public brand: pending review.
-- Browser/Android support: pending real-device/browser spikes, including Chrome Android 148+.
+- Browser support: code candidate exists, but desktop/mobile/LNA/mixed-content/device-AP behavior remains unvalidated on reference hardware, including Chrome Android 148+.
 - Real Binding/update verification: Synthetic contract proven; per-provider hardware proof pending.
 - Official 4.1.0 artifact Inputs: exact Targets/toolchain identity not fully known.
 - Performance hardware/controlled RF setup: not selected. This does not block Mock/Foundation.
 - Production CSP is documented but not deployed; it remains a trusted-hosting/Release blocker.
+- Official CI for the uncommitted M2A tree is pending separate Stage/Commit/Push authorization. The online advisory audit was not rerun locally; M2A added no external dependency and the frozen lockfile/license gates pass.
 - The public repository does not yet publish a private vulnerability-reporting route. Non-sensitive Issues remain possible, but sensitive exploit details must not be posted publicly.
 
 ## Next
 
-- Perform the M1 owner acceptance review after the evidence-only successor CI passes.
-- Keep the real Targets adapter synthetic/license-safe until upstream permission is resolved.
+- Conduct owner review of M1 evidence and the local M2A candidate.
+- Run the documented read-only hardware/browser matrix; record exact device, Firmware, browser, OS, field behavior, disconnect/reconnect, and privacy observations.
+- Keep the real Targets adapter empty/license-safe until upstream permission is resolved; never promote a self-reported Target alone.
 - Do not implement real hardware writes until reference hardware and provider verification exist.
 - Stage/commit/push only after separate explicit authorization for each action.
