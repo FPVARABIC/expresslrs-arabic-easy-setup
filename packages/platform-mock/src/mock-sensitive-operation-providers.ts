@@ -1,4 +1,4 @@
-import type { FirmwareArtifactDescriptor } from "@elrs-easy/compatibility";
+import type { FirmwareUpdateArtifact } from "@elrs-easy/compatibility";
 import {
   CoreOperationError,
   type CancellationSignal,
@@ -261,7 +261,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
   }
 
   public async validateArtifact(
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<boolean> {
     assertNotAborted(signal);
@@ -313,7 +313,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
 
   public async prepareUpdate(
     session: DeviceSession,
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<void> {
     assertNotAborted(signal);
@@ -324,7 +324,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
 
   public async writeFirmware(
     session: DeviceSession,
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<FirmwareWriteReceipt> {
     assertNotAborted(signal);
@@ -358,7 +358,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
 
   public async verifyFirmware(
     session: DeviceSession,
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<FirmwareVerificationResult> {
     assertNotAborted(signal);

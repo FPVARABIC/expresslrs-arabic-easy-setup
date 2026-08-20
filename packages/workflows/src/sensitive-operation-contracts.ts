@@ -1,4 +1,4 @@
-import type { FirmwareArtifactDescriptor } from "@elrs-easy/compatibility";
+import type { FirmwareUpdateArtifact } from "@elrs-easy/compatibility";
 import type {
   CancellationSignal,
   Capability,
@@ -83,17 +83,17 @@ export interface FirmwareUpdateProvider extends IdentityReader {
   /** Runtime capability that must be observed before this provider may write. */
   readonly updateCapabilityId: string;
   validateArtifact(
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<boolean>;
   prepareUpdate(
     session: DeviceSession,
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<void>;
   writeFirmware(
     session: DeviceSession,
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<FirmwareWriteReceipt>;
   reboot(session: DeviceSession, signal?: CancellationSignal): Promise<void>;
@@ -103,7 +103,7 @@ export interface FirmwareUpdateProvider extends IdentityReader {
   ): Promise<DeviceDescriptor | null>;
   verifyFirmware(
     session: DeviceSession,
-    artifact: FirmwareArtifactDescriptor,
+    artifact: FirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<FirmwareVerificationResult>;
 }

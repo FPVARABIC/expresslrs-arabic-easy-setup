@@ -85,10 +85,19 @@ or permission to write.
 `UNKNOWN_STATE` and `RECOVERY_REQUIRED` require a structured error through
 `endUncertain()`. This prevents unexplained terminal states.
 
-`ArtifactProvenance` and `VerificationPlan` currently exist as provisional
-standalone Domain shapes. The M1 module/update inputs do not yet require or
-populate them, so their presence is not evidence that provenance enforcement or
-a generic verification-plan executor is implemented.
+Firmware compatibility can still evaluate a minimal descriptor, but Firmware
+execution now requires a `FirmwareUpdateArtifact` with provenance schema v1.
+Core rebuilds fixed own data properties before the first observer, validates
+canonical digest/commit/time/repository/size shapes, and requires the descriptor
+Target and digest to agree with provenance. The result is explicitly labeled
+`COHERENCE_ONLY`; there is no Firmware byte hash, signature verification, or
+trusted manifest.
+
+Core creates `firmware-update-post-write-v1` with four required facts: device
+reconnected, session-local device identity matched, Target matched, and Firmware
+version matched. Strict evaluation of that immutable plan is an additional
+condition for `SUCCESS`. The exact provenance snapshot and plan are returned as
+operation evidence.
 
 ## Provider ports
 
@@ -132,7 +141,7 @@ ordinary UI does not choose a method.
 | Synthetic Discovery | Deterministic fixtures | Synthetic only |
 | Browser Local HTTP Discovery | Explicit, bounded `GET /config` candidate | `UNVALIDATED`; no Hardware |
 | Binding | Scripted Synthetic | No RF/link Hardware |
-| Firmware Update | Scripted Synthetic multi-method selection and state transitions | Wi-Fi preference/UART fallback in Mock only; no real artifact or device I/O |
+| Firmware Update | Scripted Synthetic multi-method selection, provenance coherence, and declarative verification | Mock only; no binary, signed manifest, or device I/O |
 | Android | None | Deferred to Android real-device spike |
 
 No package contains an actual WebSerial, WebUSB, native USB, Firmware build, or

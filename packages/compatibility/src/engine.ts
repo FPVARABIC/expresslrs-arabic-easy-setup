@@ -1,4 +1,5 @@
 import type {
+  ArtifactProvenance,
   DeviceIdentityResolution,
   FirmwareUpdateMethod,
   OperationErrorCode,
@@ -28,6 +29,14 @@ export interface FirmwareArtifactDescriptor {
   readonly targetId: string;
   readonly firmwareVersion: string;
   readonly sha256: string;
+}
+
+/**
+ * Execution-grade envelope. Compatibility can inspect a descriptor alone,
+ * while an update Workflow additionally requires immutable provenance input.
+ */
+export interface FirmwareUpdateArtifact extends FirmwareArtifactDescriptor {
+  readonly provenance: ArtifactProvenance;
 }
 
 export interface CompatibilityDecision {

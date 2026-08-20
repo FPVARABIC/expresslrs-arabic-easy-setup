@@ -22,14 +22,11 @@ export interface InspectedDevice {
 }
 
 /**
- * Reads only an own data property from provider-owned runtime output. Accessor
- * properties are treated as absent so provider getters cannot execute while a
- * Workflow is validating receipts, verification results, or metadata.
+ * Reads only an own data property from untrusted runtime input. Accessor
+ * properties are treated as absent so getters cannot execute while a Workflow
+ * is validating artifacts, receipts, verification results, or metadata.
  */
-export function readProviderDataProperty(
-  value: unknown,
-  key: PropertyKey,
-): unknown {
+export function readOwnDataProperty(value: unknown, key: PropertyKey): unknown {
   if (
     (typeof value !== "object" && typeof value !== "function") ||
     value === null
@@ -45,6 +42,9 @@ export function readProviderDataProperty(
     return undefined;
   }
 }
+
+/** Kept as a provider-specific name at existing call sites. */
+export const readProviderDataProperty = readOwnDataProperty;
 
 /** Providers are untrusted and may ignore cancellation on their own. */
 export function assertNotAborted(signal?: CancellationSignal): void {

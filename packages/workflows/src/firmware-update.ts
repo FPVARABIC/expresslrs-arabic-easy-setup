@@ -1,6 +1,6 @@
 import {
   evaluateFirmwareCompatibility,
-  type FirmwareArtifactDescriptor,
+  type FirmwareUpdateArtifact,
   type TargetCatalog,
 } from "@elrs-easy/compatibility";
 import {
@@ -9,12 +9,16 @@ import {
 } from "@elrs-easy/device";
 import type {
   CancellationSignal,
+  ArtifactProvenance,
+  ArtifactProvenanceValidationLevel,
   DeviceDescriptor,
   DeviceSession,
   FirmwareUpdateMethod,
   OperationRecord,
+  VerificationPlan,
 } from "@elrs-easy/domain";
 
+import { snapshotFirmwareUpdateArtifact } from "./firmware-artifact.js";
 import { selectFirmwareUpdateProvider } from "./firmware-update-provider-selection.js";
 
 import {
@@ -33,6 +37,11 @@ import {
   type OperationObserver,
   type WorkflowClock,
 } from "./operation-machine.js";
+import {
+  createFirmwareUpdateVerificationPlan,
+  evaluateVerificationPlan,
+  type VerificationObservation,
+} from "./verification-plan.js";
 
 export interface FirmwareUpdateResult {
   readonly providerId: string;
@@ -41,23 +50,10 @@ export interface FirmwareUpdateResult {
   readonly targetId: string;
   readonly firmwareVersion: string;
   readonly artifactSha256: string;
+  readonly artifactProvenance: ArtifactProvenance;
+  readonly artifactProvenanceValidation: ArtifactProvenanceValidationLevel;
+  readonly verificationPlan: VerificationPlan;
   readonly verification: "EXPECTED_FIRMWARE_OBSERVED";
-}
-
-function hasRuntimeArtifactShape(
-  artifact: FirmwareArtifactDescriptor,
-): boolean {
-  const runtimeArtifact = artifact as Partial<
-    Record<keyof FirmwareArtifactDescriptor, unknown>
-  >;
-  return (
-    typeof runtimeArtifact.targetId === "string" &&
-    runtimeArtifact.targetId.trim().length > 0 &&
-    typeof runtimeArtifact.firmwareVersion === "string" &&
-    runtimeArtifact.firmwareVersion.length > 0 &&
-    typeof runtimeArtifact.sha256 === "string" &&
-    runtimeArtifact.sha256.trim().length > 0
-  );
 }
 
 /**
@@ -67,7 +63,7 @@ function hasRuntimeArtifactShape(
 export async function runFirmwareUpdate(input: {
   readonly operationId: string;
   readonly descriptor: DeviceDescriptor;
-  readonly artifact: FirmwareArtifactDescriptor;
+  readonly artifact: FirmwareUpdateArtifact;
   readonly providers: readonly FirmwareUpdateProvider[];
   readonly sessions: DeviceSessionManager;
   readonly catalog: TargetCatalog;
@@ -82,9 +78,7 @@ export async function runFirmwareUpdate(input: {
   // selection, or confirmation after validation has begun.
   const operationId = input.operationId;
   const descriptor: DeviceDescriptor = Object.freeze({ ...input.descriptor });
-  const artifact: FirmwareArtifactDescriptor = Object.freeze({
-    ...input.artifact,
-  });
+  const artifactSnapshot = snapshotFirmwareUpdateArtifact(input.artifact);
   const providers = Object.freeze([...input.providers]);
   const sessions = input.sessions;
   const catalog = input.catalog;
@@ -110,14 +104,20 @@ export async function runFirmwareUpdate(input: {
     assertNotAborted(signal);
     machine.transition("PREPARING");
     assertNotAborted(signal);
-    if (!hasRuntimeArtifactShape(artifact)) {
+    if (artifactSnapshot.status === "BLOCKED") {
       return machine.fail({
         code: "ARTIFACT_INVALID",
-        reason: "FIRMWARE_ARTIFACT_DESCRIPTOR_INVALID",
+        reason: artifactSnapshot.reason,
         details: {},
         retryable: false,
       });
     }
+    const artifact = artifactSnapshot.artifact;
+    const verificationPlan = createFirmwareUpdateVerificationPlan({
+      expectedDeviceId: descriptor.id,
+      expectedTargetId: artifact.targetId,
+      expectedFirmwareVersion: artifact.firmwareVersion,
+    });
     const artifactTarget = catalog.get(artifact.targetId);
     if (artifactTarget === null) {
       return machine.fail({
@@ -320,11 +320,33 @@ export async function runFirmwareUpdate(input: {
       verification,
       "observedFirmwareVersion",
     );
+    const observations: VerificationObservation[] = [
+      { fact: "DEVICE_RECONNECTED", observedValue: true },
+      {
+        fact: "DEVICE_IDENTITY_MATCHES",
+        observedValue: reconnectedDescriptor.id,
+      },
+    ];
+    if (typeof observedTargetId === "string") {
+      observations.push({
+        fact: "TARGET_MATCHES",
+        observedValue: observedTargetId,
+      });
+    }
+    if (typeof observedFirmwareVersion === "string") {
+      observations.push({
+        fact: "FIRMWARE_VERSION_MATCHES",
+        observedValue: observedFirmwareVersion,
+      });
+    }
+    const planEvaluation = evaluateVerificationPlan({
+      plan: verificationPlan,
+      observations,
+    });
     const verificationPassed =
       verificationValid === true &&
       verificationReason === "EXPECTED_FIRMWARE_OBSERVED" &&
-      observedTargetId === expectedTargetId &&
-      observedFirmwareVersion === artifact.firmwareVersion;
+      planEvaluation.status === "PASSED";
     if (!verificationPassed) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
         code: "VERIFICATION_FAILED",
@@ -345,6 +367,9 @@ export async function runFirmwareUpdate(input: {
         targetId: expectedTargetId,
         firmwareVersion: artifact.firmwareVersion,
         artifactSha256: artifact.sha256,
+        artifactProvenance: artifact.provenance,
+        artifactProvenanceValidation: artifactSnapshot.provenanceValidation,
+        verificationPlan,
         verification: "EXPECTED_FIRMWARE_OBSERVED",
       }),
     );

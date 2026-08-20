@@ -1,5 +1,5 @@
 import type {
-  FirmwareArtifactDescriptor,
+  FirmwareUpdateArtifact,
   TargetCatalog,
 } from "@elrs-easy/compatibility";
 import type {
@@ -121,7 +121,7 @@ export class FoundationExpressLrsModule {
   public update(input: {
     readonly operationId: string;
     readonly descriptor: DeviceDescriptor;
-    readonly artifact: FirmwareArtifactDescriptor;
+    readonly artifact: FirmwareUpdateArtifact;
     readonly userConfirmed: boolean;
     readonly signal?: CancellationSignal;
     readonly onProgress?: OperationObserver<FirmwareUpdateResult>;

@@ -54,6 +54,8 @@ PREPARING
 
 Before the synthetic write, the workflow requires:
 
+- an immutable schema-v1 provenance envelope whose Target and SHA-256 agree
+  with the artifact descriptor;
 - artifact integrity from the provider;
 - confirmed identity;
 - exact artifact/Target match;
@@ -63,8 +65,15 @@ Before the synthetic write, the workflow requires:
 - explicit user intent.
 
 After the write, it reacquires and re-identifies the returned device, then
-checks the observed Target and Firmware version. `WRITE_COMPLETED` is an
+evaluates the Core-owned `firmware-update-post-write-v1` requirements for
+reconnect, session-local identity, Target, and Firmware version. Missing,
+duplicate, or mismatched observations cannot pass. `WRITE_COMPLETED` is an
 intermediate fact, never a success state.
+
+The provenance fixture contains metadata only. Core checks its safe shape and
+internal coherence before a provider call and snapshots nested fields before
+observers run. There are no Firmware bytes or signature, so this is not artifact
+authenticity, reproducible-build evidence, or permission for a real provider.
 
 Synthetic Targets now contain an ordered method list rather than a platform
 provider name. The test host registers Wi-Fi and UART providers together. Core
@@ -99,6 +108,9 @@ The Synthetic layer covers:
 - deterministic clock and complete provider-call histories;
 - automatic Wi-Fi preference, UART fallback, absent-method, ambiguous-provider,
   accessor-backed metadata, duplicate-provider, and registry-mutation cases;
+- canonical provenance shape, descriptor/provenance disagreement, hostile
+  accessors, unknown-field non-enumeration, nested observer mutation, and
+  declarative-plan missing/mismatch/duplicate cases;
 - privacy-classified Synthetic discovery replay traces for regression cases;
 - retry as a fresh invocation that always starts by re-reading identity and
   capabilities.

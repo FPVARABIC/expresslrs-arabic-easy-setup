@@ -67,6 +67,12 @@ describe("FoundationExpressLrsModule", () => {
     expect(update.state).toBe("SUCCESS");
     expect(update.result?.providerId).toBe("mock-wifi");
     expect(update.result?.updateMethod).toBe("WIFI_OTA");
+    expect(update.result?.artifactProvenance.artifactSha256).toBe(
+      compatibleFirmwareArtifact.sha256,
+    );
+    expect(update.result?.verificationPlan.id).toBe(
+      "firmware-update-post-write-v1",
+    );
     expect(update.auditEvents.at(-1)?.outcome).toBe("SUCCEEDED");
   });
 

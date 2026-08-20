@@ -4,6 +4,7 @@ import type {
   OperationErrorCode,
 } from "@elrs-easy/domain";
 import {
+  createSyntheticFirmwareArtifact,
   fixtureById,
   MockDiscoveryProvider,
   ScriptedBindingProvider,
@@ -109,11 +110,8 @@ function createModule(scenarioId: MockScenarioId) {
   let sessionSequence = 0;
   return {
     descriptor: fixture.descriptor,
-    artifact: Object.freeze({
+    artifact: createSyntheticFirmwareArtifact({
       targetId: target?.targetId ?? "unresolved",
-      firmwareVersion: "4.2.0",
-      sha256:
-        "2d71b8db0ff7388c78ebfa3e6f4d74f4d67887e9a5d75665c509ead24f9c88ee",
     }),
     module: new FoundationExpressLrsModule({
       providers: {

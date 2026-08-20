@@ -35,7 +35,15 @@ export function isFirmwareUpdateMethod(
   return firmwareUpdateMethodSet.has(value);
 }
 
+/** Minimum internal provenance envelope; this is not a signature format. */
+export const artifactProvenanceSchemaVersion = "1" as const;
+
+export const artifactProvenanceValidationLevels = ["COHERENCE_ONLY"] as const;
+export type ArtifactProvenanceValidationLevel =
+  (typeof artifactProvenanceValidationLevels)[number];
+
 export interface ArtifactProvenance {
+  readonly schemaVersion: typeof artifactProvenanceSchemaVersion;
   readonly applicationVersion: string;
   readonly coreVersion: string;
   readonly upstreamRepository: string;
@@ -46,6 +54,7 @@ export interface ArtifactProvenance {
   readonly buildConfigurationDigest: string;
   readonly toolchainIdentity: string;
   readonly builtAt: string;
+  readonly artifactSizeBytes: number;
   readonly artifactSha256: string;
 }
 

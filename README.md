@@ -23,6 +23,8 @@ ExpressLRS يبقى مصدر التقنية اللاسلكية الرسمي. ه�
 - اختيار تلقائي لطريقة التحديث المناسبة من Catalog الجهاز؛ البنية تدعم
   Wi-Fi وUART وpassthrough وXMODEM وSTLink وDFU دون تحويل الواجهة إلى قائمة
   بروتوكولات.
+- التحديث التجريبي يتطلب Provenance متماسكًا وخطة تحقق يحددها Core؛ هذا لا
+  يمثل توقيعًا رقميًا أو ملف Firmware حقيقيًا أو سماحًا بالكتابة على جهاز.
 - اكتشاف الجهاز والـTarget والـBand عندما توجد أدلة كافية، والتوقف عند الغموض.
 - بوابات أمان تمنع Wrong Target ولا تعرض `SUCCESS` قبل Verification.
 - تشخيص واستعادة وسجلات عمليات مفهومة.
@@ -84,6 +86,7 @@ pnpm check
 - [docs/architecture/mock-workflows.md](docs/architecture/mock-workflows.md): Binding/Update والتحقق والاستعادة في Mock.
 - [ADR-0011](docs/adr/ADR-0011-github-pages-preview.md): حدود نشر معاينة GitHub Pages وأمانها.
 - [ADR-0012](docs/adr/ADR-0012-automatic-multi-method-update-selection.md): اختيار طريقة التحديث المتعددة تلقائيًا دون كتابة حقيقية.
+- [ADR-0013](docs/adr/ADR-0013-synthetic-artifact-provenance-and-verification-plan.md): ربط Provenance وخطة التحقق بالتنفيذ التجريبي دون ادعاء أصالة أو عتاد.
 
 ## الترخيص
 
