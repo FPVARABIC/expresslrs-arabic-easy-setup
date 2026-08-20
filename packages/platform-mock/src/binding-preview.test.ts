@@ -70,9 +70,7 @@ describe("Easy Binding preview and approval", () => {
       targetDisplayName: "Synthetic TX Alpha 2.4",
       blockers: [],
     });
-    expect(preview.changeCodes).toEqual([
-      "BINDING_RELATIONSHIP_WILL_CHANGE",
-    ]);
+    expect(preview.changeCodes).toEqual(["BINDING_RELATIONSHIP_WILL_CHANGE"]);
     expect(preview.verificationRequirements).toEqual([
       "RECONNECT_SAME_DEVICE",
       "REIDENTIFY_SAME_TARGET",

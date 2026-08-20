@@ -135,9 +135,7 @@ export function buildEasyBindingPreview(input: {
   const catalogMetadata = Object.freeze({ ...input.catalog.metadata });
   const blockers: BindingPreviewBlocker[] = [];
   const executionAuthority: BindingExecutionAuthority | "NONE" =
-    input.executionAuthority === "SYNTHETIC_ONLY"
-      ? "SYNTHETIC_ONLY"
-      : "NONE";
+    input.executionAuthority === "SYNTHETIC_ONLY" ? "SYNTHETIC_ONLY" : "NONE";
 
   if (executionAuthority !== "SYNTHETIC_ONLY") {
     blockers.push(blocker("HARDWARE_WRITE_DISABLED"));
@@ -317,8 +315,7 @@ export function approvalMatchesEasyBindingPreview(
       readProviderDataProperty(approval, "approvedAt") as string,
     ) &&
     readProviderDataProperty(approval, "previewId") === preview.previewId &&
-    readProviderDataProperty(approval, "operationId") ===
-      preview.operationId &&
+    readProviderDataProperty(approval, "operationId") === preview.operationId &&
     readProviderDataProperty(approval, "providerId") === preview.providerId &&
     readProviderDataProperty(approval, "deviceId") === preview.deviceId &&
     readProviderDataProperty(approval, "targetId") === preview.targetId &&
