@@ -482,6 +482,7 @@ export function App() {
           <LockIcon />
         </span>
         <span>{t("app.mockNotice")}</span>
+        <span className="preview-validation">{t("status.previewBadge")}</span>
       </div>
 
       <main id="main-content" className="page" tabIndex={-1}>
@@ -505,32 +506,6 @@ export function App() {
             </div>
           </aside>
         </section>
-
-        <RealDeviceReadPanel
-          locale={locale}
-          origin={realOrigin}
-          outcome={realOutcome}
-          running={realRunning}
-          progress={realProgress}
-          reconnectState={realReconnectState}
-          copyState={realCopyState}
-          copyRunning={realCopyRunning}
-          t={t}
-          onOriginChange={selectRealOrigin}
-          onRead={() => void readRealDevice()}
-          onCancel={cancelRealDeviceRead}
-          onCopy={() => void copyRealSupportDetails()}
-          cancelButtonRef={realCancelButton}
-          resultSummaryRef={realResultSummary}
-        />
-
-        <div
-          className="mock-divider"
-          role="separator"
-          aria-label={t("real.mockDivider")}
-        >
-          <span>{t("real.mockDivider")}</span>
-        </div>
 
         <section className="preview-strip" aria-labelledby="preview-heading">
           <div className="preview-heading">
@@ -714,6 +689,32 @@ export function App() {
           </div>
         </section>
 
+        <div
+          className="mock-divider"
+          role="separator"
+          aria-label={t("real.mockDivider")}
+        >
+          <span>{t("real.mockDivider")}</span>
+        </div>
+
+        <RealDeviceReadPanel
+          locale={locale}
+          origin={realOrigin}
+          outcome={realOutcome}
+          running={realRunning}
+          progress={realProgress}
+          reconnectState={realReconnectState}
+          copyState={realCopyState}
+          copyRunning={realCopyRunning}
+          t={t}
+          onOriginChange={selectRealOrigin}
+          onRead={() => void readRealDevice()}
+          onCancel={cancelRealDeviceRead}
+          onCopy={() => void copyRealSupportDetails()}
+          cancelButtonRef={realCancelButton}
+          resultSummaryRef={realResultSummary}
+        />
+
         <section
           className="advanced-section"
           aria-labelledby="advanced-heading"
@@ -801,6 +802,8 @@ export function App() {
           <span>{t("footer.version")}</span>
           <span aria-hidden="true">·</span>
           <span>{t("app.independent")}</span>
+          <span aria-hidden="true">·</span>
+          <a href="THIRD_PARTY_NOTICES.txt">{t("footer.notices")}</a>
         </div>
       </footer>
     </div>

@@ -46,6 +46,13 @@ Lowest legal uncertainty: use `GPL-3.0-only` for a product that directly copies,
 
 No product `LICENSE` file is selected during this Discovery checkpoint because Q-009 remains open.
 
+The owner explicitly authorized one narrow public M2A Web preview on
+2026-08-20. That preview may distribute only the independently written Web
+shell, the admitted runtime dependencies, and their required notices. It may
+not distribute Firmware, copied Configurator/Web Flasher/Targets material, or
+claim final product-brand or Release approval. This exception does not resolve
+Q-009 or select a license for the repository source.
+
 ## Trademark and naming
 
 ExpressLRS names and logos are not granted under GPL. The product needs a distinct brand and must not imply official status. Recommended public wording:
@@ -63,3 +70,6 @@ No public binary or derived-source release until:
 - the notice/source-bundle procedure is tested;
 - dependency licenses are inventoried;
 - trademark-safe product naming is approved.
+
+The authorized M2A development preview above is evidence/evaluation material,
+not the product Release governed by this gate.

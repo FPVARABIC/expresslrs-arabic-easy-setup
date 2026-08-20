@@ -4,9 +4,10 @@ export const ar = {
   "app.name": "إعداد ExpressLRS بسهولة",
   "app.shortName": "ELRS السهل",
   "app.tagline": "اتصال واضح، خطوة بخطوة",
-  "app.independent": "مشروع مجتمعي مستقل — غير تابع لمشروع ExpressLRS",
+  "app.independent":
+    "متوافق مع ExpressLRS — مشروع مجتمعي مستقل، غير تابع أو معتمد من ExpressLRS LLC",
   "app.mockNotice":
-    "معاينة تطويرية — تتوفر قراءة Wi-Fi تجريبية فقط. تبقى الكتابة على الأجهزة معطّلة، ومختبر المحاكاة منفصل أدناه.",
+    "معاينة تطويرية عامة — الواجهة ومختبر المحاكاة متاحان. قد يمنع المتصفح المستضاف قراءة أجهزة HTTP المحلية، وتبقى كل الكتابة على الأجهزة معطّلة.",
   "navigation.skip": "انتقل إلى المحتوى",
   "language.arabic": "العربية",
   "language.english": "English",
@@ -14,9 +15,10 @@ export const ar = {
   "mode.easy": "الوضع السهل",
   "mode.advanced": "الوضع المتقدم",
   "mode.advancedHint": "إظهار الأدلة التقنية والتفاصيل الآمنة للخصوصية",
-  "status.systemReady": "بيئة آمنة",
+  "status.systemReady": "معاينة · الكتابة معطّلة",
   "status.readOnly": "محاكاة للقراءة فقط",
   "status.mockBadge": "محاكاة",
+  "status.previewBadge": "معاينة · العتاد غير مختبر",
   "home.eyebrow": "طريقة أوضح لاستخدام ExpressLRS",
   "home.title": "ما الذي تريد فعله؟",
   "home.description":
@@ -85,7 +87,7 @@ export const ar = {
   "real.cancelled": "أُلغيت القراءة. لم يُطلب أي تغيير على الجهاز.",
   "real.noSecrets":
     "لا نحتفظ بـUID أو خيارات Wi-Fi أو SSID أو كلمة المرور أو الاستجابة الخام، ولا نعرضها.",
-  "real.mockDivider": "مختبر محاكاة حتمي منفصل",
+  "real.mockDivider": "تجربة منفصلة للقراءة من جهاز حقيقي",
   "real.fact.product": "المنتج كما أبلغ عنه الجهاز",
   "real.fact.target": "Target كما أبلغ عنه الجهاز",
   "real.fact.version": "Firmware كما أبلغ عنه الجهاز",
@@ -243,7 +245,8 @@ export const ar = {
   "scenarioValue.session.none": "لا توجد جلسة",
   "footer.localFirst": "يعمل محليًا أولًا",
   "footer.noCloud": "تبقى بيانات الجهاز على هذا الجهاز افتراضيًا.",
-  "footer.version": "معاينة المرحلة التأسيسية 0.1",
+  "footer.version": "معاينة M2A العامة",
+  "footer.notices": "إشعارات الأطراف الثالثة",
   "error.DEVICE_NOT_FOUND": "تعذر العثور على الجهاز.",
   "error.DEVICE_BUSY": "توجد عملية أخرى تستخدم هذا الجهاز.",
   "error.PERMISSION_DENIED": "تم رفض إذن الوصول إلى الجهاز.",

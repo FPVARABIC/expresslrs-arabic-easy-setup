@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "check:boundaries": "node scripts/check-dependency-boundaries.mjs",
     "check:security-headers": "node scripts/check-security-headers.mjs",
+    "check:pages-build": "node scripts/check-pages-build.mjs",
     "check:links": "node scripts/check-markdown-links.mjs",
     "check:master-plan": "node scripts/check-master-plan.mjs",
     "licenses:report": "pnpm licenses list --recursive --json > dependency-licenses.json",

@@ -37,6 +37,7 @@ const expectedDirectiveNames = new Set([
   "object-src",
   "script-src",
   "style-src",
+  "worker-src",
 ]);
 
 function fail(message) {
@@ -133,6 +134,7 @@ function validate(source, label) {
   requireExactDirective(directives, "manifest-src", ["'self'"]);
   requireExactDirective(directives, "script-src", ["'self'"]);
   requireExactDirective(directives, "style-src", ["'self'"]);
+  requireExactDirective(directives, "worker-src", ["'none'"]);
 
   const connectSources = directives.get("connect-src");
   if (

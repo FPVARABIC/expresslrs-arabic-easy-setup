@@ -3,9 +3,9 @@ export const en = {
   "app.shortName": "ELRS Easy",
   "app.tagline": "Connect with confidence",
   "app.independent":
-    "Independent community project — not affiliated with ExpressLRS",
+    "Compatible with ExpressLRS — independent community project, not affiliated with or endorsed by ExpressLRS LLC",
   "app.mockNotice":
-    "Development preview — experimental read-only Wi-Fi access is available. Hardware writes remain disabled, and the Mock lab is separate below.",
+    "Public development preview — the interface and Mock lab are available. Hosted browsers may block local HTTP device reads; every hardware write remains disabled.",
   "navigation.skip": "Skip to content",
   "language.arabic": "العربية",
   "language.english": "English",
@@ -13,9 +13,10 @@ export const en = {
   "mode.easy": "Easy mode",
   "mode.advanced": "Advanced mode",
   "mode.advancedHint": "Show technical evidence and privacy-safe details",
-  "status.systemReady": "Safe workspace",
+  "status.systemReady": "Preview · writes disabled",
   "status.readOnly": "Read-only simulation",
   "status.mockBadge": "MOCK",
+  "status.previewBadge": "PREVIEW · HARDWARE NONE",
   "home.eyebrow": "A clearer way to use ExpressLRS",
   "home.title": "What would you like to do?",
   "home.description":
@@ -85,7 +86,7 @@ export const en = {
   "real.cancelled": "The read was cancelled. No device change was requested.",
   "real.noSecrets":
     "UID, Wi-Fi options, SSID, password, and the raw response are not retained or displayed.",
-  "real.mockDivider": "Separate deterministic Mock lab",
+  "real.mockDivider": "Separate experimental real-device read",
   "real.fact.product": "Reported product",
   "real.fact.target": "Reported Target",
   "real.fact.version": "Reported Firmware",
@@ -247,7 +248,8 @@ export const en = {
   "scenarioValue.session.none": "NO-SESSION",
   "footer.localFirst": "Local-first",
   "footer.noCloud": "Device data stays on this device by default.",
-  "footer.version": "Foundation preview 0.1",
+  "footer.version": "M2A public preview",
+  "footer.notices": "Third-party notices",
   "error.DEVICE_NOT_FOUND": "The device could not be found.",
   "error.DEVICE_BUSY": "Another operation is using this device.",
   "error.PERMISSION_DENIED": "Permission to access the device was denied.",

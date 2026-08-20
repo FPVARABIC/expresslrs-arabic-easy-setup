@@ -5,7 +5,8 @@
 | Date | 2026-08-20 |
 | Phase | Milestone 2A — Hardened read-only real-device candidate |
 | Local branch | `feat/read-only-device-foundation` |
-| Remote repository | `https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup`; public repository with M2A [Draft PR #3](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/pull/3) |
+| Remote repository | `https://github.com/FPVARABIC/expresslrs-arabic-easy-setup`; public repository with M2A [Draft PR #3](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/3) |
+| Public Web preview | `https://fpvarabic.github.io/expresslrs-arabic-easy-setup/`; deployment evidence pending first successful Pages run |
 | Stable upstream | ExpressLRS 4.1.0 / `a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6` |
 | Development reference | `73ce820ba51437f73f31686233b607c58e188e7b` |
 | Hardware validation | None |
@@ -56,12 +57,14 @@
 - A framework-independent Diagnostics package creates value-free, fixed-category support reports and rejects inconsistent success/reconnect claims.
 - The real-device UI now exposes honest Workflow progress, manual refresh/reconnect snapshot comparison, focus movement, connection guidance, and explicit safe support copy without polling or a live-connection claim.
 - A production `_headers` artifact and deterministic checker restrict CSP connections to self plus the three reviewed ExpressLRS origins and enforce the policy in source/build output.
+- The GitHub Pages preview candidate now derives and verifies the repository base path, injects a partial reviewed CSP meta policy, uses the agreed dark-green/turquoise/pale-yellow direction, keeps Easy tasks first, and ships required runtime/font notices. Official deployment Actions are pinned to immutable SHAs and may upload only the quality-gated Web `dist` artifact.
 - The current local M2A candidate passes the complete quality gate: 332/332 Vitest cases across 22 files, 94.46% statement / 88.69% branch / 98.84% function / 94.41% line coverage, TypeScript, ESLint with zero warnings, formatting, nine-project dependency boundaries, 53 local links across 51 Markdown files, the Master Plan contract, production security-header source/build verification, and the Web production build. The frozen offline install passes all 272 lockfile entries, the license policy passes 248 package/version records, and the high-severity advisory audit finds no known vulnerability. This is not Hardware evidence.
 - M2A [Draft PR #3](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/pull/3) is open. Candidate commit `79eb37e7298b0e244f0bedf368e84dc1c684c5c4` passed both official [GitHub Actions run #8](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409948903) and [run #9](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409978636), including the frozen install, complete quality/build gate, license inventory/policy, and high-severity advisory audit.
 
 ## In progress
 
 - Review M2A Draft PR #3 and complete the still-pending M1 owner acceptance review.
+- Complete the first GitHub Pages workflow, verify the public URL and deployed assets, and record its exact run/SHA without promoting the preview to Release.
 - Execute the prepared reference-hardware/browser runbook and matrix for TX and RX Local HTTP reads, disconnect/reconnect, Local Network Access, device-AP switching, and mobile behavior.
 - Keep all Binding, configuration, reboot, update, Firmware, and RF paths disabled in the real-device adapter.
 
@@ -74,6 +77,7 @@
 - Official 4.1.0 artifact Inputs: exact Targets/toolchain identity not fully known.
 - Performance hardware/controlled RF setup: not selected. This does not block Mock/Foundation.
 - A reviewed CSP deployment artifact now exists, but the eventual production host must serve and verify the same response header; `_headers` compatibility alone is not deployed-host evidence.
+- GitHub Pages cannot enforce the reviewed response-only headers; its HTML meta CSP is partial, so trusted-host status remains blocked even after the public preview deploys.
 - The public repository does not yet publish a private vulnerability-reporting route. Non-sensitive Issues remain possible, but sensitive exploit details must not be posted publicly.
 
 ## Next

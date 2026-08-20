@@ -5,6 +5,7 @@
 ## الحالة الحالية
 
 - المرحلة: `Milestone 2A — Read-only real-device candidate`
+- معاينة GitHub Pages: `https://fpvarabic.github.io/expresslrs-arabic-easy-setup/`؛ معاينة عامة وليست Release أو دليل Hardware
 - الفرع المحلي: `feat/read-only-device-foundation`
 - السلوك المسموح حاليًا: Foundation وMock، إضافة إلى قراءة Wi-Fi حقيقية تجريبية ومحدودة يبدأها المستخدم عبر `GET /config` فقط
 - السلوك المحظور حاليًا: تعديل upstream، أو Flash أجهزة، أو ادعاء دعم Hardware/تحسين أداء
@@ -30,6 +31,12 @@ ExpressLRS يبقى مصدر التقنية اللاسلكية الرسمي. ه�
 > Understand → Measure → Implement → Test → Verify → Ship.
 
 لا توجد نسخة مستخدم أو Firmware خاص بالمشروع بعد. لا يوجد Hardware Validation بعد.
+
+معاينة GitHub Pages تعرض الواجهة العربية/English ومختبر Mock، وتبقي الكتابة
+كلها معطلة. قد يمنع المتصفح المستضاف قراءة عناوين أجهزة HTTP المحلية؛ نجاح
+هذا المسار غير معتمد إلى أن تكتمل مصفوفة المتصفح والعتاد. GitHub Pages لا
+يطبّق ملف `_headers` كرؤوس استجابة، لذلك تستخدم المعاينة CSP جزئيًا داخل HTML
+وتبقى بوابة الاستضافة الموثوقة مفتوحة.
 
 ## Foundation الحالية
 
@@ -72,6 +79,7 @@ pnpm check
 - [docs/architecture/core-api.md](docs/architecture/core-api.md): حدود Core/Host التجريبية.
 - [docs/architecture/milestone-2-read-only-device.md](docs/architecture/milestone-2-read-only-device.md): حدود أول اتصال حقيقي للقراءة فقط.
 - [docs/architecture/mock-workflows.md](docs/architecture/mock-workflows.md): Binding/Update والتحقق والاستعادة في Mock.
+- [ADR-0011](docs/adr/ADR-0011-github-pages-preview.md): حدود نشر معاينة GitHub Pages وأمانها.
 
 ## الترخيص
 

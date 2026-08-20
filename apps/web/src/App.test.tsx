@@ -54,13 +54,19 @@ describe("Arabic-first Web foundation", () => {
       screen.getByRole("button", { name: /ربط جهاز جديد/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("قراءة Wi-Fi تجريبية فقط", { exact: false }),
+      screen.getByText("العتاد غير مختبر", { exact: false }),
     ).toBeInTheDocument();
+    const easyTasks = screen.getByRole("heading", {
+      name: "ما الذي تريد فعله؟",
+      level: 2,
+    });
+    const realRead = screen.getByRole("heading", {
+      name: "اقرأ معلومات جهاز ExpressLRS عبر Wi-Fi",
+    });
     expect(
-      screen.getByRole("heading", {
-        name: "اقرأ معلومات جهاز ExpressLRS عبر Wi-Fi",
-      }),
-    ).toBeInTheDocument();
+      easyTasks.compareDocumentPosition(realRead) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("switches direction with the English fallback locale", async () => {
