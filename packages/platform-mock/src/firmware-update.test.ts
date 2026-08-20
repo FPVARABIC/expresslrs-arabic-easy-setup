@@ -528,8 +528,11 @@ describe("Firmware Update with a synthetic provider", () => {
     );
 
     expect(operation.state).toBe("UNKNOWN_STATE");
-    expect(
-      sessionManager.current(sensitiveOperationFixtures.initial.descriptor.id),
-    ).toBeNull();
+    expect(() =>
+      sessionManager.acquire({
+        deviceId: sensitiveOperationFixtures.initial.descriptor.id,
+        owner: { id: "update-cleanup-check", kind: "SYSTEM" },
+      }),
+    ).not.toThrow();
   });
 });

@@ -20,7 +20,7 @@ describe("ExclusiveDeviceSessionManager", () => {
     expect(() => sessions.acquire({ deviceId: "device-a", owner })).toThrow(
       CoreOperationError,
     );
-    expect(sessions.current("device-a")).toBe(first);
+    expect(sessions.isHeld(first)).toBe(true);
   });
 
   it("prevents a second module from owning the same physical session", () => {
@@ -62,5 +62,23 @@ describe("ExclusiveDeviceSessionManager", () => {
     sessions.release(first);
 
     expect(() => sessions.assertHeld(first)).toThrow(CoreOperationError);
+    expect(sessions.isHeld(first)).toBe(false);
+  });
+
+  it("rejects a forged structural copy of an active opaque lease", () => {
+    const sessions = manager();
+    const lease = sessions.acquire({
+      deviceId: "device-a",
+      owner: { id: "operation-a", kind: "WORKFLOW" },
+    });
+    const forged = {
+      ...lease,
+      owner: { ...lease.owner },
+    };
+
+    expect(sessions.isHeld(forged)).toBe(false);
+    expect(() => sessions.assertHeld(forged)).toThrow(CoreOperationError);
+    expect(() => sessions.release(forged)).toThrow(CoreOperationError);
+    expect(sessions.isHeld(lease)).toBe(true);
   });
 });

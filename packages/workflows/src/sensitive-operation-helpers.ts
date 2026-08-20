@@ -75,7 +75,7 @@ export function releaseIfHeld(
   if (session === null) {
     return;
   }
-  if (sessions.current(session.deviceId)?.id === session.id) {
+  if (sessions.isHeld(session)) {
     sessions.release(session);
   }
 }

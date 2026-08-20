@@ -1,8 +1,13 @@
 import type { TargetCatalog } from "@elrs-easy/compatibility";
 import {
+  rebuildDiscoveryCapabilities,
+  rebuildDiscoveryDescriptors,
+  rebuildDiscoveryEvidence,
+  rebuildProviderId,
   resolveDeviceIdentity,
   type DeviceSessionManager,
   type DiscoveryProvider,
+  type IdentityEvidenceTrustPolicy,
 } from "@elrs-easy/device";
 import {
   CoreOperationError,
@@ -69,6 +74,7 @@ export async function runReadOnlyDiscovery(input: {
   readonly provider: DiscoveryProvider;
   readonly sessions: DeviceSessionManager;
   readonly catalog: TargetCatalog;
+  readonly evidencePolicy?: IdentityEvidenceTrustPolicy;
   readonly clock?: WorkflowClock;
   readonly observer?: OperationObserver<ReadOnlyDiscoveryResult>;
   readonly signal?: CancellationSignal;
@@ -78,9 +84,9 @@ export async function runReadOnlyDiscovery(input: {
   // must not be able to swap safety-critical collaborators mid-operation.
   const operationId = input.operationId;
   const provider = input.provider;
-  const providerId = provider.id;
   const sessions = input.sessions;
   const catalog = input.catalog;
+  const evidencePolicy = input.evidencePolicy;
   const clock = input.clock;
   const observer = input.observer;
   const signal = input.signal;
@@ -96,10 +102,17 @@ export async function runReadOnlyDiscovery(input: {
     assertNotAborted(signal);
     machine.transition("PREPARING");
     assertNotAborted(signal);
+    // Read and validate the provider's public id once after PREPARING so a
+    // malformed adapter produces a structured FAILED operation.
+    const providerId = rebuildProviderId(provider.id);
+    assertNotAborted(signal);
     machine.transition("DISCOVERING");
     assertNotAborted(signal);
-    const descriptors = await provider.discover(signal);
+    const reportedDescriptors = await provider.discover(signal);
     assertNotAborted(signal);
+    // Rebuild before entering IDENTIFYING. Duplicate ids, invalid shapes and
+    // non-connected descriptors therefore cannot open a device session.
+    const descriptors = rebuildDiscoveryDescriptors(reportedDescriptors);
     if (descriptors.length === 0) {
       return machine.fail({
         code: "DEVICE_NOT_FOUND",
@@ -121,11 +134,26 @@ export async function runReadOnlyDiscovery(input: {
       try {
         sessions.assertHeld(session);
         assertNotAborted(signal);
-        const evidence = await provider.readIdentity(session, signal);
+        const reportedEvidence = await provider.readIdentity(session, signal);
         assertNotAborted(signal);
         sessions.assertHeld(session);
-        const capabilities = await provider.readCapabilities(session, signal);
+        const rebuiltEvidence = rebuildDiscoveryEvidence({
+          value: reportedEvidence,
+          provider,
+          providerId,
+          ...(evidencePolicy === undefined ? {} : { policy: evidencePolicy }),
+        });
+        const reportedCapabilities = await provider.readCapabilities(
+          session,
+          signal,
+        );
         assertNotAborted(signal);
+        sessions.assertHeld(session);
+        const capabilities = rebuildDiscoveryCapabilities({
+          value: reportedCapabilities,
+          safeIdByReportedId: rebuiltEvidence.safeIdByReportedId,
+        });
+        const evidence = rebuiltEvidence.evidence;
         const candidates = catalog.match(evidence);
         devices.push(
           Object.freeze({
@@ -138,7 +166,9 @@ export async function runReadOnlyDiscovery(input: {
           }),
         );
       } finally {
-        sessions.release(session);
+        if (sessions.isHeld(session)) {
+          sessions.release(session);
+        }
       }
     }
 

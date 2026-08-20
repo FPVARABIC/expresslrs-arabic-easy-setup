@@ -7,14 +7,19 @@ export const identityClaims = {
   mcuFamily: "mcu-family",
   firmwareVersion: "firmware-version",
   firmwareCommit: "firmware-commit",
+  regulatoryDomainLow: "regulatory-domain-low",
+  regulatoryDomainHigh: "regulatory-domain-high",
+  /** Presence only; raw custom-hardware payloads must not cross Core. */
+  customHardwarePresent: "custom-hardware-present",
 } as const;
 
 export type KnownIdentityClaim =
   (typeof identityClaims)[keyof typeof identityClaims];
 
 /**
- * Identity claims are deliberately open-ended. Platform adapters may add a
- * claim without changing the core or introducing a model-specific branch.
+ * The type remains extensible for compilation boundaries, but runtime
+ * discovery accepts only the reviewed `identityClaims` allowlist. Adding a
+ * provider claim therefore requires a Core privacy/semantics review first.
  */
 export type IdentityClaim = KnownIdentityClaim | (string & {});
 

@@ -24,10 +24,6 @@ const systemIdFactory: SessionIdFactory = {
     `session-${Date.now().toString(36)}-${(++systemSessionSequence).toString(36)}`,
 };
 
-function sameOwner(left: SessionOwner, right: SessionOwner): boolean {
-  return left.id === right.id && left.kind === right.kind;
-}
-
 /** One in-process owner may hold a device at a time. */
 export class ExclusiveDeviceSessionManager implements DeviceSessionManager {
   readonly #sessionsByDevice = new Map<string, DeviceSession>();
@@ -77,12 +73,7 @@ export class ExclusiveDeviceSessionManager implements DeviceSessionManager {
   }
 
   public assertHeld(session: DeviceSession): void {
-    const current = this.#sessionsByDevice.get(session.deviceId);
-    if (
-      current === undefined ||
-      current.id !== session.id ||
-      !sameOwner(current.owner, session.owner)
-    ) {
+    if (!this.isHeld(session)) {
       throw new CoreOperationError({
         code: "CONNECTION_LOST",
         reason: "DEVICE_SESSION_IS_NOT_HELD",
@@ -92,7 +83,7 @@ export class ExclusiveDeviceSessionManager implements DeviceSessionManager {
     }
   }
 
-  public current(deviceId: string): DeviceSession | null {
-    return this.#sessionsByDevice.get(deviceId) ?? null;
+  public isHeld(session: DeviceSession): boolean {
+    return this.#sessionsByDevice.get(session.deviceId) === session;
   }
 }

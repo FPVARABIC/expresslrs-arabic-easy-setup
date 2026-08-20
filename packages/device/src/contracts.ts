@@ -26,5 +26,9 @@ export interface DeviceSessionManager {
   }): DeviceSession;
   release(session: DeviceSession): void;
   assertHeld(session: DeviceSession): void;
-  current(deviceId: string): DeviceSession | null;
+  /**
+   * Answers only whether this exact opaque lease is still held. It deliberately
+   * does not expose the active token for a device to unrelated callers.
+   */
+  isHeld(session: DeviceSession): boolean;
 }

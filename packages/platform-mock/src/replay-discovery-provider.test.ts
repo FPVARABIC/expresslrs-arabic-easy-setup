@@ -10,6 +10,7 @@ import {
   createSyntheticDiscoveryReplay,
   ReplayDiscoveryProvider,
 } from "./replay-discovery-provider.js";
+import { createSyntheticIdentityEvidencePolicy } from "./synthetic-evidence-policy.js";
 
 function sessions() {
   let id = 0;
@@ -27,15 +28,19 @@ describe("ReplayDiscoveryProvider", () => {
       fixtures: [fixtureById("known-tx-2g4"), fixtureById("ambiguous-family")],
     });
 
+    const firstProvider = new ReplayDiscoveryProvider(replay);
     const first = await runReadOnlyDiscovery({
       operationId: "replay-first",
-      provider: new ReplayDiscoveryProvider(replay),
+      provider: firstProvider,
+      evidencePolicy: createSyntheticIdentityEvidencePolicy(firstProvider),
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
     });
+    const secondProvider = new ReplayDiscoveryProvider(replay);
     const second = await runReadOnlyDiscovery({
       operationId: "replay-second",
-      provider: new ReplayDiscoveryProvider(replay),
+      provider: secondProvider,
+      evidencePolicy: createSyntheticIdentityEvidencePolicy(secondProvider),
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
     });
@@ -67,6 +72,7 @@ describe("ReplayDiscoveryProvider", () => {
     const operation = await runReadOnlyDiscovery({
       operationId: "replay-pre-cancelled",
       provider,
+      evidencePolicy: createSyntheticIdentityEvidencePolicy(provider),
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       signal,
@@ -99,6 +105,9 @@ describe("ReplayDiscoveryProvider", () => {
     const operation = await runReadOnlyDiscovery({
       operationId: "replay-cancelled-after-discover",
       provider: cancellationIgnoringProvider,
+      evidencePolicy: createSyntheticIdentityEvidencePolicy(
+        cancellationIgnoringProvider,
+      ),
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       signal,
@@ -119,9 +128,11 @@ describe("ReplayDiscoveryProvider", () => {
     });
     const signal = { aborted: false };
 
+    const provider = new ReplayDiscoveryProvider(replay);
     const operation = await runReadOnlyDiscovery({
       operationId: "replay-cancelled-at-verification",
-      provider: new ReplayDiscoveryProvider(replay),
+      provider,
+      evidencePolicy: createSyntheticIdentityEvidencePolicy(provider),
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       signal,

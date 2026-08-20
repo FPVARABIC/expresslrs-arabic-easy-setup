@@ -374,8 +374,11 @@ describe("Easy Binding with a synthetic provider", () => {
     );
 
     expect(operation.state).toBe("UNKNOWN_STATE");
-    expect(
-      sessionManager.current(sensitiveOperationFixtures.initial.descriptor.id),
-    ).toBeNull();
+    expect(() =>
+      sessionManager.acquire({
+        deviceId: sensitiveOperationFixtures.initial.descriptor.id,
+        owner: { id: "binding-cleanup-check", kind: "SYSTEM" },
+      }),
+    ).not.toThrow();
   });
 });

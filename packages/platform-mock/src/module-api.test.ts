@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { fixtureById, syntheticTargetCatalog } from "./fixtures.js";
 import { MockDiscoveryProvider } from "./mock-discovery-provider.js";
+import { createSyntheticIdentityEvidencePolicy } from "./synthetic-evidence-policy.js";
 import {
   ScriptedBindingProvider,
   ScriptedFirmwareUpdateProvider,
@@ -16,9 +17,10 @@ import {
 function createModule() {
   let sessionId = 0;
   const fixture = fixtureById("known-tx-2g4");
+  const discovery = new MockDiscoveryProvider([fixture]);
   return new FoundationExpressLrsModule({
     providers: {
-      discovery: new MockDiscoveryProvider([fixture]),
+      discovery,
       binding: new ScriptedBindingProvider({ initial: fixture }),
       firmwareUpdate: new ScriptedFirmwareUpdateProvider({ initial: fixture }),
     },
@@ -27,6 +29,7 @@ function createModule() {
       ids: { next: () => `module-session-${++sessionId}` },
     }),
     catalog: syntheticTargetCatalog,
+    discoveryEvidencePolicy: createSyntheticIdentityEvidencePolicy(discovery),
     clock: { now: () => "2026-08-20T08:00:00.000Z" },
   });
 }

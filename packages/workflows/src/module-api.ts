@@ -5,6 +5,7 @@ import type {
 import type {
   DeviceSessionManager,
   DiscoveryProvider,
+  IdentityEvidenceTrustPolicy,
 } from "@elrs-easy/device";
 import {
   CoreOperationError,
@@ -47,6 +48,7 @@ export class FoundationExpressLrsModule {
   readonly #sessions: DeviceSessionManager;
   readonly #catalog: TargetCatalog;
   readonly #clock?: WorkflowClock;
+  readonly #discoveryEvidencePolicy?: IdentityEvidenceTrustPolicy;
   readonly #usedOperationIds = new Set<string>();
 
   public constructor(input: {
@@ -54,11 +56,13 @@ export class FoundationExpressLrsModule {
     readonly sessions: DeviceSessionManager;
     readonly catalog: TargetCatalog;
     readonly clock?: WorkflowClock;
+    readonly discoveryEvidencePolicy?: IdentityEvidenceTrustPolicy;
   }) {
     this.#providers = Object.freeze({ ...input.providers });
     this.#sessions = input.sessions;
     this.#catalog = input.catalog;
     this.#clock = input.clock;
+    this.#discoveryEvidencePolicy = input.discoveryEvidencePolicy;
   }
 
   public discover(input: {
@@ -75,6 +79,9 @@ export class FoundationExpressLrsModule {
       provider: this.#providers.discovery,
       sessions: this.#sessions,
       catalog: this.#catalog,
+      ...(this.#discoveryEvidencePolicy === undefined
+        ? {}
+        : { evidencePolicy: this.#discoveryEvidencePolicy }),
       ...(this.#clock === undefined ? {} : { clock: this.#clock }),
       ...(onProgress === undefined ? {} : { observer: onProgress }),
       ...(signal === undefined ? {} : { signal }),
