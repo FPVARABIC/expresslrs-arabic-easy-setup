@@ -1,0 +1,130 @@
+.software-lab-launcher {
+  position: fixed;
+  inset-inline-end: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  inline-size: min(22rem, calc(100vw - 2rem));
+}
+
+.software-lab-launcher-link {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  box-shadow: 0 0.8rem 2.2rem rgba(15, 23, 42, 0.16);
+  text-decoration: none;
+  backdrop-filter: blur(0.8rem);
+}
+
+.software-lab-launcher-link:hover {
+  transform: translateY(-1px);
+}
+
+.software-lab-launcher-link:focus-visible,
+.software-lab-index-card a:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 3px;
+}
+
+.software-lab-launcher-link strong,
+.software-lab-launcher-link small {
+  grid-column: 2;
+}
+
+.software-lab-launcher-link small {
+  color: #475569;
+}
+
+.software-lab-navigation-badge {
+  display: inline-flex;
+  grid-row: 1 / span 2;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 2rem;
+  padding-inline: 0.55rem;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  font: 700 0.68rem/1.1 ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, monospace;
+  letter-spacing: 0.025em;
+}
+
+.software-lab-index-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-block: 1.5rem 2rem;
+}
+
+.software-lab-index-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-inline-size: 0;
+  padding: clamp(1.15rem, 3vw, 1.75rem);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0.6rem 1.8rem rgba(15, 23, 42, 0.08);
+}
+
+.software-lab-index-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.software-lab-index-card-header .software-lab-navigation-badge {
+  grid-row: auto;
+}
+
+.software-lab-index-card h2,
+.software-lab-index-card p {
+  margin: 0;
+}
+
+.software-lab-index-card ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-inline-start: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.software-lab-index-card .primary-button {
+  align-self: flex-start;
+  margin-block-start: auto;
+  text-decoration: none;
+}
+
+@media (max-width: 48rem) {
+  .software-lab-index-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 40rem) {
+  .software-lab-launcher {
+    inset-inline: 0.75rem;
+    bottom: 0.75rem;
+    inline-size: auto;
+  }
+
+  .software-lab-launcher-link {
+    border-radius: 0.85rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .software-lab-launcher-link:hover {
+    transform: none;
+  }
+}
