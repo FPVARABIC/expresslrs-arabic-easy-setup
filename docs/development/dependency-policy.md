@@ -111,10 +111,9 @@ currently observes it on transitive tooling dependencies `lru-cache@11.5.2` and
 
 ## Outstanding gates
 
-- CI is configured to generate and preserve the installed direct/transitive
-  license inventory and enforce the fail-closed M1 policy; the expanded candidate
-  still needs an official CI run. Legal review and generated Release notices
-  remain outstanding.
+- CI generates and preserves the installed direct/transitive license inventory
+  and enforces the fail-closed M1 policy; official candidate run #6 passed.
+  Legal review and generated Release notices remain outstanding.
 - CI now blocks known advisories at `high` or `critical`; broader SAST,
   signature/SBOM, and final hosting checks remain Release work.
 - Review transitive changes whenever the lockfile changes; direct admission does

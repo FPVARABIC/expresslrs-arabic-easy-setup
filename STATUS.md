@@ -44,12 +44,12 @@
 - A provisional `FoundationExpressLrsModule` proves Discovery/Binding/Update can be invoked outside React and is exercised by the Web Mock preview.
 - Structured Audit events, fail-closed Allowlist privacy scrubbing, threat model, storage registry, and dependency-admission ledger are implemented.
 - `ArtifactProvenance` and `VerificationPlan` are provisional standalone Domain shapes only; they are not yet required/populated by the M1 module or update workflow.
-- CI requires the committed lockfile with frozen installation and has no PR bootstrap fallback. It is also configured for dependency inventory plus a fail-closed license policy, high-severity advisory audit, Core browser/DOM boundary enforcement, Markdown-link checking, and verified immutable Action pins; the expanded candidate still awaits its official run.
+- CI requires the committed lockfile with frozen installation and has no PR bootstrap fallback. It is also configured for dependency inventory plus a fail-closed license policy, high-severity advisory audit, Core browser/DOM boundary enforcement, Markdown-link checking, and verified immutable Action pins.
+- Draft PR #1 GitHub Actions run #6 passed on candidate commit `9db3f268d32732840d475281cd2435acbbe0f7bb`, including the frozen install, all quality/build gates, license inventory/policy, and high-severity advisory audit.
 
 ## In progress
 
-- After explicit authorization, Stage/Commit/Push the candidate and run the complete official CI gate.
-- Add the immutable CI run and exact test totals to the M1 acceptance evidence, then conduct owner acceptance review.
+- Commit and push the immutable CI evidence update, confirm its documentation-only successor check remains green, then conduct the owner acceptance review.
 
 ## Blocked
 
@@ -64,8 +64,7 @@
 
 ## Next
 
-- Request explicit Stage/Commit/Push authorization; no Git mutation occurs before it.
-- Run official CI on the exact pushed commits, fix any finding, record immutable evidence, then perform M1 acceptance review.
+- Perform the M1 owner acceptance review after the evidence-only successor CI passes.
 - Keep the real Targets adapter synthetic/license-safe until upstream permission is resolved.
 - Do not implement real hardware writes until reference hardware and provider verification exist.
 - Stage/commit/push only after separate explicit authorization for each action.
