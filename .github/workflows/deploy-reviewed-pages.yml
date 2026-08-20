@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  REVIEWED_SHA: 8889381e9f60e93b647efa02117ae0bf513970f4
+  REVIEWED_SHA: e0ec9c4d356f666034e8fd1aba7b442741a8ec18
   PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
 
 concurrency:
