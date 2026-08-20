@@ -10,9 +10,7 @@ import {
 import type { SyntheticDeviceFixture } from "./fixtures.js";
 
 export type MockFailureStage =
-  | "DISCOVER"
-  | "READ_IDENTITY"
-  | "READ_CAPABILITIES";
+  "DISCOVER" | "READ_IDENTITY" | "READ_CAPABILITIES";
 
 export interface MockDiscoveryCall {
   readonly method: "discover" | "readIdentity" | "readCapabilities";
@@ -21,7 +19,10 @@ export interface MockDiscoveryCall {
 
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw new DOMException("The synthetic operation was cancelled", "AbortError");
+    throw new DOMException(
+      "The synthetic operation was cancelled",
+      "AbortError",
+    );
   }
 }
 
@@ -69,7 +70,10 @@ export class MockDiscoveryProvider implements DiscoveryProvider {
     signal?: AbortSignal,
   ): Promise<readonly Capability[]> {
     assertNotAborted(signal);
-    this.#calls.push({ method: "readCapabilities", deviceId: session.deviceId });
+    this.#calls.push({
+      method: "readCapabilities",
+      deviceId: session.deviceId,
+    });
     this.#maybeFail("READ_CAPABILITIES");
     return this.#fixture(session).capabilities;
   }

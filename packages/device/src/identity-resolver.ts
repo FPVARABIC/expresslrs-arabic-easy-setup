@@ -21,7 +21,9 @@ function collectConflicts(
 
   const conflicts: IdentityConflict[] = [];
   for (const [claim, items] of byClaim.entries()) {
-    const normalizedValues = [...new Set(items.map((item) => item.normalizedValue))];
+    const normalizedValues = [
+      ...new Set(items.map((item) => item.normalizedValue)),
+    ];
     if (normalizedValues.length > 1) {
       conflicts.push(
         Object.freeze({

@@ -5,7 +5,8 @@ export const ar = {
   "app.shortName": "ELRS السهل",
   "app.tagline": "اتصال واضح، خطوة بخطوة",
   "app.independent": "مشروع مجتمعي مستقل — غير تابع لمشروع ExpressLRS",
-  "app.mockNotice": "معاينة للمرحلة التأسيسية — أجهزة محاكاة فقط، والكتابة على الأجهزة غير مفعّلة.",
+  "app.mockNotice":
+    "معاينة للمرحلة التأسيسية — أجهزة محاكاة فقط، والكتابة على الأجهزة غير مفعّلة.",
   "language.arabic": "العربية",
   "language.english": "English",
   "language.switch": "تغيير اللغة",
@@ -16,26 +17,33 @@ export const ar = {
   "status.readOnly": "محاكاة للقراءة فقط",
   "home.eyebrow": "طريقة أوضح لاستخدام ExpressLRS",
   "home.title": "ما الذي تريد فعله؟",
-  "home.description": "وصّل جهازك واختر المهمة. سنتعرّف عليه، ونتحقق من التوافق، ثم نرشدك خلال كل خطوة دون تخمين غير آمن.",
+  "home.description":
+    "وصّل جهازك واختر المهمة. سنتعرّف عليه، ونتحقق من التوافق، ثم نرشدك خلال كل خطوة دون تخمين غير آمن.",
   "home.mockLabel": "عاين حالة جهاز",
-  "home.mockHelp": "هذه السيناريوهات تختبر الواجهة بأمان إلى أن نعتمد موصلات الأجهزة الحقيقية.",
+  "home.mockHelp":
+    "هذه السيناريوهات تختبر الواجهة بأمان إلى أن نعتمد موصلات الأجهزة الحقيقية.",
   "task.bind.title": "ربط جهاز جديد",
-  "task.bind.description": "اربط المرسل والمستقبل باستخدام أكثر الطرق المدعومة أمانًا.",
+  "task.bind.description":
+    "اربط المرسل والمستقبل باستخدام أكثر الطرق المدعومة أمانًا.",
   "task.bind.action": "ابدأ الربط",
   "task.update.title": "تحديث جهاز",
   "task.update.description": "نحدّد Target الصحيح بدقة قبل تجهيز تحديث موثوق.",
   "task.update.action": "تحقق من التحديثات",
   "task.setup.title": "إعداد جهاز",
-  "task.setup.description": "طبّق الإعدادات المقترحة بعد معاينة واضحة لما سيتغير.",
+  "task.setup.description":
+    "طبّق الإعدادات المقترحة بعد معاينة واضحة لما سيتغير.",
   "task.setup.action": "افتح الإعداد السهل",
   "task.diagnose.title": "تشخيص مشكلة",
-  "task.diagnose.description": "نجمع الأدلة ونشرح الخطوات الآمنة التالية بلغة واضحة.",
+  "task.diagnose.description":
+    "نجمع الأدلة ونشرح الخطوات الآمنة التالية بلغة واضحة.",
   "task.diagnose.action": "ابدأ التشخيص",
   "task.selected": "المهمة المختارة",
-  "task.previewOnly": "معاينة فقط: هذه المرحلة التأسيسية لا تستطيع تغيير جهاز حقيقي.",
+  "task.previewOnly":
+    "معاينة فقط: هذه المرحلة التأسيسية لا تستطيع تغيير جهاز حقيقي.",
   "device.heading": "الجهاز المكتشف",
   "device.none": "لا يوجد جهاز متصل",
-  "device.noneDescription": "وصّل جهازًا مدعومًا عند توفر موصل حقيقي. حاليًا يمكنك اختيار محاكاة من الأعلى.",
+  "device.noneDescription":
+    "وصّل جهازًا مدعومًا عند توفر موصل حقيقي. حاليًا يمكنك اختيار محاكاة من الأعلى.",
   "device.receiver": "المستقبل (RX)",
   "device.transmitter": "المرسل (TX)",
   "device.target": "تعريف الجهاز (Target)",
@@ -53,8 +61,10 @@ export const ar = {
   "confidence.ambiguous": "غير محسوم",
   "confidence.unknown": "غير معروف",
   "confidence.confirmedHelp": "هوية الجهاز مدعومة بأدلة مستقلة ومتطابقة.",
-  "confidence.highHelp": "توجد أدلة قوية، لكن بوابة الكتابة ما زالت تتطلب تأكيدًا.",
-  "confidence.ambiguousHelp": "يوجد أكثر من Target محتمل، لذلك أوقفنا العمليات الحساسة.",
+  "confidence.highHelp":
+    "توجد أدلة قوية، لكن بوابة الكتابة ما زالت تتطلب تأكيدًا.",
+  "confidence.ambiguousHelp":
+    "يوجد أكثر من Target محتمل، لذلك أوقفنا العمليات الحساسة.",
   "confidence.unknownHelp": "لا توجد أدلة كافية لتحديد الجهاز بأمان.",
   "discovery.heading": "تقدّم اكتشاف الجهاز",
   "discovery.description": "كل معلومة معروضة مرتبطة بمصدرها.",
@@ -78,11 +88,14 @@ export const ar = {
   "evidence.supporting": "مساند",
   "evidence.weak": "ضعيف",
   "safety.heading": "جهازك يبقى محميًا",
-  "safety.description": "لن يعلن أي تحديث أو ربط عن النجاح قبل عودة الجهاز المتوقع والتحقق من النتيجة فعليًا.",
+  "safety.description":
+    "لن يعلن أي تحديث أو ربط عن النجاح قبل عودة الجهاز المتوقع والتحقق من النتيجة فعليًا.",
   "safety.blockedTitle": "العمليات الحساسة متوقفة",
-  "safety.blockedDescription": "لم نستطع حسم Target واحد. لن يخمّن التطبيق أبدًا أي Firmware يخص جهازك.",
+  "safety.blockedDescription":
+    "لم نستطع حسم Target واحد. لن يخمّن التطبيق أبدًا أي Firmware يخص جهازك.",
   "safety.readOnlyTitle": "مرحلة تأسيسية للقراءة فقط",
-  "safety.readOnlyDescription": "تعرض هذه الشاشة سيناريوهات محاكاة حتمية. الوصول إلى الأجهزة والكتابة عليها غير مفعّلين عمدًا.",
+  "safety.readOnlyDescription":
+    "تعرض هذه الشاشة سيناريوهات محاكاة حتمية. الوصول إلى الأجهزة والكتابة عليها غير مفعّلين عمدًا.",
   "advanced.heading": "التفاصيل التقنية",
   "advanced.session": "جلسة الاتصال",
   "advanced.owner": "مالك الجلسة",
@@ -101,5 +114,5 @@ export const ar = {
   "scenario.reconnecting": "الجهاز يعيد الاتصال",
   "footer.localFirst": "يعمل محليًا أولًا",
   "footer.noCloud": "تبقى بيانات الجهاز على هذا الجهاز افتراضيًا.",
-  "footer.version": "معاينة المرحلة التأسيسية 0.1"
+  "footer.version": "معاينة المرحلة التأسيسية 0.1",
 } satisfies Partial<Record<MessageKey, string>>;

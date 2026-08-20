@@ -27,17 +27,20 @@ export interface TargetDefinition {
 export interface TargetCatalog {
   readonly metadata: TargetCatalogMetadata;
   get(targetId: string): TargetDefinition | null;
-  match(evidence: readonly DeviceIdentityEvidence[]): readonly TargetCandidate[];
+  match(
+    evidence: readonly DeviceIdentityEvidence[],
+  ): readonly TargetCandidate[];
 }
 
 function normalizedIdentity(
   definition: TargetDefinition,
 ): ReadonlyMap<string, ReadonlySet<string>> {
   const entries = Object.entries(definition.identity).map(
-    ([claim, values]) => [
-      claim,
-      new Set(values.map((value) => normalizeIdentityValue(value))),
-    ] as const,
+    ([claim, values]) =>
+      [
+        claim,
+        new Set(values.map((value) => normalizeIdentityValue(value))),
+      ] as const,
   );
   entries.push([
     identityClaims.target,

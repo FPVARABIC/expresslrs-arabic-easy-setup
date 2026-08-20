@@ -86,7 +86,10 @@ export async function runReadOnlyDiscovery(input: {
       });
       try {
         input.sessions.assertHeld(session);
-        const evidence = await input.provider.readIdentity(session, input.signal);
+        const evidence = await input.provider.readIdentity(
+          session,
+          input.signal,
+        );
         input.sessions.assertHeld(session);
         const capabilities = await input.provider.readCapabilities(
           session,

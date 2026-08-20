@@ -1,4 +1,5 @@
-export type DetectionConfidence = "confirmed" | "high" | "ambiguous" | "unknown";
+export type DetectionConfidence =
+  "confirmed" | "high" | "ambiguous" | "unknown";
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
 export type DeviceKind = "receiver" | "transmitter";
 export type DiscoveryStepState = "complete" | "active" | "pending" | "blocked";
@@ -55,7 +56,7 @@ const completeSteps: readonly DiscoveryStepViewModel[] = [
   { id: "discover", state: "complete" },
   { id: "identify", state: "complete" },
   { id: "crossCheck", state: "complete" },
-  { id: "ready", state: "complete" }
+  { id: "ready", state: "complete" },
 ];
 
 export const mockScenarios: readonly MockScenarioViewModel[] = [
@@ -70,14 +71,24 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       target: "fixture.rx.alpha-2g4",
       firmware: "ExpressLRS 4.1.0",
       band: "2.4 GHz",
-      connection: "connected"
+      connection: "connected",
     },
     steps: completeSteps,
     evidence: [
-      { id: "runtime-target", source: "runtime", value: "fixture.rx.alpha-2g4", strength: "strong" },
-      { id: "mdns-type", source: "mdns", value: "type=RX · version=4.1.0", strength: "supporting" }
+      {
+        id: "runtime-target",
+        source: "runtime",
+        value: "fixture.rx.alpha-2g4",
+        strength: "strong",
+      },
+      {
+        id: "mdns-type",
+        source: "mdns",
+        value: "type=RX · version=4.1.0",
+        strength: "supporting",
+      },
     ],
-    sessionId: "MOCK-RX24-7F3A"
+    sessionId: "MOCK-RX24-7F3A",
   },
   {
     id: "tx-sub-ghz",
@@ -90,14 +101,24 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       target: "fixture.tx.beta-subghz",
       firmware: "ExpressLRS 4.1.0",
       band: "Sub-GHz · 868/915 MHz",
-      connection: "connected"
+      connection: "connected",
     },
     steps: completeSteps,
     evidence: [
-      { id: "runtime-target", source: "runtime", value: "fixture.tx.beta-subghz", strength: "strong" },
-      { id: "catalog-radio", source: "catalog", value: "SX127x · TX", strength: "supporting" }
+      {
+        id: "runtime-target",
+        source: "runtime",
+        value: "fixture.tx.beta-subghz",
+        strength: "strong",
+      },
+      {
+        id: "catalog-radio",
+        source: "catalog",
+        value: "SX127x · TX",
+        strength: "supporting",
+      },
     ],
-    sessionId: "MOCK-TXSG-04C1"
+    sessionId: "MOCK-TXSG-04C1",
   },
   {
     id: "dual-band",
@@ -110,19 +131,24 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       target: "LR1121 Dual-Band RX",
       firmware: "ExpressLRS 4.1.0",
       band: "2.4 GHz + Sub-GHz",
-      connection: "connected"
+      connection: "connected",
     },
     steps: [
       { id: "discover", state: "complete" },
       { id: "identify", state: "complete" },
       { id: "crossCheck", state: "active" },
-      { id: "ready", state: "pending" }
+      { id: "ready", state: "pending" },
     ],
     evidence: [
-      { id: "runtime-radio", source: "runtime", value: "LR1121 · dual-band", strength: "strong" },
-      { id: "usb-mcu", source: "usb", value: "ESP32-S3", strength: "weak" }
+      {
+        id: "runtime-radio",
+        source: "runtime",
+        value: "LR1121 · dual-band",
+        strength: "strong",
+      },
+      { id: "usb-mcu", source: "usb", value: "ESP32-S3", strength: "weak" },
     ],
-    sessionId: "MOCK-DUAL-E221"
+    sessionId: "MOCK-DUAL-E221",
   },
   {
     id: "ambiguous",
@@ -135,19 +161,24 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       target: "2 possible targets",
       firmware: "ExpressLRS 3.5.3",
       band: "2.4 GHz",
-      connection: "connected"
+      connection: "connected",
     },
     steps: [
       { id: "discover", state: "complete" },
       { id: "identify", state: "complete" },
       { id: "crossCheck", state: "blocked" },
-      { id: "ready", state: "blocked" }
+      { id: "ready", state: "blocked" },
     ],
     evidence: [
       { id: "usb-mcu", source: "usb", value: "ESP8285", strength: "weak" },
-      { id: "catalog-candidates", source: "catalog", value: "Candidate A · Candidate B", strength: "supporting" }
+      {
+        id: "catalog-candidates",
+        source: "catalog",
+        value: "Candidate A · Candidate B",
+        strength: "supporting",
+      },
     ],
-    sessionId: "MOCK-AMB-912D"
+    sessionId: "MOCK-AMB-912D",
   },
   {
     id: "reconnecting",
@@ -160,19 +191,29 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       target: "fixture.rx.reconnect-2g4",
       firmware: "ExpressLRS 4.1.0",
       band: "2.4 GHz",
-      connection: "reconnecting"
+      connection: "reconnecting",
     },
     steps: [
       { id: "discover", state: "complete" },
       { id: "identify", state: "complete" },
       { id: "crossCheck", state: "complete" },
-      { id: "ready", state: "active" }
+      { id: "ready", state: "active" },
     ],
     evidence: [
-      { id: "runtime-target", source: "runtime", value: "fixture.rx.reconnect-2g4", strength: "strong" },
-      { id: "reconnect-wait", source: "mdns", value: "Awaiting the same device session", strength: "supporting" }
+      {
+        id: "runtime-target",
+        source: "runtime",
+        value: "fixture.rx.reconnect-2g4",
+        strength: "strong",
+      },
+      {
+        id: "reconnect-wait",
+        source: "mdns",
+        value: "Awaiting the same device session",
+        strength: "supporting",
+      },
     ],
-    sessionId: "MOCK-RECON-33E8"
+    sessionId: "MOCK-RECON-33E8",
   },
   {
     id: "disconnected",
@@ -182,13 +223,15 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       { id: "discover", state: "active" },
       { id: "identify", state: "pending" },
       { id: "crossCheck", state: "pending" },
-      { id: "ready", state: "pending" }
+      { id: "ready", state: "pending" },
     ],
     evidence: [],
-    sessionId: "NO-SESSION"
-  }
+    sessionId: "NO-SESSION",
+  },
 ];
 
 export function getMockScenario(id: MockScenarioId): MockScenarioViewModel {
-  return mockScenarios.find((scenario) => scenario.id === id) ?? mockScenarios[0]!;
+  return (
+    mockScenarios.find((scenario) => scenario.id === id) ?? mockScenarios[0]!
+  );
 }

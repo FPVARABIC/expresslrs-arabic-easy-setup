@@ -10,5 +10,11 @@
     "packages/*/src/**/*.tsx",
     "vitest.setup.ts"
   ],
-  "exclude": ["node_modules", "dist", "coverage", ".research-worktrees", "artifacts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    ".research-worktrees",
+    "artifacts"
+  ]
 }

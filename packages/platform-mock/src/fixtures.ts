@@ -226,7 +226,10 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
     descriptor: descriptor("mock-device-tx-2g4", "Synthetic TX 2.4"),
     evidence: tx2g4Evidence,
     capabilities: [
-      capability("read-config", tx2g4Evidence.map((item) => item.id)),
+      capability(
+        "read-config",
+        tx2g4Evidence.map((item) => item.id),
+      ),
       capability("guided-bind", ["tx2g4-config-target"]),
     ],
   },
@@ -236,7 +239,10 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
     descriptor: descriptor("mock-device-rx-subghz", "Synthetic RX Sub-GHz"),
     evidence: rxSubGhzEvidence,
     capabilities: [
-      capability("read-config", rxSubGhzEvidence.map((item) => item.id)),
+      capability(
+        "read-config",
+        rxSubGhzEvidence.map((item) => item.id),
+      ),
       capability("guided-bind", ["rxsub-config-target"]),
     ],
   },
@@ -246,7 +252,10 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
     descriptor: descriptor("mock-device-dual", "Synthetic Dual-Band TX"),
     evidence: dualBandEvidence,
     capabilities: [
-      capability("read-config", dualBandEvidence.map((item) => item.id)),
+      capability(
+        "read-config",
+        dualBandEvidence.map((item) => item.id),
+      ),
       capability("band-aware-operation", ["dual-radio", "dual-band"]),
     ],
   },
@@ -254,9 +263,7 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
     fixtureId: "unknown-mcu-only",
     family: "UNKNOWN_MCU_ONLY",
     descriptor: descriptor("mock-device-unknown", "Unknown MCU-only device"),
-    evidence: [
-      supportingEvidence("unknown-mcu", "mcu-family", "mcu-unknown"),
-    ],
+    evidence: [supportingEvidence("unknown-mcu", "mcu-family", "mcu-unknown")],
     capabilities: [capability("read-chip-info", ["unknown-mcu"])],
   },
   {
@@ -273,7 +280,10 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
   {
     fixtureId: "conflicting-targets",
     family: "CONFLICTING_IDENTITY",
-    descriptor: descriptor("mock-device-conflict", "Conflicting target evidence"),
+    descriptor: descriptor(
+      "mock-device-conflict",
+      "Conflicting target evidence",
+    ),
     evidence: [
       targetEvidence(
         "conflict-runtime",

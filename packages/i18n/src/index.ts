@@ -13,7 +13,7 @@ export const supportedLocales = ["ar", "en"] as const;
 
 const catalog: Readonly<Record<Locale, Partial<Record<MessageKey, string>>>> = {
   ar,
-  en
+  en,
 };
 
 export function getDirection(locale: Locale): Direction {
@@ -23,14 +23,17 @@ export function getDirection(locale: Locale): Direction {
 export function translate(
   locale: Locale,
   key: MessageKey,
-  parameters: TranslationParameters = {}
+  parameters: TranslationParameters = {},
 ): string {
   const template = catalog[locale][key] ?? catalog[fallbackLocale][key] ?? key;
 
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (placeholder, name: string) => {
-    const value = parameters[name];
-    return value === undefined ? placeholder : String(value);
-  });
+  return template.replace(
+    /\{([a-zA-Z0-9_]+)\}/g,
+    (placeholder, name: string) => {
+      const value = parameters[name];
+      return value === undefined ? placeholder : String(value);
+    },
+  );
 }
 
 export function createTranslator(locale: Locale) {

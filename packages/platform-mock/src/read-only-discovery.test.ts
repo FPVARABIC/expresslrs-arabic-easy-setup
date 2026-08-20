@@ -61,9 +61,7 @@ describe("runReadOnlyDiscovery with synthetic families", () => {
 
     expect(operation.state).toBe("SUCCESS");
     expect(operation.result?.devices[0]?.identity.confidence).toBe("UNKNOWN");
-    expect(
-      operation.result?.devices[0]?.identity.selectedTargetId,
-    ).toBeNull();
+    expect(operation.result?.devices[0]?.identity.selectedTargetId).toBeNull();
   });
 
   it("releases the exclusive session when a provider disconnects", async () => {

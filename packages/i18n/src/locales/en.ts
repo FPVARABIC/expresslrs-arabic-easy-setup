@@ -2,8 +2,10 @@ export const en = {
   "app.name": "ExpressLRS Easy Setup",
   "app.shortName": "ELRS Easy",
   "app.tagline": "Connect with confidence",
-  "app.independent": "Independent community project — not affiliated with ExpressLRS",
-  "app.mockNotice": "Foundation preview — simulated devices only. No hardware writes are enabled.",
+  "app.independent":
+    "Independent community project — not affiliated with ExpressLRS",
+  "app.mockNotice":
+    "Foundation preview — simulated devices only. No hardware writes are enabled.",
   "language.arabic": "العربية",
   "language.english": "English",
   "language.switch": "Switch language",
@@ -14,26 +16,34 @@ export const en = {
   "status.readOnly": "Read-only simulation",
   "home.eyebrow": "A clearer way to use ExpressLRS",
   "home.title": "What would you like to do?",
-  "home.description": "Connect your device and choose a task. We will identify it, check compatibility, and guide every step without making unsafe guesses.",
+  "home.description":
+    "Connect your device and choose a task. We will identify it, check compatibility, and guide every step without making unsafe guesses.",
   "home.mockLabel": "Preview a device state",
-  "home.mockHelp": "These scenarios exercise the UI safely until real adapters are validated.",
+  "home.mockHelp":
+    "These scenarios exercise the UI safely until real adapters are validated.",
   "task.bind.title": "Connect a new device",
-  "task.bind.description": "Pair a transmitter and receiver with the safest supported method.",
+  "task.bind.description":
+    "Pair a transmitter and receiver with the safest supported method.",
   "task.bind.action": "Start binding",
   "task.update.title": "Update a device",
-  "task.update.description": "Resolve the exact target before preparing a verified update.",
+  "task.update.description":
+    "Resolve the exact target before preparing a verified update.",
   "task.update.action": "Check for updates",
   "task.setup.title": "Set up a device",
-  "task.setup.description": "Apply recommended settings with a clear preview first.",
+  "task.setup.description":
+    "Apply recommended settings with a clear preview first.",
   "task.setup.action": "Open easy setup",
   "task.diagnose.title": "Diagnose a problem",
-  "task.diagnose.description": "Collect evidence and explain safe next steps in plain language.",
+  "task.diagnose.description":
+    "Collect evidence and explain safe next steps in plain language.",
   "task.diagnose.action": "Run diagnostics",
   "task.selected": "Selected task",
-  "task.previewOnly": "Preview only: this foundation cannot change a real device.",
+  "task.previewOnly":
+    "Preview only: this foundation cannot change a real device.",
   "device.heading": "Detected device",
   "device.none": "No device connected",
-  "device.noneDescription": "Connect a supported device when a real provider is available. For now, choose a simulation above.",
+  "device.noneDescription":
+    "Connect a supported device when a real provider is available. For now, choose a simulation above.",
   "device.receiver": "Receiver (RX)",
   "device.transmitter": "Transmitter (TX)",
   "device.target": "Target",
@@ -50,10 +60,14 @@ export const en = {
   "confidence.high": "High confidence",
   "confidence.ambiguous": "Ambiguous",
   "confidence.unknown": "Unknown",
-  "confidence.confirmedHelp": "The identity is supported by matching independent evidence.",
-  "confidence.highHelp": "Strong evidence exists, but the write gate still requires confirmation.",
-  "confidence.ambiguousHelp": "More than one target matches. Sensitive operations are blocked.",
-  "confidence.unknownHelp": "There is not enough evidence to identify this device safely.",
+  "confidence.confirmedHelp":
+    "The identity is supported by matching independent evidence.",
+  "confidence.highHelp":
+    "Strong evidence exists, but the write gate still requires confirmation.",
+  "confidence.ambiguousHelp":
+    "More than one target matches. Sensitive operations are blocked.",
+  "confidence.unknownHelp":
+    "There is not enough evidence to identify this device safely.",
   "discovery.heading": "Discovery progress",
   "discovery.description": "Every claim stays tied to its source.",
   "discovery.discover": "Discover connection",
@@ -76,11 +90,14 @@ export const en = {
   "evidence.supporting": "Supporting",
   "evidence.weak": "Weak",
   "safety.heading": "Your device stays protected",
-  "safety.description": "No update or binding workflow may report success until the expected device reconnects and its result is verified.",
+  "safety.description":
+    "No update or binding workflow may report success until the expected device reconnects and its result is verified.",
   "safety.blockedTitle": "Sensitive operations are blocked",
-  "safety.blockedDescription": "We could not resolve one exact target. The app will never guess which firmware belongs to this device.",
+  "safety.blockedDescription":
+    "We could not resolve one exact target. The app will never guess which firmware belongs to this device.",
   "safety.readOnlyTitle": "Read-only foundation",
-  "safety.readOnlyDescription": "This screen uses deterministic mock scenarios. Hardware access and write providers are intentionally disabled.",
+  "safety.readOnlyDescription":
+    "This screen uses deterministic mock scenarios. Hardware access and write providers are intentionally disabled.",
   "advanced.heading": "Technical details",
   "advanced.session": "Session",
   "advanced.owner": "Session owner",
@@ -100,7 +117,7 @@ export const en = {
   "footer.localFirst": "Local-first",
   "footer.noCloud": "Device data stays on this device by default.",
   "footer.version": "Foundation preview 0.1",
-  "debug.englishOnly": "English fallback verified"
+  "debug.englishOnly": "English fallback verified",
 } as const;
 
 export type MessageKey = keyof typeof en;

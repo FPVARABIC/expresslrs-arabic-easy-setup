@@ -52,25 +52,17 @@ const allowedTransitions = {
     "UNKNOWN_STATE",
     "RECOVERY_REQUIRED",
   ],
-  REBOOTING: [
-    "RECONNECTING",
-    "FAILED",
-    "UNKNOWN_STATE",
-    "RECOVERY_REQUIRED",
-  ],
-  RECONNECTING: [
-    "VERIFYING",
-    "FAILED",
-    "UNKNOWN_STATE",
-    "RECOVERY_REQUIRED",
-  ],
+  REBOOTING: ["RECONNECTING", "FAILED", "UNKNOWN_STATE", "RECOVERY_REQUIRED"],
+  RECONNECTING: ["VERIFYING", "FAILED", "UNKNOWN_STATE", "RECOVERY_REQUIRED"],
   VERIFYING: ["FAILED", "UNKNOWN_STATE", "RECOVERY_REQUIRED"],
   SUCCESS: [],
   FAILED: [],
   CANCELLED: [],
   UNKNOWN_STATE: [],
   RECOVERY_REQUIRED: [],
-} as const satisfies Readonly<Record<OperationState, readonly OperationState[]>>;
+} as const satisfies Readonly<
+  Record<OperationState, readonly OperationState[]>
+>;
 
 export interface StartOperationInput {
   readonly id: string;
@@ -149,7 +141,10 @@ export class VerifiedOperationMachine<TResult = unknown> {
       progress: { stage: "FAILED", messageCode: error.code },
       updatedAt: now,
       result: null,
-      error: Object.freeze({ ...error, details: Object.freeze({ ...error.details }) }),
+      error: Object.freeze({
+        ...error,
+        details: Object.freeze({ ...error.details }),
+      }),
       verificationPassed: false,
       history: [...this.#record.history, "FAILED"],
     };
@@ -182,7 +177,9 @@ export class VerifiedOperationMachine<TResult = unknown> {
 
   #assertTransition(next: OperationState): void {
     const current = this.#record.state;
-    if (!(allowedTransitions[current] as readonly OperationState[]).includes(next)) {
+    if (
+      !(allowedTransitions[current] as readonly OperationState[]).includes(next)
+    ) {
       throw this.#invalidTransition(next);
     }
   }

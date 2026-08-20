@@ -42,10 +42,23 @@ body {
   background:
     linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    radial-gradient(circle at 85% -10%, rgba(29, 170, 201, 0.15), transparent 32rem),
-    radial-gradient(circle at 5% 45%, rgba(113, 74, 209, 0.11), transparent 28rem),
+    radial-gradient(
+      circle at 85% -10%,
+      rgba(29, 170, 201, 0.15),
+      transparent 32rem
+    ),
+    radial-gradient(
+      circle at 5% 45%,
+      rgba(113, 74, 209, 0.11),
+      transparent 28rem
+    ),
     var(--page);
-  background-size: 44px 44px, 44px 44px, auto, auto, auto;
+  background-size:
+    44px 44px,
+    44px 44px,
+    auto,
+    auto,
+    auto;
   color: var(--text);
 }
 
@@ -182,9 +195,15 @@ svg {
   place-items: center;
   border: 1px solid rgba(65, 217, 231, 0.34);
   border-radius: 13px;
-  background: linear-gradient(145deg, rgba(65, 217, 231, 0.2), rgba(65, 217, 231, 0.05));
+  background: linear-gradient(
+    145deg,
+    rgba(65, 217, 231, 0.2),
+    rgba(65, 217, 231, 0.05)
+  );
   color: var(--cyan);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 10px 32px rgba(27, 182, 202, 0.09);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    0 10px 32px rgba(27, 182, 202, 0.09);
 }
 
 .brand-mark svg {
@@ -241,7 +260,9 @@ svg {
   height: 7px;
   border-radius: 50%;
   background: var(--mint);
-  box-shadow: 0 0 0 4px rgba(101, 230, 179, 0.09), 0 0 15px rgba(101, 230, 179, 0.45);
+  box-shadow:
+    0 0 0 4px rgba(101, 230, 179, 0.09),
+    0 0 15px rgba(101, 230, 179, 0.45);
 }
 
 .language-switcher {
@@ -329,7 +350,11 @@ svg {
   padding: 1.3rem;
   border: 1px solid rgba(101, 230, 179, 0.19);
   border-radius: 18px;
-  background: linear-gradient(145deg, rgba(101, 230, 179, 0.08), rgba(9, 20, 31, 0.72));
+  background: linear-gradient(
+    145deg,
+    rgba(101, 230, 179, 0.08),
+    rgba(9, 20, 31, 0.72)
+  );
 }
 
 .safety-icon,
@@ -364,7 +389,11 @@ svg {
 .info-panel,
 .advanced-section {
   border: 1px solid var(--line);
-  background: linear-gradient(150deg, rgba(18, 34, 51, 0.79), rgba(8, 18, 29, 0.84));
+  background: linear-gradient(
+    150deg,
+    rgba(18, 34, 51, 0.79),
+    rgba(8, 18, 29, 0.84)
+  );
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
 }
@@ -433,7 +462,10 @@ svg {
   cursor: pointer;
   font-size: 0.72rem;
   font-weight: 680;
-  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
 }
 
 .scenario-chip:hover,
@@ -450,10 +482,18 @@ svg {
   background: var(--text-muted);
 }
 
-.scenario-indicator.confidence-confirmed { background: var(--mint); }
-.scenario-indicator.confidence-high { background: var(--cyan); }
-.scenario-indicator.confidence-ambiguous { background: var(--amber); }
-.scenario-indicator.confidence-unknown { background: var(--danger); }
+.scenario-indicator.confidence-confirmed {
+  background: var(--mint);
+}
+.scenario-indicator.confidence-high {
+  background: var(--cyan);
+}
+.scenario-indicator.confidence-ambiguous {
+  background: var(--amber);
+}
+.scenario-indicator.confidence-unknown {
+  background: var(--danger);
+}
 
 .dashboard-grid {
   display: grid;
@@ -494,7 +534,10 @@ svg {
   background: rgba(8, 18, 29, 0.64);
   text-align: start;
   cursor: pointer;
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
 }
 
 .task-card:hover,
@@ -504,9 +547,18 @@ svg {
   background: linear-gradient(145deg, var(--task-soft), rgba(8, 18, 29, 0.74));
 }
 
-.task-violet { --task-color: var(--violet); --task-soft: var(--violet-soft); }
-.task-amber { --task-color: var(--amber); --task-soft: var(--amber-soft); }
-.task-mint { --task-color: var(--mint); --task-soft: var(--mint-soft); }
+.task-violet {
+  --task-color: var(--violet);
+  --task-soft: var(--violet-soft);
+}
+.task-amber {
+  --task-color: var(--amber);
+  --task-soft: var(--amber-soft);
+}
+.task-mint {
+  --task-color: var(--mint);
+  --task-soft: var(--mint-soft);
+}
 
 .task-icon {
   display: grid;
@@ -591,14 +643,30 @@ svg {
   padding: 0.4rem 0.65rem;
 }
 
-.connection-connected { color: var(--mint); }
-.connection-reconnecting { color: var(--amber); }
-.connection-disconnected { color: var(--text-muted); }
-.connection-reconnecting > span { background: var(--amber); box-shadow: 0 0 0 4px rgba(245, 189, 101, 0.09); animation: pulse 1.4s infinite; }
-.connection-disconnected > span { background: var(--text-muted); box-shadow: none; }
+.connection-connected {
+  color: var(--mint);
+}
+.connection-reconnecting {
+  color: var(--amber);
+}
+.connection-disconnected {
+  color: var(--text-muted);
+}
+.connection-reconnecting > span {
+  background: var(--amber);
+  box-shadow: 0 0 0 4px rgba(245, 189, 101, 0.09);
+  animation: pulse 1.4s infinite;
+}
+.connection-disconnected > span {
+  background: var(--text-muted);
+  box-shadow: none;
+}
 
 @keyframes pulse {
-  50% { opacity: 0.35; transform: scale(0.7); }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
 }
 
 .device-card-body {
@@ -701,9 +769,18 @@ svg {
   color: var(--mint);
 }
 
-.confidence-card.confidence-high .confidence-icon { background: var(--cyan-soft); color: var(--cyan); }
-.confidence-card.confidence-ambiguous .confidence-icon { background: var(--amber-soft); color: var(--amber); }
-.confidence-card.confidence-unknown .confidence-icon { background: var(--danger-soft); color: var(--danger); }
+.confidence-card.confidence-high .confidence-icon {
+  background: var(--cyan-soft);
+  color: var(--cyan);
+}
+.confidence-card.confidence-ambiguous .confidence-icon {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.confidence-card.confidence-unknown .confidence-icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
 .confidence-card small {
   display: block;
@@ -813,9 +890,22 @@ svg {
   height: 1rem;
 }
 
-.step-complete .step-marker { border-color: rgba(101, 230, 179, 0.35); background: var(--mint-soft); color: var(--mint); }
-.step-active .step-marker { border-color: rgba(65, 217, 231, 0.4); background: var(--cyan-soft); color: var(--cyan); box-shadow: 0 0 18px rgba(65, 217, 231, 0.12); }
-.step-blocked .step-marker { border-color: rgba(245, 189, 101, 0.35); background: var(--amber-soft); color: var(--amber); }
+.step-complete .step-marker {
+  border-color: rgba(101, 230, 179, 0.35);
+  background: var(--mint-soft);
+  color: var(--mint);
+}
+.step-active .step-marker {
+  border-color: rgba(65, 217, 231, 0.4);
+  background: var(--cyan-soft);
+  color: var(--cyan);
+  box-shadow: 0 0 18px rgba(65, 217, 231, 0.12);
+}
+.step-blocked .step-marker {
+  border-color: rgba(245, 189, 101, 0.35);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
 
 .progress-step strong,
 .progress-step span {
@@ -895,9 +985,18 @@ svg {
   font-weight: 740;
 }
 
-.strength-strong { background: var(--mint-soft); color: var(--mint); }
-.strength-supporting { background: var(--cyan-soft); color: var(--cyan); }
-.strength-weak { background: var(--amber-soft); color: var(--amber); }
+.strength-strong {
+  background: var(--mint-soft);
+  color: var(--mint);
+}
+.strength-supporting {
+  background: var(--cyan-soft);
+  color: var(--cyan);
+}
+.strength-weak {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
 
 .empty-evidence {
   min-height: 140px;
@@ -919,12 +1018,20 @@ svg {
   padding: 1.15rem 1.3rem;
   border: 1px solid rgba(101, 230, 179, 0.2);
   border-radius: 18px;
-  background: linear-gradient(120deg, rgba(101, 230, 179, 0.1), rgba(8, 18, 29, 0.72));
+  background: linear-gradient(
+    120deg,
+    rgba(101, 230, 179, 0.1),
+    rgba(8, 18, 29, 0.72)
+  );
 }
 
 .safety-callout.is-blocked {
   border-color: rgba(245, 189, 101, 0.25);
-  background: linear-gradient(120deg, rgba(245, 189, 101, 0.1), rgba(8, 18, 29, 0.72));
+  background: linear-gradient(
+    120deg,
+    rgba(245, 189, 101, 0.1),
+    rgba(8, 18, 29, 0.72)
+  );
 }
 
 .safety-callout.is-blocked .safety-callout-icon {
@@ -951,7 +1058,9 @@ svg {
   border-radius: 999px;
   background: rgba(6, 14, 23, 0.7);
   cursor: pointer;
-  transition: background 180ms ease, border-color 180ms ease;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease;
 }
 
 .switch > span:first-child {
@@ -960,7 +1069,9 @@ svg {
   height: 19px;
   border-radius: 50%;
   background: var(--text-muted);
-  transition: transform 180ms ease, background 180ms ease;
+  transition:
+    transform 180ms ease,
+    background 180ms ease;
 }
 
 .switch[aria-checked="true"] {

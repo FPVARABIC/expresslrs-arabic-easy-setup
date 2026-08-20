@@ -29,8 +29,7 @@ function resolution(
 ): DeviceIdentityResolution {
   return {
     confidence,
-    selectedTargetId:
-      confidence === "CONFIRMED" ? "fixture.rx.alpha" : null,
+    selectedTargetId: confidence === "CONFIRMED" ? "fixture.rx.alpha" : null,
     candidates: [],
     evidence: [],
     conflicts: [],

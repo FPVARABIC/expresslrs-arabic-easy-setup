@@ -32,9 +32,9 @@ describe("VerifiedOperationMachine", () => {
     operation.transition("EXECUTING");
     operation.transition("WRITE_COMPLETED");
 
-    expect(() =>
-      operation.verificationSucceeded({ version: "4.1.0" }),
-    ).toThrow(CoreOperationError);
+    expect(() => operation.verificationSucceeded({ version: "4.1.0" })).toThrow(
+      CoreOperationError,
+    );
   });
 
   it("reaches SUCCESS only through a passed verification", () => {
