@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/domain/src/**/*.ts",
+    "packages/device/src/**/*.ts",
+    "packages/compatibility/src/**/*.ts",
+    "packages/workflows/src/**/*.ts",
+    "packages/platform-mock/src/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+}

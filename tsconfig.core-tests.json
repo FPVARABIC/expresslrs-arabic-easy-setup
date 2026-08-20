@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "packages/domain/src/**/*.ts",
+    "packages/device/src/**/*.ts",
+    "packages/compatibility/src/**/*.ts",
+    "packages/workflows/src/**/*.ts",
+    "packages/platform-mock/src/**/*.ts"
+  ]
+}

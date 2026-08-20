@@ -1,0 +1,23 @@
+# Performance Hypothesis Backlog
+
+هذه السجلات ليست تحسينات ولا Claims. لا يُنفذ أي منها قبل Measurement Harness وOfficial Baseline وtest plan مناسب.
+
+| ID | Status | Observation | Potential question | Source area | Required measurement | Primary risk |
+| --- | --- | --- | --- | --- | --- | --- |
+| HYP-001 | UNTESTED | TX connection/recovery thresholds and sync cadence are explicit in the link loop. | Can recovery time be reduced without false transitions or latency/telemetry regression? | `src/src/tx_main.cpp`, RF performance parameters | loss detection, reacquisition, usable-link time, false recovery count | oscillation/CPU/timing |
+| HYP-002 | UNTESTED | Telemetry slots interact with hopping and control scheduling. | Are there degraded-link cases where scheduling can preserve control continuity more effectively? | `src/src/tx_main.cpp`, `src/src/rx_main.cpp`, `src/lib/StubbornSender/`, `src/lib/LBT/` | packet delivery, burst loss, latency, telemetry throughput | starving telemetry or control |
+| HYP-003 | UNTESTED | Dynamic power reacts to link statistics and missed telemetry. | Are thresholds optimal across supported radios/bands and conditions? | `src/src/dynpower.cpp` | power transitions, LQ/SNR/RSSI, loss bursts, recovery, energy/thermal behavior | regulatory/power oscillation |
+| HYP-004 | UNTESTED | Shared FHSS logic serves multiple radio/band configurations. | Are there implementation inefficiencies measurable without changing regulatory behavior? | `src/lib/FHSS/`, radio configuration paths | timing budget, hop accuracy, sync retention, packet delivery | protocol/regulatory incompatibility |
+| HYP-005 | UNTESTED | Band/radio paths differ, including SX127x/SX1280/LR1121/LR2021-era abstractions. | Which optimizations, if any, are truly shared versus band/radio specific? | radio drivers and `RadioBand`/modulation tables | matched baseline matrix by radio/band | false universal optimization |
+| HYP-006 | UNTESTED | TX uses fixed sync-spam counts around connection/rate transitions. | Do fixed counts affect reacquisition time under intermittent degradation? | `src/src/tx_main.cpp` | recovery time, sync airtime, latency, false transitions | protocol/timing regression |
+| HYP-007 | UNTESTED | LBT-blocked transmissions defer completion using calculated time-on-air. | What jitter/deadline behavior appears under legal shielded channel-busy scenarios? | `src/lib/LBT/`, TX timing path | jitter, deadline misses, packet continuity | regulatory/timing regression |
+| HYP-008 | UNTESTED | Reliable telemetry uses acknowledged sender/receiver state. | How do retries/completion time affect control traffic during burst loss? | `src/lib/StubbornSender/`, `src/lib/StubbornReceiver/` | telemetry completion, retries, control latency/loss | control starvation |
+| HYP-009 | UNTESTED | Existing debug link-stat mode changes RX filtering behavior. | Can a lower-overhead measurement path preserve production behavior? | `src/src/rx_main.cpp` | instrumentation overhead and external timing | measuring a modified system |
+| HYP-010 | UNTESTED | 4.1.0 refuses unsupported requested RX modes rather than accepting a soft-locked state. | Which heterogeneous-target capability mismatches need deterministic recovery fixtures? | rate negotiation and capability checks | transition result, recovery, error classification | false compatibility |
+| HYP-011 | UNTESTED | Upstream previously separated SX1280 TX/RX FIFO locations while addressing invalid-packet/failsafe/reconnect reports. | Which exact FIFO/serial-load regression fixture must be locked before related code is touched? | `src/lib/SX1280Driver/`, upstream history | invalid packets, burst loss, failsafe/reconnect events under controlled load | recreating a resolved regression |
+| HYP-012 | UNTESTED | RX disconnected recovery cycles supported rates using table-driven dwell/lock/disconnect timing. | Do particular rate/band combinations dominate reacquisition time under intermittent loss? | `src/src/rx_main.cpp`, RF performance tables | loss detection, per-rate dwell, first valid packet, usable-link restoration | false locks or slower recovery |
+| HYP-013 | UNTESTED | LR1121 binding alternates between bands, and the source comment/timing constant are not aligned. | What is the actual acquisition-time distribution on dual-band reference hardware? | LR1121 binding branches in `tx_main.cpp` and `rx_main.cpp` | bind-attempt timing, success distribution, band observed, retries | incorrect UX timeout or band bias |
+
+## Admission rule
+
+لكل Hypothesis مستقبلًا: baseline SHA، hardware/config/environment، repeat runs، raw data، summary، multi-metric regression analysis، وقرار `KEEP / MODIFY / REJECT`.

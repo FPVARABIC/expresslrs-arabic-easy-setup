@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Format, lint, typecheck, test, and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Detect dependency lockfile
+        id: lockfile
+        shell: bash
+        run: |
+          if test -f pnpm-lock.yaml; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies from lockfile
+        if: steps.lockfile.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Bootstrap dependency lockfile
+        if: steps.lockfile.outputs.present != 'true'
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Preserve bootstrap lockfile for review
+        if: steps.lockfile.outputs.present != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-lock-bootstrap
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Run quality gates
+        run: pnpm check
