@@ -26,7 +26,8 @@ response-header gate.
 
 The deployment must:
 
-- obtain and verify the Pages base path before building;
+- build against the fixed canonical repository base path, verify every emitted
+  asset against it, and compare it with the configured Pages path before deploy;
 - run the frozen install, complete source checks, dependency-license policy,
   and high-severity advisory audit before packaging;
 - inject a reviewed Pages-only CSP meta policy before executable resources and
