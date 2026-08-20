@@ -140,6 +140,7 @@ export const identityResolutionReasons = {
   noTargetCandidate: "NO_TARGET_CANDIDATE",
   multipleTargetCandidates: "MULTIPLE_TARGET_CANDIDATES",
   conflictingTargetEvidence: "CONFLICTING_TARGET_EVIDENCE",
+  duplicateEvidenceIds: "DUPLICATE_EVIDENCE_IDS",
   genericEvidenceOnly: "GENERIC_EVIDENCE_ONLY",
   oneTargetSpecificTrustDomain: "ONE_TARGET_SPECIFIC_TRUST_DOMAIN",
   independentTargetEvidence: "INDEPENDENT_TARGET_EVIDENCE",

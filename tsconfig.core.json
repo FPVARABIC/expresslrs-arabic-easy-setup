@@ -1,11 +1,15 @@
 {
   "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"]
+  },
   "include": [
     "packages/domain/src/**/*.ts",
     "packages/device/src/**/*.ts",
     "packages/compatibility/src/**/*.ts",
     "packages/workflows/src/**/*.ts",
-    "packages/platform-mock/src/**/*.ts"
+    "packages/platform-mock/src/**/*.ts",
+    "packages/i18n/src/**/*.ts"
   ],
   "exclude": ["**/*.test.ts", "**/*.test.tsx"]
 }

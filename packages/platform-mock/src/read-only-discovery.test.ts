@@ -80,15 +80,12 @@ describe("runReadOnlyDiscovery with synthetic families", () => {
   });
 
   it("reports an explicit cancellation instead of an internal failure", async () => {
-    const controller = new AbortController();
-    controller.abort();
-
     const operation = await runReadOnlyDiscovery({
       operationId: "discovery-cancelled",
       provider: new MockDiscoveryProvider([fixtureById("known-tx-2g4")]),
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
-      signal: controller.signal,
+      signal: { aborted: true },
     });
 
     expect(operation.state).toBe("CANCELLED");

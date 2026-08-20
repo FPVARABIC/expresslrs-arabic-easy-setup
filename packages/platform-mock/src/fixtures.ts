@@ -231,6 +231,7 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
         tx2g4Evidence.map((item) => item.id),
       ),
       capability("guided-bind", ["tx2g4-config-target"]),
+      capability("mock-wifi-update", ["tx2g4-config-target"]),
     ],
   },
   {
@@ -244,6 +245,7 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
         rxSubGhzEvidence.map((item) => item.id),
       ),
       capability("guided-bind", ["rxsub-config-target"]),
+      capability("mock-serial-update", ["rxsub-config-target"]),
     ],
   },
   {
@@ -257,6 +259,7 @@ export const syntheticDeviceFixtures: readonly SyntheticDeviceFixture[] = [
         dualBandEvidence.map((item) => item.id),
       ),
       capability("band-aware-operation", ["dual-radio", "dual-band"]),
+      capability("mock-wifi-update", ["dual-config-target"]),
     ],
   },
   {

@@ -1,4 +1,5 @@
 import type {
+  CancellationSignal,
   Capability,
   DeviceDescriptor,
   DeviceIdentityEvidence,
@@ -7,14 +8,14 @@ import type {
 
 export interface DiscoveryProvider {
   readonly id: string;
-  discover(signal?: AbortSignal): Promise<readonly DeviceDescriptor[]>;
+  discover(signal?: CancellationSignal): Promise<readonly DeviceDescriptor[]>;
   readIdentity(
     session: DeviceSession,
-    signal?: AbortSignal,
+    signal?: CancellationSignal,
   ): Promise<readonly DeviceIdentityEvidence[]>;
   readCapabilities(
     session: DeviceSession,
-    signal?: AbortSignal,
+    signal?: CancellationSignal,
   ): Promise<readonly Capability[]>;
 }
 

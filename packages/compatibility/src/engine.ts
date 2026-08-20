@@ -36,9 +36,34 @@ export interface CompatibilityDecision {
   readonly blockingErrorCode: OperationErrorCode | null;
 }
 
-function parseFirmwareMajor(version: string): number | null {
-  const match = /^(\d+)\./u.exec(version.trim());
-  return match === null ? null : Number.parseInt(match[1] ?? "", 10);
+const semanticVersionPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u;
+
+function parseFirmwareMajor(version: unknown): number | null {
+  if (typeof version !== "string") {
+    return null;
+  }
+  const match = semanticVersionPattern.exec(version);
+  if (match === null) {
+    return null;
+  }
+
+  const prerelease = match[4];
+  if (
+    prerelease
+      ?.split(".")
+      .some(
+        (identifier) =>
+          /^\d+$/u.test(identifier) &&
+          identifier.length > 1 &&
+          identifier.startsWith("0"),
+      ) === true
+  ) {
+    return null;
+  }
+
+  const major = Number(match[1]);
+  return Number.isSafeInteger(major) ? major : null;
 }
 
 export function evaluateFirmwareCompatibility(input: {

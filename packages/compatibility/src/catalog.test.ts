@@ -89,4 +89,39 @@ describe("InMemoryTargetCatalog", () => {
     expect(candidates[0]?.targetId).toBe("fixture.rx.alpha");
     expect(candidates[0]?.conflictingEvidenceIds).toEqual(["radio"]);
   });
+
+  it("copies injected definitions so later caller mutation cannot change decisions", () => {
+    const capabilities = ["read-config"];
+    const radioFamilies = ["radio-safe"];
+    const definition = {
+      targetId: "fixture.rx.immutable",
+      displayName: "Synthetic Immutable",
+      identity: { "radio-family": radioFamilies },
+      capabilities,
+      updateProviders: ["mock-wifi"],
+      supportedFirmwareMajors: [4],
+    };
+    const immutableCatalog = new InMemoryTargetCatalog(
+      {
+        source: "synthetic-test",
+        revision: "immutable-1",
+        schemaVersion: "1",
+        contentDigest: "sha256:immutable",
+        redistributionApproved: true,
+      },
+      [definition],
+    );
+
+    capabilities.push("unsafe-later-capability");
+    radioFamilies.push("radio-mutated");
+
+    expect(immutableCatalog.get("fixture.rx.immutable")?.capabilities).toEqual([
+      "read-config",
+    ]);
+    expect(
+      immutableCatalog.match([
+        evidence("mutated", "radio-family", "radio-mutated"),
+      ]),
+    ).toEqual([]);
+  });
 });

@@ -1,3 +1,5 @@
+import { scrubAuditDetails } from "./audit.js";
+
 export const operationErrorCodes = [
   "DEVICE_NOT_FOUND",
   "DEVICE_BUSY",
@@ -27,15 +29,51 @@ export interface OperationError {
   readonly retryable: boolean;
 }
 
+/**
+ * Public operation errors are safe-by-construction. Adapters may provide raw
+ * diagnostics elsewhere, but only reviewed primitive fields can cross this
+ * boundary or reach a host/export path.
+ */
+export function sanitizeOperationError(error: OperationError): OperationError {
+  const runtimeError = error as Partial<OperationError>;
+  const codeIsKnown = operationErrorCodes.includes(
+    runtimeError.code as OperationErrorCode,
+  );
+  const reason =
+    typeof runtimeError.reason === "string" ? runtimeError.reason.trim() : "";
+  const detailsAreSafeShape =
+    runtimeError.details !== null &&
+    typeof runtimeError.details === "object" &&
+    !Array.isArray(runtimeError.details);
+  if (
+    !codeIsKnown ||
+    !/^[A-Z0-9][A-Z0-9_:-]{0,127}$/u.test(reason) ||
+    !detailsAreSafeShape ||
+    typeof runtimeError.retryable !== "boolean"
+  ) {
+    return Object.freeze({
+      code: "INTERNAL_ERROR",
+      reason: "UNSAFE_PROVIDER_ERROR_REJECTED",
+      details: Object.freeze({}),
+      retryable: false,
+    });
+  }
+  const scrubbed = scrubAuditDetails(runtimeError.details!);
+  return Object.freeze({
+    code: runtimeError.code!,
+    reason,
+    details: scrubbed.details,
+    retryable: runtimeError.retryable,
+  });
+}
+
 export class CoreOperationError extends Error {
   public readonly operationError: OperationError;
 
   public constructor(operationError: OperationError) {
-    super(operationError.reason);
+    const safeError = sanitizeOperationError(operationError);
+    super(safeError.reason);
     this.name = "CoreOperationError";
-    this.operationError = Object.freeze({
-      ...operationError,
-      details: Object.freeze({ ...operationError.details }),
-    });
+    this.operationError = safeError;
   }
 }

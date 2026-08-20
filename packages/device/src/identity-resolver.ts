@@ -37,6 +37,20 @@ function collectConflicts(
   return Object.freeze(conflicts);
 }
 
+function hasDuplicateEvidenceIds(
+  evidence: readonly DeviceIdentityEvidence[],
+): boolean {
+  const ids = new Set<string>();
+  for (const item of evidence) {
+    const id = item.id.trim();
+    if (ids.has(id)) {
+      return true;
+    }
+    ids.add(id);
+  }
+  return false;
+}
+
 function frozenResolution(
   resolution: DeviceIdentityResolution,
 ): DeviceIdentityResolution {
@@ -62,6 +76,17 @@ export function resolveDeviceIdentity(input: {
   const candidateConflicts = input.candidates.flatMap(
     (candidate) => candidate.conflictingEvidenceIds,
   );
+
+  if (hasDuplicateEvidenceIds(input.evidence)) {
+    return frozenResolution({
+      confidence: "AMBIGUOUS",
+      selectedTargetId: null,
+      candidates: input.candidates,
+      evidence: input.evidence,
+      conflicts,
+      reasons: [identityResolutionReasons.duplicateEvidenceIds],
+    });
+  }
 
   if (conflicts.length > 0 || candidateConflicts.length > 0) {
     return frozenResolution({

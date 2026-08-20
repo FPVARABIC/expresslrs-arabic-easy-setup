@@ -84,4 +84,110 @@ describe("evaluateFirmwareCompatibility", () => {
 
     expect(decision.status).toBe("COMPATIBLE");
   });
+
+  it("returns the exact fail-closed reason for ambiguous identity", () => {
+    const decision = evaluateFirmwareCompatibility({
+      identity: resolution("AMBIGUOUS"),
+      artifact: {
+        targetId: "fixture.rx.alpha",
+        firmwareVersion: "4.1.0",
+        sha256: "abc",
+      },
+      updateProvider: "mock-wifi",
+      catalog,
+    });
+
+    expect(decision.blockingErrorCode).toBe("IDENTITY_AMBIGUOUS");
+  });
+
+  it.each([
+    "4.0.0",
+    "4.1.0",
+    "4.1.0-rc.1",
+    "4.1.0+fixture.5",
+    "4.1.0-rc.1+fixture.5",
+  ])("accepts a supported firmware major with valid SemVer: %s", (version) => {
+    const decision = evaluateFirmwareCompatibility({
+      identity: resolution("CONFIRMED"),
+      artifact: {
+        targetId: "fixture.rx.alpha",
+        firmwareVersion: version,
+        sha256: "abc",
+      },
+      updateProvider: "mock-wifi",
+      catalog,
+    });
+
+    expect(decision.status).toBe("COMPATIBLE");
+    expect(decision.blockingErrorCode).toBeNull();
+  });
+
+  it.each([
+    "",
+    "not-a-version",
+    "4.",
+    "4.garbage",
+    "4...",
+    "4.1",
+    "v4.1.0",
+    "04.1.0",
+    "4.01.0",
+    "4.1.00",
+    "4.1.0trailing",
+    "4.1.0 trailing",
+    "4.1.0-",
+    "4.1.0+",
+    "4.1.0-01",
+    "4.1.0-rc..1",
+    "5.0.0",
+  ])("blocks malformed or unsupported Firmware SemVer: %j", (version) => {
+    const decision = evaluateFirmwareCompatibility({
+      identity: resolution("CONFIRMED"),
+      artifact: {
+        targetId: "fixture.rx.alpha",
+        firmwareVersion: version,
+        sha256: "abc",
+      },
+      updateProvider: "mock-wifi",
+      catalog,
+    });
+
+    expect(decision.status).toBe("BLOCKED");
+    expect(decision.reasons).toEqual(["FIRMWARE_MAJOR_UNSUPPORTED"]);
+    expect(decision.blockingErrorCode).toBe("VERSION_INCOMPATIBLE");
+  });
+
+  it("blocks an update provider that the confirmed target does not support", () => {
+    const decision = evaluateFirmwareCompatibility({
+      identity: resolution("CONFIRMED"),
+      artifact: {
+        targetId: "fixture.rx.alpha",
+        firmwareVersion: "4.1.0",
+        sha256: "abc",
+      },
+      updateProvider: "mock-serial",
+      catalog,
+    });
+
+    expect(decision.blockingErrorCode).toBe("PROVIDER_UNSUPPORTED");
+  });
+
+  it("treats a confirmed target absent from the pinned catalog as unknown", () => {
+    const decision = evaluateFirmwareCompatibility({
+      identity: {
+        ...resolution("CONFIRMED"),
+        selectedTargetId: "fixture.rx.removed",
+      },
+      artifact: {
+        targetId: "fixture.rx.removed",
+        firmwareVersion: "4.1.0",
+        sha256: "abc",
+      },
+      updateProvider: "mock-wifi",
+      catalog,
+    });
+
+    expect(decision.status).toBe("UNKNOWN");
+    expect(decision.blockingErrorCode).toBe("TARGET_UNKNOWN");
+  });
 });

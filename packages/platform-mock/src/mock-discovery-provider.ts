@@ -1,6 +1,7 @@
 import type { DiscoveryProvider } from "@elrs-easy/device";
 import {
   CoreOperationError,
+  type CancellationSignal,
   type Capability,
   type DeviceDescriptor,
   type DeviceIdentityEvidence,
@@ -17,12 +18,11 @@ export interface MockDiscoveryCall {
   readonly deviceId: string | null;
 }
 
-function assertNotAborted(signal?: AbortSignal): void {
+function assertNotAborted(signal?: CancellationSignal): void {
   if (signal?.aborted === true) {
-    throw new DOMException(
-      "The synthetic operation was cancelled",
-      "AbortError",
-    );
+    const error = new Error("The synthetic operation was cancelled");
+    error.name = "AbortError";
+    throw error;
   }
 }
 
@@ -47,7 +47,7 @@ export class MockDiscoveryProvider implements DiscoveryProvider {
   }
 
   public async discover(
-    signal?: AbortSignal,
+    signal?: CancellationSignal,
   ): Promise<readonly DeviceDescriptor[]> {
     assertNotAborted(signal);
     this.#calls.push({ method: "discover", deviceId: null });
@@ -57,7 +57,7 @@ export class MockDiscoveryProvider implements DiscoveryProvider {
 
   public async readIdentity(
     session: DeviceSession,
-    signal?: AbortSignal,
+    signal?: CancellationSignal,
   ): Promise<readonly DeviceIdentityEvidence[]> {
     assertNotAborted(signal);
     this.#calls.push({ method: "readIdentity", deviceId: session.deviceId });
@@ -67,7 +67,7 @@ export class MockDiscoveryProvider implements DiscoveryProvider {
 
   public async readCapabilities(
     session: DeviceSession,
-    signal?: AbortSignal,
+    signal?: CancellationSignal,
   ): Promise<readonly Capability[]> {
     assertNotAborted(signal);
     this.#calls.push({

@@ -1,4 +1,5 @@
 import type { OperationError } from "./errors.js";
+import type { AuditEvent } from "./audit.js";
 
 export const operationStates = [
   "IDLE",
@@ -47,6 +48,8 @@ export interface OperationRecord<TResult = unknown> {
   readonly error: OperationError | null;
   readonly verificationPassed: boolean;
   readonly history: readonly OperationState[];
+  /** Ordered, privacy-scrubbed evidence for support and host integration. */
+  readonly auditEvents: readonly AuditEvent[];
 }
 
 export function isTerminalOperationState(state: OperationState): boolean {

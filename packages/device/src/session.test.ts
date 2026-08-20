@@ -12,13 +12,15 @@ function manager() {
 }
 
 describe("ExclusiveDeviceSessionManager", () => {
-  it("returns the same lease when one owner retries acquisition", () => {
+  it("rejects re-entrant acquisition even when the owner id is reused", () => {
     const sessions = manager();
     const owner = { id: "operation-a", kind: "WORKFLOW" } as const;
     const first = sessions.acquire({ deviceId: "device-a", owner });
-    const second = sessions.acquire({ deviceId: "device-a", owner });
 
-    expect(second).toBe(first);
+    expect(() => sessions.acquire({ deviceId: "device-a", owner })).toThrow(
+      CoreOperationError,
+    );
+    expect(sessions.current("device-a")).toBe(first);
   });
 
   it("prevents a second module from owning the same physical session", () => {

@@ -6,6 +6,7 @@ import {
 } from "@elrs-easy/device";
 import {
   CoreOperationError,
+  type CancellationSignal,
   type DeviceIdentityResolution,
   type DeviceSnapshot,
   type OperationError,
@@ -14,6 +15,7 @@ import {
 
 import {
   VerifiedOperationMachine,
+  type OperationObserver,
   type WorkflowClock,
 } from "./operation-machine.js";
 
@@ -48,6 +50,19 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+/**
+ * Provider support is not sufficient: every provider is untrusted and may
+ * ignore cancellation. Check at the workflow boundary before and after each
+ * asynchronous provider call so stale results cannot be promoted to SUCCESS.
+ */
+function assertNotAborted(signal?: CancellationSignal): void {
+  if (signal?.aborted === true) {
+    const error = new Error("The discovery operation was cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
+}
+
 /** Connect → identify → resolve → display facts. This workflow cannot write. */
 export async function runReadOnlyDiscovery(input: {
   readonly operationId: string;
@@ -55,23 +70,41 @@ export async function runReadOnlyDiscovery(input: {
   readonly sessions: DeviceSessionManager;
   readonly catalog: TargetCatalog;
   readonly clock?: WorkflowClock;
-  readonly signal?: AbortSignal;
+  readonly observer?: OperationObserver<ReadOnlyDiscoveryResult>;
+  readonly signal?: CancellationSignal;
 }): Promise<OperationRecord<ReadOnlyDiscoveryResult>> {
+  // Capture the invocation boundary before the machine constructor notifies an
+  // observer and before any provider await. A caller mutating the input object
+  // must not be able to swap safety-critical collaborators mid-operation.
+  const operationId = input.operationId;
+  const provider = input.provider;
+  const providerId = provider.id;
+  const sessions = input.sessions;
+  const catalog = input.catalog;
+  const clock = input.clock;
+  const observer = input.observer;
+  const signal = input.signal;
+
   const machine = new VerifiedOperationMachine<ReadOnlyDiscoveryResult>({
-    id: input.operationId,
+    id: operationId,
     type: "READ_ONLY_DISCOVERY",
-    ...(input.clock === undefined ? {} : { clock: input.clock }),
+    ...(clock === undefined ? {} : { clock }),
+    ...(observer === undefined ? {} : { observer }),
   });
 
   try {
+    assertNotAborted(signal);
     machine.transition("PREPARING");
+    assertNotAborted(signal);
     machine.transition("DISCOVERING");
-    const descriptors = await input.provider.discover(input.signal);
+    assertNotAborted(signal);
+    const descriptors = await provider.discover(signal);
+    assertNotAborted(signal);
     if (descriptors.length === 0) {
       return machine.fail({
         code: "DEVICE_NOT_FOUND",
         reason: "DISCOVERY_RETURNED_NO_DEVICES",
-        details: { providerId: input.provider.id },
+        details: { providerId },
         retryable: true,
       });
     }
@@ -80,22 +113,20 @@ export async function runReadOnlyDiscovery(input: {
     const devices: DiscoveredDevice[] = [];
 
     for (const descriptor of descriptors) {
-      const session = input.sessions.acquire({
+      assertNotAborted(signal);
+      const session = sessions.acquire({
         deviceId: descriptor.id,
-        owner: { id: input.operationId, kind: "WORKFLOW" },
+        owner: { id: operationId, kind: "WORKFLOW" },
       });
       try {
-        input.sessions.assertHeld(session);
-        const evidence = await input.provider.readIdentity(
-          session,
-          input.signal,
-        );
-        input.sessions.assertHeld(session);
-        const capabilities = await input.provider.readCapabilities(
-          session,
-          input.signal,
-        );
-        const candidates = input.catalog.match(evidence);
+        sessions.assertHeld(session);
+        assertNotAborted(signal);
+        const evidence = await provider.readIdentity(session, signal);
+        assertNotAborted(signal);
+        sessions.assertHeld(session);
+        const capabilities = await provider.readCapabilities(session, signal);
+        assertNotAborted(signal);
+        const candidates = catalog.match(evidence);
         devices.push(
           Object.freeze({
             snapshot: Object.freeze({
@@ -107,16 +138,18 @@ export async function runReadOnlyDiscovery(input: {
           }),
         );
       } finally {
-        input.sessions.release(session);
+        sessions.release(session);
       }
     }
 
+    assertNotAborted(signal);
     machine.transition("VERIFYING", {
       messageCode: "DISCOVERY_FACTS_COLLECTED",
     });
+    assertNotAborted(signal);
     return machine.verificationSucceeded(
       Object.freeze({
-        providerId: input.provider.id,
+        providerId,
         devices: Object.freeze(devices),
       }),
     );

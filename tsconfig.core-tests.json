@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ES2023"],
     "types": []
   },
   "include": [
@@ -8,6 +9,7 @@
     "packages/device/src/**/*.ts",
     "packages/compatibility/src/**/*.ts",
     "packages/workflows/src/**/*.ts",
-    "packages/platform-mock/src/**/*.ts"
+    "packages/platform-mock/src/**/*.ts",
+    "packages/i18n/src/**/*.ts"
   ]
 }

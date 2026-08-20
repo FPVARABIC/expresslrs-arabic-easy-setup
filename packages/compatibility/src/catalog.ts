@@ -67,7 +67,26 @@ export class InMemoryTargetCatalog implements TargetCatalog {
       if (byId.has(key)) {
         throw new TypeError(`Duplicate target id: ${definition.targetId}`);
       }
-      byId.set(key, Object.freeze({ ...definition }));
+      const identity = Object.freeze(
+        Object.fromEntries(
+          Object.entries(definition.identity).map(([claim, values]) => [
+            claim,
+            Object.freeze([...values]),
+          ]),
+        ),
+      );
+      byId.set(
+        key,
+        Object.freeze({
+          ...definition,
+          identity,
+          capabilities: Object.freeze([...definition.capabilities]),
+          updateProviders: Object.freeze([...definition.updateProviders]),
+          supportedFirmwareMajors: Object.freeze([
+            ...definition.supportedFirmwareMajors,
+          ]),
+        }),
+      );
     }
     this.metadata = Object.freeze({ ...metadata });
     this.#definitions = byId;

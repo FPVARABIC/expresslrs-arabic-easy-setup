@@ -18,8 +18,10 @@ const systemClock: SessionClock = {
   now: () => new Date().toISOString(),
 };
 
-const randomIdFactory: SessionIdFactory = {
-  next: () => globalThis.crypto.randomUUID(),
+let systemSessionSequence = 0;
+const systemIdFactory: SessionIdFactory = {
+  next: () =>
+    `session-${Date.now().toString(36)}-${(++systemSessionSequence).toString(36)}`,
 };
 
 function sameOwner(left: SessionOwner, right: SessionOwner): boolean {
@@ -37,7 +39,7 @@ export class ExclusiveDeviceSessionManager implements DeviceSessionManager {
     readonly ids?: SessionIdFactory;
   }) {
     this.#clock = input?.clock ?? systemClock;
-    this.#ids = input?.ids ?? randomIdFactory;
+    this.#ids = input?.ids ?? systemIdFactory;
   }
 
   public acquire(input: {
@@ -51,12 +53,9 @@ export class ExclusiveDeviceSessionManager implements DeviceSessionManager {
 
     const current = this.#sessionsByDevice.get(deviceId);
     if (current !== undefined) {
-      if (sameOwner(current.owner, input.owner)) {
-        return current;
-      }
       throw new CoreOperationError({
         code: "DEVICE_BUSY",
-        reason: "DEVICE_SESSION_OWNED_BY_ANOTHER_OPERATION",
+        reason: "DEVICE_SESSION_ALREADY_OWNED",
         details: { deviceId },
         retryable: true,
       });

@@ -111,6 +111,27 @@ describe("resolveDeviceIdentity", () => {
     expect(result.confidence).toBe("HIGH_CONFIDENCE");
   });
 
+  it("fails ambiguous when a duplicate evidence id could be double-counted", () => {
+    const runtime = evidence({
+      id: "duplicate-target",
+      value: "fixture.rx.alpha",
+      domain: "runtime-firmware",
+    });
+    const bootloader = evidence({
+      id: "duplicate-target",
+      value: "fixture.rx.alpha",
+      domain: "bootloader",
+    });
+    const result = resolveDeviceIdentity({
+      evidence: [runtime, bootloader],
+      candidates: [candidate(["duplicate-target"])],
+    });
+
+    expect(result.confidence).toBe("AMBIGUOUS");
+    expect(result.selectedTargetId).toBeNull();
+    expect(result.reasons).toContain("DUPLICATE_EVIDENCE_IDS");
+  });
+
   it("fails ambiguous when evidence values or catalog matches conflict", () => {
     const runtime = evidence({
       id: "config-target",
