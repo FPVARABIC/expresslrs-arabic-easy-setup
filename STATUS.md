@@ -31,11 +31,12 @@
 - Production Core, Web, i18n, and the complete source/test structure pass TypeScript 6.0.3 checking.
 - All 25 Core cases and all 4 Web/i18n behaviours passed deterministic local compatibility runs.
 - Root CI/tooling configuration created; no publish/release action exists.
+- Draft PR #1 CI now reaches dependency installation; run #2 generated the reviewed bootstrap lockfile artifact and exposed the first source gate at formatting.
 
 ## In progress
 
-- Generate and review `pnpm-lock.yaml`, then run the official `pnpm check` toolchain. The first CI run can preserve a bootstrap lockfile artifact; all later runs become frozen automatically once it is committed.
-- Fix the first executable CI finding: skip dependency caching until `pnpm-lock.yaml` exists, then rerun Draft PR #1.
+- Add the exact CI-generated `pnpm-lock.yaml`, then make all later installs frozen.
+- Generate and review a Prettier patch in CI while still collecting lint, typecheck, test, and build findings in the same run.
 - Execute the real Vitest/React DOM suite and Vite production bundle after dependency installation.
 - Complete Mock workflow coverage required by the final Milestone 1 exit gate; this checkpoint is not an M1 completion claim.
 

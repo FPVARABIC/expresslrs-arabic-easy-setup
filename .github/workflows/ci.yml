@@ -69,5 +69,31 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: Run quality gates
-        run: pnpm check
+      - name: Check formatting
+        id: formatting
+        continue-on-error: true
+        run: pnpm format:check
+
+      - name: Generate formatter patch
+        if: steps.formatting.outcome == 'failure'
+        run: |
+          pnpm format
+          git diff --binary > prettier.patch
+
+      - name: Preserve formatter patch for review
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prettier-fix-${{ github.run_attempt }}
+          path: prettier.patch
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Run lint, typecheck, test, and build
+        run: pnpm lint && pnpm typecheck && pnpm test && pnpm build
+
+      - name: Enforce formatting gate
+        if: always() && steps.formatting.outcome == 'failure'
+        run: |
+          echo "::error::Formatting changes are required; review the prettier-fix artifact."
+          exit 1
