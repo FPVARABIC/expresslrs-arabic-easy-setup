@@ -42,7 +42,7 @@ describe("M3 Binding preview Web lab", () => {
     expect(document.documentElement).toHaveAttribute("lang", "en");
     expect(document.documentElement).toHaveAttribute("dir", "ltr");
     expect(
-      screen.getByRole("heading", { name: "Bind a new device", level: 1 }),
+      screen.getByRole("heading", { name: "Connect a new device", level: 1 }),
     ).toBeInTheDocument();
     expect(screen.getByText("SIMULATION_ONLY")).toBeInTheDocument();
   });
