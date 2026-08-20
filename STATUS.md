@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Date | 2026-08-20 |
-| Phase | Milestone 2A — Read-only real-device candidate |
+| Phase | Milestone 2A — Hardened read-only real-device candidate |
 | Local branch | `feat/read-only-device-foundation` |
 | Remote repository | `https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup`; public repository with Draft PR #1 |
 | Stable upstream | ExpressLRS 4.1.0 / `a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6` |
@@ -22,7 +22,7 @@
 - Reuse matrix, ADR set, Phase 0 exit review, and Mock-only Milestone 1 proposal completed.
 - No upstream/project Firmware source copied or modified.
 - Owner approved model-agnostic M1 Foundation and Cairo typography.
-- TypeScript workspace and seven independent packages created: Domain, Device, Compatibility, Workflows, Browser Platform, Mock Platform, and i18n (eight workspace projects including Web).
+- TypeScript workspace and eight independent packages created: Domain, Diagnostics, Device, Compatibility, Workflows, Browser Platform, Mock Platform, and i18n (nine workspace projects including Web).
 - Device identity resolution is evidence-based and requires independent trust domains for `CONFIRMED`.
 - Exclusive device-session ownership, fail-closed Compatibility, and verified-only operation success are implemented.
 - Read-only discovery handles confirmed, unknown, ambiguous, conflicting, disconnected, and cancelled synthetic cases.
@@ -51,12 +51,17 @@
 - The M2A parser requires a bounded JSON response and rebuilds only allowlisted device-reported facts. Raw response data, UID, Wi-Fi options, SSID, password, `lua_name`, and unknown fields do not cross the adapter boundary.
 - All Local HTTP facts remain `UNVALIDATED` in one self-reported trust domain. Web composition deliberately uses an empty Target Catalog, so the resulting identity remains `UNKNOWN` and cannot authorize Binding or update.
 - Device-session leases now use exact opaque-object ownership, while the Core boundary rebuilds and freezes descriptors, evidence, and capabilities supplied by providers.
-- The current local M2A candidate passes 261/261 Vitest cases across 20 files, TypeScript, ESLint with zero warnings, formatting, eight-project dependency boundaries, Markdown/Master Plan checks, and a production Web build. This is not Hardware evidence.
+- The Local HTTP transport now uses fixed 256 KiB storage, rejects empty or excessive chunks, enforces a strict JSON/UTF-8 boundary, and releases an origin only after normal completion or proven successful cleanup. A rejected, absent, accessor-backed, or otherwise unprovable cleanup keeps that origin fail-closed quarantined for the current JavaScript realm.
+- Provider-controlled error reasons/details, write receipts, verification diagnostics, reconnect descriptors, and attacker-controlled audit field names no longer cross Workflow/audit export boundaries without a Core-owned rebuild. Accessor-backed provider metadata is treated as absent rather than executed, and Audit output uses bounded counts and fixed categories.
+- A framework-independent Diagnostics package creates value-free, fixed-category support reports and rejects inconsistent success/reconnect claims.
+- The real-device UI now exposes honest Workflow progress, manual refresh/reconnect snapshot comparison, focus movement, connection guidance, and explicit safe support copy without polling or a live-connection claim.
+- A production `_headers` artifact and deterministic checker restrict CSP connections to self plus the three reviewed ExpressLRS origins and enforce the policy in source/build output.
+- The current local M2A candidate passes the complete quality gate: 332/332 Vitest cases across 22 files, 94.46% statement / 88.69% branch / 98.84% function / 94.41% line coverage, TypeScript, ESLint with zero warnings, formatting, nine-project dependency boundaries, 53 local links across 51 Markdown files, the Master Plan contract, production security-header source/build verification, and the Web production build. The frozen offline install passes all 272 lockfile entries, the license policy passes 248 package/version records, and the high-severity advisory audit finds no known vulnerability. This is not Hardware evidence.
 
 ## In progress
 
 - Review the isolated M2A implementation candidate and complete the still-pending M1 owner acceptance review.
-- Prepare the reference-hardware/browser matrix for TX and RX Local HTTP reads, disconnect/reconnect, Local Network Access, device-AP switching, and mobile behavior.
+- Execute the prepared reference-hardware/browser runbook and matrix for TX and RX Local HTTP reads, disconnect/reconnect, Local Network Access, device-AP switching, and mobile behavior.
 - Keep all Binding, configuration, reboot, update, Firmware, and RF paths disabled in the real-device adapter.
 
 ## Blocked
@@ -67,14 +72,14 @@
 - Real Binding/update verification: Synthetic contract proven; per-provider hardware proof pending.
 - Official 4.1.0 artifact Inputs: exact Targets/toolchain identity not fully known.
 - Performance hardware/controlled RF setup: not selected. This does not block Mock/Foundation.
-- Production CSP is documented but not deployed; it remains a trusted-hosting/Release blocker.
-- Official CI for the uncommitted M2A tree is pending separate Stage/Commit/Push authorization. The online advisory audit was not rerun locally; M2A added no external dependency and the frozen lockfile/license gates pass.
+- A reviewed CSP deployment artifact now exists, but the eventual production host must serve and verify the same response header; `_headers` compatibility alone is not deployed-host evidence.
+- Official CI for the hardened M2A branch is pending commit/push. This slice adds no external dependency, and the local online advisory audit is green.
 - The public repository does not yet publish a private vulnerability-reporting route. Non-sensitive Issues remain possible, but sensitive exploit details must not be posted publicly.
 
 ## Next
 
-- Conduct owner review of M1 evidence and the local M2A candidate.
-- Run the documented read-only hardware/browser matrix; record exact device, Firmware, browser, OS, field behavior, disconnect/reconnect, and privacy observations.
+- Commit and push the hardened M2A candidate, open its own Draft PR, and require green official CI.
+- Conduct owner review of M1 evidence and the M2A candidate.
+- Run the documented read-only Hardware/Browser runbook; record exact device, Firmware, browser, OS, field behavior, disconnect/reconnect, and privacy observations.
 - Keep the real Targets adapter empty/license-safe until upstream permission is resolved; never promote a self-reported Target alone.
 - Do not implement real hardware writes until reference hardware and provider verification exist.
-- Stage/commit/push only after separate explicit authorization for each action.

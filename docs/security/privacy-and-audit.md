@@ -40,9 +40,11 @@ The provider excludes by construction:
 - `lua_name` and other user-customizable identifiers;
 - unknown top-level, `settings`, `config`, or `options` fields.
 
-The sanitized snapshot is in memory only for one provider instance. The current
-real-device panel has no export action, analytics, cloud transport, storage key,
-or path into the separate Synthetic Binding/update lab.
+The sanitized snapshot is in memory only for one provider instance. The
+real-device panel has one explicit safe support-copy action, but no raw export,
+analytics, cloud transport, storage key, or path into the separate Synthetic
+Binding/update lab. The copied report contains fixed categories and state only,
+never reported device values.
 
 ## Data classes
 
@@ -95,12 +97,14 @@ Before clipboard/export/support use, the scrubber must:
 
 1. build a new object from an allowlist rather than mutate and forward the raw
    object;
-2. remove known secret/identifier field names case-insensitively;
+2. never enumerate provider-owned keys or execute their accessors; probe only a
+   fixed reviewed set of allowlisted keys and known sensitive aliases through
+   own data descriptors, excluding every unknown key;
 3. reject unexpected nested objects, binary data, URLs with credentials, and raw
    exception objects;
-4. never copy a sensitive value, replacement derived from it, or hash of it;
-   record only the field name in `redactedFields` so reviewers can see that a
-   class was removed without receiving its value;
+4. never copy a sensitive value, replacement derived from it, hash of it, or
+   attacker-controlled field name; publish only bounded redacted/excluded
+   counts and reviewed category constants;
 5. retain safe provenance fields needed to reproduce the issue: app/Core
    version, upstream SHA, synthetic/catalog revision, workflow stage, stable
    error code, and validation level;
@@ -110,6 +114,38 @@ Before clipboard/export/support use, the scrubber must:
 
 Logs must not infer that a field is safe because its name is unfamiliar. Unknown
 adapter detail is excluded by default.
+
+Provider-controlled `OperationError.reason` and `OperationError.details` are
+also replaced/stripped at Workflow boundaries. A provider cannot leak a token
+through exception text or by placing it under a normally allowlisted detail
+key; Core-owned code must select a fixed reason and rebuild any useful detail
+from its own validated values.
+
+Provider IDs, write/command receipts, reconnect descriptors, and verification
+results are untrusted too. Sensitive workflows inspect provider metadata and
+result fields only through own data descriptors, so accessor-backed properties
+are treated as absent rather than executed. Reconnect descriptors are rebuilt
+at the Core boundary. Verification values may be used only for fixed equality
+checks; provider-supplied reasons and observed Target/version/device values are
+not forwarded into operation records or Audit output.
+
+## Read-only support report
+
+The current real-device clipboard report has schema version `1` and type
+`READ_ONLY_DEVICE_DIAGNOSTIC`. It may contain only:
+
+- fixed operation outcome, confidence, error code, retryable flag, verification
+  flag, bounded attempt count, and reconnect category;
+- reviewed fact-category and workflow-stage constants;
+- fixed finding/recommendation identifiers and the explicit validation labels
+  `BUILD_TESTED` / Hardware validation `NONE`;
+- boolean privacy declarations that all raw values, raw field names, stable
+  identifiers, credentials, and application persistence are absent.
+
+It must not accept or emit a reported value, endpoint URL, timestamp, raw field
+name, operation/session/device ID, exception text, or automatic-fix claim.
+Runtime input is rebuilt and inconsistent success/reconnect combinations become
+a fail-closed result.
 
 ## Retention and deletion
 

@@ -22,8 +22,10 @@ ephemeral. Sanitized Local HTTP discovery snapshots are also ephemeral and do
 not register a storage key. The Browser request uses `cache: "no-store"`. The
 browser's ordinary HTTP cache for versioned static build assets is
 platform-managed and is not an application data store. Clipboard writes are
-explicit exports and remain subject to the privacy scrubber policy; the M2A
-real-device result currently has no clipboard/export action.
+explicit exports and remain subject to the privacy scrubber policy. The M2A
+real-device panel can copy only a fixed-category, value-free diagnostic report
+after a user action; it is generated in memory and does not register a storage
+key.
 
 ## Registration gate
 

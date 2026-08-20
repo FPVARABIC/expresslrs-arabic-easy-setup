@@ -77,8 +77,8 @@ method.
   approved Target catalog and cross-check.
 - The provider is model-agnostic because it parses the shared schema and does
   not branch on manufacturer/model names.
-- Hardware validation, reconnect behavior, mobile browsers, CSP deployment,
-  and Android remain explicit follow-up gates.
+- Hardware validation of reconnect behavior, mobile browsers, deployed-host CSP
+  verification, and Android remain explicit follow-up gates.
 - Missing half of the low/high band flag pair remains unknown; the adapter does
   not infer an exclusive band or emit a capability without evidence.
 

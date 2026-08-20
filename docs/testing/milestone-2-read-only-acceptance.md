@@ -1,7 +1,7 @@
 # Milestone 2A Read-only Candidate — Acceptance Evidence
 
-Status: **Implementation candidate complete locally; owner acceptance and
-Hardware validation pending**.
+Status: **Build-tested implementation candidate; owner acceptance, official CI,
+and Hardware validation pending**.
 
 This evidence covers only the first real Browser read path. It does not close
 the complete Milestone 2 hardware gate and does not authorize Binding,
@@ -37,17 +37,23 @@ scan, fallback endpoint, or write command.
 | No request before user intent | Web test asserts `fetch` is untouched on initial render | Passed |
 | Exact request boundary | Provider/Web tests assert fixed origins, literal `/config`, method, credentials, redirect, cache, and referrer policy | Passed |
 | Transport/body validation | Tests cover actual `Response`, status, redirect, JSON content type, content length, streamed size, malformed chunks, UTF-8, JSON, and schema | Passed |
+| Bounded work | Body storage is fixed at 256 KiB, chunks must be non-empty, the stream is capped at 4,096 chunks, and malformed UTF-8 is rejected | Passed |
 | Timeout and cancellation | Tests cover fetch timeout, hung-body timeout, caller cancellation during fetch/body, and stale Web completion | Passed |
-| Transport/session ownership | Same-origin provider instances serialize before Fetch, different origins remain independent, timeout/cancel release the guard, and the Web host shares stable endpoint sessions | Passed |
+| Transport/session ownership | Same-origin reads serialize before Fetch, different origins remain independent, and an origin is released only after normal completion or proven successful cleanup; rejected, absent, throwing, or otherwise unprovable cleanup stays fail-closed quarantined | Passed |
 | Minimum identity envelope | Target, Firmware version, and TX/RX role are required; optional safe fields may be absent | Passed |
 | Partial band flags | Missing half of the low/high pair remains unknown and emits no capability with empty provenance | Passed |
-| Privacy-negative matrix | UID, Wi-Fi options, SSID, password, `lua_name`, raw response, raw errors, unknown fields, and malicious control/Bidi text do not cross the boundary | Passed |
+| Privacy-negative matrix | UID, Wi-Fi options, SSID, password, `lua_name`, raw response, provider error reason/details, receipt/verification diagnostics, hostile field names/getters, unknown fields, and malicious control/Bidi text do not cross the boundary | Passed |
 | Trust clamp | Provider trust metadata is rebuilt by a Core policy; one Local HTTP trust domain remains `UNVALIDATED` | Passed |
 | Target safety | Empty real Target Catalog keeps identity `UNKNOWN`; no real Binding/update surface exists | Passed |
 | Session ownership | Exact opaque session lease, duplicate/non-connected rejection, release on failure/cancel, and forged-session cases | Passed |
 | UI separation | Real panel is visually/structurally separate from deterministic Mock Binding/update; real facts cannot populate the Mock workflows | Passed |
-| Arabic/English UX | RTL/LTR, explicit read, loading, cancel, failure/retry, safe result, unvalidated label, keyboard, and mobile/desktop shell tests | Passed |
+| Arabic/English UX | RTL/LTR, explicit read, progress, cancel, manual retry, snapshot/reconnect wording, safe support copy, focus movement, result, and unvalidated labels | Passed |
 | Retry semantics | Retry is offered for transient errors and withheld for non-retryable schema/provider failures | Passed |
+| Support diagnostics | Runtime input is rebuilt into fixed categories only; inconsistent success/reconnect claims fail closed and no value, raw field name, URL, or identifier can enter the report | Passed |
+| Browser security policy | A checked production `_headers` artifact limits `connect-src` to self plus the three reviewed origins and sets `base-uri`, `object-src`, and `frame-ancestors` to `none` without wildcard/unsafe script sources | Passed locally |
+
+The 360/1440 Web tests are component-shell smoke checks under jsdom. They do
+not execute a real layout engine and are not responsive-browser evidence.
 
 ## Local quality evidence
 
@@ -57,18 +63,22 @@ Executed from the candidate tree on 2026-08-20:
 Prettier format check: passed
 ESLint with zero warnings: passed
 TypeScript: passed
-Dependency boundaries: 8 workspace projects passed
+Dependency boundaries: 9 workspace projects passed
+Production browser security-header policy: passed in source and build output
 Markdown links and MASTER_PLAN contract: passed
-Vitest: 20 files, 261/261 tests passed
+Vitest: 22 files, 332/332 tests passed
 Production Web build: passed
 Frozen offline lockfile/policy verification: 272 entries passed
 Dependency license policy: 248 package/version records passed
+High-severity dependency advisory audit: no known vulnerabilities
+Coverage: 94.46% statements, 88.69% branches, 98.84% functions, 94.41% lines
 git diff --check: passed
 ```
 
-No new external package was added by M2A. The high-severity advisory audit and
-official CI must run again after the candidate is committed/pushed; prior green
-M1 CI is not evidence for this uncommitted tree.
+No new external package was added by this hardening slice. The local
+high-severity advisory audit found no known vulnerability. Official CI must run
+again after the candidate is committed/pushed; prior green M1 CI is not
+evidence for this candidate.
 
 ## Validation labels and limits
 
@@ -84,8 +94,10 @@ held. It does not confirm the reported Target or Hardware support.
 
 ## Hardware/browser acceptance still required
 
-Record the exact device, Target, ExpressLRS version/SHA, browser version, OS,
-network topology, and raw observations for at least:
+Use the dedicated
+[read-only Hardware/Browser runbook](milestone-2-hardware-browser-runbook.md)
+and record the exact device, reported Target, ExpressLRS version/SHA, browser
+version, OS, network topology, and sanitized observations for at least:
 
 - one reference TX and one reference RX;
 - AP IP, RX mDNS, and TX mDNS paths where applicable;
@@ -94,8 +106,8 @@ network topology, and raw observations for at least:
   behavior on each candidate desktop/mobile browser;
 - cable/network loss, request timeout, cancellation, tab close, sleep, device
   leaving Wi-Fi mode, and reconnect;
-- confirmation that UID, credentials, raw bodies, and identifiers do not enter
-  UI, logs, clipboard, storage, or reports.
+- confirmation that UID, credentials, raw bodies, raw field names, and stable
+  identifiers do not enter UI, logs, clipboard, storage, or reports.
 
 Only reviewed matrix rows may later receive `HARDWARE_TESTED`; success on one
 device must not become a general ExpressLRS support claim.

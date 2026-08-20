@@ -38,6 +38,7 @@ apps/web                 واجهة عربية RTL بخط Cairo
 packages/domain          الحقائق والأخطاء وحالات العمليات
 packages/device          الأدلة، حل الهوية، وملكية Device Session
 packages/compatibility   Target Catalog قابل للحقن وقرارات Fail-closed
+packages/diagnostics     تقارير دعم ثابتة الفئات وخالية من قيم الجهاز
 packages/workflows       Discovery وEasy Binding وUpdate State Machines وModule API
 packages/platform-browser  موفر Local HTTP للقراءة فقط دون أي write API
 packages/platform-mock   أجهزة/Providers Synthetic ومصفوفة فشل واستعادة
@@ -46,7 +47,7 @@ packages/i18n            العربية وEnglish fallback وربط الأخطا
 
 الموديلات ليست شروطًا داخل الواجهة أو الـCore. يضيف Adapter أدلة الجهاز، ويطابقها Catalog مثبت الإصدار، ثم يقرر Core مستوى الثقة والقدرات. توجد الآن قراءة حقيقية تجريبية منفصلة عن مختبر Mock؛ حقائق `/config` ذاتية الإبلاغ و`UNVALIDATED`، ولا تدخل مسارات Binding/Update التجريبية ولا تؤكد Target أو دعم جهاز تجاري بعينه.
 
-المسار الحقيقي الحالي لا يفحص الشبكة تلقائيًا ولا يقرأ إلا من ثلاثة عناوين ExpressLRS محلية مثبتة. ويستبعد الاستجابة الخام وUID وخيارات Wi-Fi وSSID وكلمة المرور قبل عبور البيانات إلى Core. لا توجد كتابة أو إعادة تشغيل أو Binding أو Firmware update في هذا المسار.
+المسار الحقيقي الحالي لا يفحص الشبكة تلقائيًا ولا يقرأ إلا من ثلاثة عناوين ExpressLRS محلية مثبتة. ويستبعد الاستجابة الخام وUID وخيارات Wi-Fi وSSID وكلمة المرور قبل عبور البيانات إلى Core. ويعرض تقدّمًا ولقطات قراءة يدوية، ويمكنه نسخ تقرير دعم ثابت الفئات بلا قيم الجهاز. لا توجد كتابة أو إعادة تشغيل أو Binding أو Firmware update في هذا المسار.
 
 الـlockfile مثبت. بوابة التطوير المطلوبة هي:
 
