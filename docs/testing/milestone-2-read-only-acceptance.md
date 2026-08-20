@@ -1,7 +1,7 @@
 # Milestone 2A Read-only Candidate — Acceptance Evidence
 
-Status: **Build-tested implementation candidate; owner acceptance, official CI,
-and Hardware validation pending**.
+Status: **Build-tested implementation candidate with green official CI; owner
+acceptance and Hardware validation pending**.
 
 This evidence covers only the first real Browser read path. It does not close
 the complete Milestone 2 hardware gate and does not authorize Binding,
@@ -76,9 +76,12 @@ git diff --check: passed
 ```
 
 No new external package was added by this hardening slice. The local
-high-severity advisory audit found no known vulnerability. Official CI must run
-again after the candidate is committed/pushed; prior green M1 CI is not
-evidence for this candidate.
+high-severity advisory audit found no known vulnerability. Candidate commit
+`79eb37e7298b0e244f0bedf368e84dc1c684c5c4` passed the complete official gate
+in [GitHub Actions run #8](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409948903)
+and the PR-triggered [run #9](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409978636).
+These runs are evidence only for that immutable candidate; later source changes
+require their own run.
 
 ## Validation labels and limits
 
