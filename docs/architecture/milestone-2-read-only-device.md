@@ -1,7 +1,7 @@
 # Milestone 2A — Read-only Real Device Candidate
 
-Status: **Build-tested implementation candidate; owner acceptance, official CI,
-and hardware validation pending**.
+Status: **Build-tested implementation candidate with green official CI; owner
+acceptance and hardware validation pending**.
 
 This slice is intentionally narrower than the complete Milestone 2 gate. It
 proves a first real browser connection without granting write authority.
