@@ -1,8 +1,11 @@
 import { ar } from "./locales/ar";
 import { en } from "./locales/en";
 import type { MessageKey } from "./locales/en";
+import type { OperationErrorCode } from "@elrs-easy/domain";
+import { operationErrorMessageKeys } from "./errors";
 
 export type { MessageKey } from "./locales/en";
+export { operationErrorMessageKeys } from "./errors";
 export type Locale = "ar" | "en";
 export type Direction = "rtl" | "ltr";
 export type TranslationParameters = Readonly<Record<string, string | number>>;
@@ -39,4 +42,11 @@ export function translate(
 export function createTranslator(locale: Locale) {
   return (key: MessageKey, parameters?: TranslationParameters): string =>
     translate(locale, key, parameters);
+}
+
+export function translateOperationError(
+  locale: Locale,
+  code: OperationErrorCode,
+): string {
+  return translate(locale, operationErrorMessageKeys[code]);
 }

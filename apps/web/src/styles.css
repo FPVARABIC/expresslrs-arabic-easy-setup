@@ -540,11 +540,20 @@ svg {
     background 180ms ease;
 }
 
-.task-card:hover,
+.task-card:not(:disabled):hover,
 .task-card.is-selected {
   transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--task-color), transparent 58%);
   background: linear-gradient(145deg, var(--task-soft), rgba(8, 18, 29, 0.74));
+}
+
+.task-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.task-card:disabled.is-selected {
+  transform: none;
 }
 
 .task-violet {
@@ -633,6 +642,39 @@ svg {
   margin: 0.15rem 0 0;
   color: var(--text-muted);
   font-size: 0.7rem;
+}
+
+.selection-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.confirmation-preview {
+  margin-block-start: 0.75rem;
+  padding-block-start: 0.7rem;
+  border-block-start: 1px solid rgba(65, 217, 231, 0.18);
+}
+
+.confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-block-start: 0.7rem;
+}
+
+.primary-button {
+  padding: 0.55rem 0.8rem;
+  border: 1px solid rgba(65, 217, 231, 0.45);
+  border-radius: 10px;
+  background: rgba(65, 217, 231, 0.18);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 750;
+}
+
+.primary-button:hover {
+  background: rgba(65, 217, 231, 0.26);
 }
 
 .device-heading-row {
@@ -1151,6 +1193,17 @@ svg {
 .secondary-button:hover {
   border-color: rgba(65, 217, 231, 0.35);
   color: var(--cyan);
+}
+
+.clipboard-status {
+  min-height: 1.2em;
+  margin: 0.55rem 0 0;
+  color: var(--mint);
+  font-size: 0.66rem;
+}
+
+.clipboard-status.is-error {
+  color: var(--danger);
 }
 
 .footer {

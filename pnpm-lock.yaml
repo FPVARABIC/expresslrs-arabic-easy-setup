@@ -75,9 +75,21 @@ importers:
 
   apps/web:
     dependencies:
+      '@elrs-easy/device':
+        specifier: workspace:*
+        version: link:../../packages/device
+      '@elrs-easy/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@elrs-easy/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@elrs-easy/platform-mock':
+        specifier: workspace:*
+        version: link:../../packages/platform-mock
+      '@elrs-easy/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
       '@fontsource-variable/cairo':
         specifier: 5.3.0
         version: 5.3.0
@@ -134,6 +146,10 @@ importers:
   packages/domain: {}
 
   packages/i18n:
+    dependencies:
+      '@elrs-easy/domain':
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       typescript:
         specifier: 6.0.3

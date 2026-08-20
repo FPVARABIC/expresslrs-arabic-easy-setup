@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { scrubAuditDetails } from "@elrs-easy/domain";
 import {
   createTranslator,
   defaultLocale,
   getDirection,
+  translateOperationError,
   type Locale,
   type MessageKey,
 } from "@elrs-easy/i18n";
@@ -17,8 +19,15 @@ import {
   type MockScenarioId,
   type MockScenarioViewModel,
 } from "./view-model/mockScenarios";
+import {
+  canRunSensitiveFoundationTask,
+  isSensitiveFoundationTask,
+  runFoundationDemo,
+  type FoundationDemoOutcome,
+} from "./view-model/foundationDemo";
 
 type TaskId = "bind" | "update" | "setup" | "diagnose";
+type CopyState = "idle" | "copied" | "failed";
 
 interface TaskDefinition {
   readonly id: TaskId;
@@ -69,11 +78,25 @@ export function App() {
   const [advanced, setAdvanced] = useState(false);
   const [scenarioId, setScenarioId] = useState<MockScenarioId>("rx24");
   const [selectedTask, setSelectedTask] = useState<TaskId | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [demoOutcome, setDemoOutcome] = useState<FoundationDemoOutcome | null>(
+    null,
+  );
+  const [demoRunning, setDemoRunning] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const demoRequestSequence = useRef(0);
   const t = useMemo(() => createTranslator(locale), [locale]);
   const scenario = getMockScenario(scenarioId);
   const selectedTaskDefinition = taskDefinitions.find(
     (task) => task.id === selectedTask,
+  );
+  const selectedTaskIsSensitive =
+    selectedTask !== null && isSensitiveFoundationTask(selectedTask);
+  const selectedTaskCanRun =
+    selectedTask === null ||
+    canRunSensitiveFoundationTask(selectedTask, scenarioId);
+  const sensitiveActionsAvailable = canRunSensitiveFoundationTask(
+    "bind",
+    scenarioId,
   );
   const direction = getDirection(locale);
 
@@ -84,19 +107,65 @@ export function App() {
   }, [direction, locale, t]);
 
   function selectScenario(nextScenario: MockScenarioId) {
+    demoRequestSequence.current += 1;
     setScenarioId(nextScenario);
     setSelectedTask(null);
-    setCopied(false);
+    setDemoOutcome(null);
+    setDemoRunning(false);
+    setCopyState("idle");
+  }
+
+  function selectTask(task: TaskId) {
+    demoRequestSequence.current += 1;
+    setSelectedTask(task);
+    setDemoOutcome(null);
+    setDemoRunning(false);
+  }
+
+  async function confirmSelectedTask() {
+    if (selectedTask === null || !isSensitiveFoundationTask(selectedTask)) {
+      return;
+    }
+
+    const requestId = ++demoRequestSequence.current;
+    setDemoOutcome(null);
+    setDemoRunning(true);
+    try {
+      const outcome = await runFoundationDemo(selectedTask, scenarioId, true);
+      if (demoRequestSequence.current === requestId) {
+        setDemoOutcome(outcome);
+      }
+    } finally {
+      if (demoRequestSequence.current === requestId) {
+        setDemoRunning(false);
+      }
+    }
+  }
+
+  function cancelSelectedTask() {
+    demoRequestSequence.current += 1;
+    setSelectedTask(null);
+    setDemoOutcome(null);
+    setDemoRunning(false);
   }
 
   async function copyTechnicalDetails() {
+    setCopyState("idle");
+    const scrubbed = scrubAuditDetails({
+      confidence: scenario.confidence,
+      ...(scenario.device?.targetId === null ||
+      scenario.device?.targetId === undefined
+        ? {}
+        : { targetId: scenario.device.targetId }),
+      providerId: "synthetic-foundation",
+      validationLevel: "SYNTHETIC",
+    });
     const details = JSON.stringify(
       {
-        scenario: scenario.id,
-        session: scenario.sessionId,
-        confidence: scenario.confidence,
-        device: scenario.device ?? null,
-        evidence: scenario.evidence,
+        schemaVersion: "1",
+        safeDetails: scrubbed.details,
+        redactedFields: scrubbed.redactedFields,
+        excludedFields: scrubbed.excludedFields,
       },
       null,
       2,
@@ -104,16 +173,16 @@ export function App() {
 
     try {
       await navigator.clipboard.writeText(details);
-      setCopied(true);
+      setCopyState("copied");
     } catch {
-      setCopied(false);
+      setCopyState("failed");
     }
   }
 
   return (
     <div className="app-shell" dir={direction}>
       <a className="skip-link" href="#main-content">
-        {locale === "ar" ? "انتقل إلى المحتوى" : "Skip to content"}
+        {t("navigation.skip")}
       </a>
 
       <div className="ambient ambient-one" aria-hidden="true" />
@@ -197,7 +266,7 @@ export function App() {
               <h2 id="preview-heading">{t("home.mockLabel")}</h2>
               <p>{t("home.mockHelp")}</p>
             </div>
-            <span className="mock-badge">MOCK</span>
+            <span className="mock-badge">{t("status.mockBadge")}</span>
           </div>
 
           <div className="scenario-list" role="list">
@@ -233,39 +302,101 @@ export function App() {
             </div>
 
             <div className="task-grid">
-              {taskDefinitions.map((task) => (
-                <button
-                  key={task.id}
-                  className={`task-card task-${task.tone} ${selectedTask === task.id ? "is-selected" : ""}`}
-                  type="button"
-                  onClick={() => setSelectedTask(task.id)}
-                  aria-pressed={selectedTask === task.id}
-                >
-                  <span className="task-icon" aria-hidden="true">
-                    {task.icon}
-                  </span>
-                  <span className="task-content">
-                    <strong>{t(task.titleKey)}</strong>
-                    <span>{t(task.descriptionKey)}</span>
-                  </span>
-                  <span className="task-action">
-                    {t(task.actionKey)}
-                    <ArrowIcon />
-                  </span>
-                </button>
-              ))}
+              {taskDefinitions.map((task) => {
+                const blocked =
+                  isSensitiveFoundationTask(task.id) &&
+                  !canRunSensitiveFoundationTask(task.id, scenarioId);
+
+                return (
+                  <button
+                    key={task.id}
+                    className={`task-card task-${task.tone} ${selectedTask === task.id ? "is-selected" : ""} ${blocked ? "is-blocked" : ""}`}
+                    type="button"
+                    onClick={() => selectTask(task.id)}
+                    aria-pressed={selectedTask === task.id}
+                    aria-busy={selectedTask === task.id && demoRunning}
+                    disabled={blocked || demoRunning}
+                  >
+                    <span className="task-icon" aria-hidden="true">
+                      {task.icon}
+                    </span>
+                    <span className="task-content">
+                      <strong>{t(task.titleKey)}</strong>
+                      <span>{t(task.descriptionKey)}</span>
+                    </span>
+                    <span className="task-action">
+                      {blocked ? t("discovery.blocked") : t(task.actionKey)}
+                      {blocked ? <LockIcon /> : <ArrowIcon />}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {selectedTaskDefinition ? (
-              <div className="selection-notice" role="status">
+              <div className="selection-notice">
                 <span className="selection-check" aria-hidden="true">
                   <CheckIcon />
                 </span>
-                <div>
+                <div className="selection-copy">
                   <strong>
                     {t("task.selected")}: {t(selectedTaskDefinition.titleKey)}
                   </strong>
                   <p>{t("task.previewOnly")}</p>
+                  {!selectedTaskIsSensitive ? (
+                    <p role="status">{t("task.notImplemented")}</p>
+                  ) : demoOutcome === null && !demoRunning ? (
+                    <div className="confirmation-preview">
+                      <strong>{t("task.confirmTitle")}</strong>
+                      <p>
+                        {selectedTaskCanRun
+                          ? t("task.confirmDescription")
+                          : t("task.blocked")}
+                      </p>
+                      <div className="confirmation-actions">
+                        {selectedTaskCanRun ? (
+                          <button
+                            className="primary-button"
+                            type="button"
+                            onClick={() => void confirmSelectedTask()}
+                          >
+                            {t("task.confirmAction")}
+                          </button>
+                        ) : null}
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={cancelSelectedTask}
+                        >
+                          {t("task.cancelAction")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p role="status">
+                      {demoRunning
+                        ? t("task.mockRunning")
+                        : demoOutcome?.errorCode !== null &&
+                            demoOutcome?.errorCode !== undefined
+                          ? t("task.mockError", {
+                              state: demoOutcome.state,
+                              message: translateOperationError(
+                                locale,
+                                demoOutcome.errorCode,
+                              ),
+                            })
+                          : demoOutcome?.verificationPassed === true
+                            ? t("task.mockVerified", {
+                                state: demoOutcome.state,
+                                events: demoOutcome.auditEventCount,
+                              })
+                            : demoOutcome === null
+                              ? t("task.mockPending")
+                              : t("task.mockNotVerified", {
+                                  state: demoOutcome.state,
+                                })}
+                    </p>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -283,31 +414,23 @@ export function App() {
 
         <section
           className={
-            scenario.confidence === "ambiguous" ||
-            scenario.confidence === "unknown"
+            !sensitiveActionsAvailable
               ? "safety-callout is-blocked"
               : "safety-callout"
           }
           aria-live="polite"
         >
           <span className="safety-callout-icon" aria-hidden="true">
-            {scenario.confidence === "ambiguous" ||
-            scenario.confidence === "unknown" ? (
-              <LockIcon />
-            ) : (
-              <ShieldCheckIcon />
-            )}
+            {!sensitiveActionsAvailable ? <LockIcon /> : <ShieldCheckIcon />}
           </span>
           <div>
             <h2>
-              {scenario.confidence === "ambiguous" ||
-              scenario.confidence === "unknown"
+              {!sensitiveActionsAvailable
                 ? t("safety.blockedTitle")
                 : t("safety.readOnlyTitle")}
             </h2>
             <p>
-              {scenario.confidence === "ambiguous" ||
-              scenario.confidence === "unknown"
+              {!sensitiveActionsAvailable
                 ? t("safety.blockedDescription")
                 : t("safety.readOnlyDescription")}
             </p>
@@ -341,15 +464,15 @@ export function App() {
               <dl className="technical-grid">
                 <TechnicalDatum
                   label={t("advanced.session")}
-                  value={scenario.sessionId}
+                  value={t(scenario.sessionDisplayKey)}
                 />
                 <TechnicalDatum
                   label={t("advanced.owner")}
-                  value="@elrs-easy/platform-mock"
+                  value={t("advanced.ownerValue")}
                 />
                 <TechnicalDatum
                   label={t("advanced.provider")}
-                  value="DeterministicMockProvider"
+                  value={t("advanced.providerValue")}
                 />
                 <TechnicalDatum
                   label={t("advanced.operation")}
@@ -360,8 +483,10 @@ export function App() {
                 <div>
                   <strong>{t("advanced.log")}</strong>
                   <p>
-                    <code>INFO</code> {t("advanced.logEntry")}
+                    <code>{t("advanced.logLevel")}</code>{" "}
+                    {t("advanced.logEntry")}
                   </p>
+                  <p>{t("advanced.exportDescription")}</p>
                 </div>
                 <button
                   className="secondary-button"
@@ -369,9 +494,22 @@ export function App() {
                   onClick={() => void copyTechnicalDetails()}
                 >
                   <CopyIcon />
-                  {copied ? t("advanced.copied") : t("advanced.copy")}
+                  {copyState === "copied"
+                    ? t("advanced.copied")
+                    : t("advanced.copy")}
                 </button>
               </div>
+              {copyState !== "idle" ? (
+                <p
+                  className={`clipboard-status ${copyState === "failed" ? "is-error" : ""}`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {copyState === "failed"
+                    ? t("advanced.copyFailed")
+                    : t("advanced.copied")}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </section>
@@ -432,15 +570,22 @@ function DeviceOverview({
                   ? t("device.receiver")
                   : t("device.transmitter")}
               </span>
-              <h3>{device.model}</h3>
-              <p>{device.manufacturer}</p>
+              <h3>{t(device.modelKey)}</h3>
+              <p>{t(device.manufacturerKey)}</p>
             </div>
           </div>
 
           <dl className="device-facts">
-            <DeviceFact label={t("device.target")} value={device.target} mono />
-            <DeviceFact label={t("device.firmware")} value={device.firmware} />
-            <DeviceFact label={t("device.band")} value={device.band} />
+            <DeviceFact
+              label={t("device.target")}
+              value={t(device.targetKey)}
+              mono
+            />
+            <DeviceFact
+              label={t("device.firmware")}
+              value={t(device.firmwareKey)}
+            />
+            <DeviceFact label={t("device.band")} value={t(device.bandKey)} />
           </dl>
 
           <ConfidenceCard confidence={scenario.confidence} t={t} />
@@ -625,7 +770,7 @@ function EvidencePanel({
                     ? t(sourceLabels[evidence.source])
                     : evidence.source}
                 </span>
-                <strong dir="auto">{evidence.value}</strong>
+                <strong dir="auto">{t(evidence.valueKey)}</strong>
               </div>
               <span className={`strength-badge strength-${evidence.strength}`}>
                 {t(strengthLabels[evidence.strength])}

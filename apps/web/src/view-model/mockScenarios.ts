@@ -1,3 +1,5 @@
+import type { MessageKey } from "@elrs-easy/i18n";
+
 export type DetectionConfidence =
   "confirmed" | "high" | "ambiguous" | "unknown";
 export type ConnectionState = "connected" | "reconnecting" | "disconnected";
@@ -9,7 +11,7 @@ export type EvidenceStrength = "strong" | "supporting" | "weak";
 export interface DeviceEvidenceViewModel {
   readonly id: string;
   readonly source: EvidenceSource;
-  readonly value: string;
+  readonly valueKey: MessageKey;
   readonly strength: EvidenceStrength;
 }
 
@@ -20,28 +22,24 @@ export interface DiscoveryStepViewModel {
 
 export interface DeviceViewModel {
   readonly kind: DeviceKind;
-  readonly manufacturer: string;
-  readonly model: string;
-  readonly target: string;
-  readonly firmware: string;
-  readonly band: string;
+  readonly manufacturerKey: MessageKey;
+  readonly modelKey: MessageKey;
+  /** Machine-readable synthetic Target; null means no safe resolution. */
+  readonly targetId: string | null;
+  readonly targetKey: MessageKey;
+  readonly firmwareKey: MessageKey;
+  readonly bandKey: MessageKey;
   readonly connection: ConnectionState;
 }
 
 export interface MockScenarioViewModel {
   readonly id: MockScenarioId;
-  readonly labelKey:
-    | "scenario.disconnected"
-    | "scenario.rx24"
-    | "scenario.txSubGhz"
-    | "scenario.dualBand"
-    | "scenario.ambiguous"
-    | "scenario.reconnecting";
+  readonly labelKey: MessageKey;
   readonly confidence: DetectionConfidence;
   readonly device?: DeviceViewModel;
   readonly steps: readonly DiscoveryStepViewModel[];
   readonly evidence: readonly DeviceEvidenceViewModel[];
-  readonly sessionId: string;
+  readonly sessionDisplayKey: MessageKey;
 }
 
 export type MockScenarioId =
@@ -65,12 +63,13 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
     labelKey: "scenario.rx24",
     confidence: "confirmed",
     device: {
-      kind: "receiver",
-      manufacturer: "Synthetic fixture",
-      model: "RX Alpha",
-      target: "fixture.rx.alpha-2g4",
-      firmware: "ExpressLRS 4.1.0",
-      band: "2.4 GHz",
+      kind: "transmitter",
+      manufacturerKey: "scenarioValue.manufacturer.synthetic",
+      modelKey: "scenarioValue.model.txAlpha2g4",
+      targetId: "fixture.tx.alpha-2g4",
+      targetKey: "scenarioValue.target.txAlpha2g4",
+      firmwareKey: "scenarioValue.firmware.v410",
+      bandKey: "scenarioValue.band.2g4",
       connection: "connected",
     },
     steps: completeSteps,
@@ -78,29 +77,30 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       {
         id: "runtime-target",
         source: "runtime",
-        value: "fixture.rx.alpha-2g4",
+        valueKey: "scenarioValue.target.txAlpha2g4",
         strength: "strong",
       },
       {
         id: "mdns-type",
         source: "mdns",
-        value: "type=RX · version=4.1.0",
+        valueKey: "scenarioValue.evidence.txVersion410",
         strength: "supporting",
       },
     ],
-    sessionId: "MOCK-RX24-7F3A",
+    sessionDisplayKey: "scenarioValue.session.rx24",
   },
   {
     id: "tx-sub-ghz",
     labelKey: "scenario.txSubGhz",
     confidence: "confirmed",
     device: {
-      kind: "transmitter",
-      manufacturer: "Synthetic fixture",
-      model: "TX Beta",
-      target: "fixture.tx.beta-subghz",
-      firmware: "ExpressLRS 4.1.0",
-      band: "Sub-GHz · 868/915 MHz",
+      kind: "receiver",
+      manufacturerKey: "scenarioValue.manufacturer.synthetic",
+      modelKey: "scenarioValue.model.rxBetaSubGhz",
+      targetId: "fixture.rx.beta-subghz",
+      targetKey: "scenarioValue.target.rxBetaSubGhz",
+      firmwareKey: "scenarioValue.firmware.v410",
+      bandKey: "scenarioValue.band.subGhz",
       connection: "connected",
     },
     steps: completeSteps,
@@ -108,47 +108,48 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       {
         id: "runtime-target",
         source: "runtime",
-        value: "fixture.tx.beta-subghz",
+        valueKey: "scenarioValue.target.rxBetaSubGhz",
         strength: "strong",
       },
       {
         id: "catalog-radio",
         source: "catalog",
-        value: "SX127x · TX",
+        valueKey: "scenarioValue.evidence.subGhzRx",
         strength: "supporting",
       },
     ],
-    sessionId: "MOCK-TXSG-04C1",
+    sessionDisplayKey: "scenarioValue.session.txSubGhz",
   },
   {
     id: "dual-band",
     labelKey: "scenario.dualBand",
-    confidence: "high",
+    confidence: "confirmed",
     device: {
-      kind: "receiver",
-      manufacturer: "Generic fixture",
-      model: "LR1121 Dual RX",
-      target: "LR1121 Dual-Band RX",
-      firmware: "ExpressLRS 4.1.0",
-      band: "2.4 GHz + Sub-GHz",
+      kind: "transmitter",
+      manufacturerKey: "scenarioValue.manufacturer.synthetic",
+      modelKey: "scenarioValue.model.txGammaDual",
+      targetId: "fixture.tx.gamma-dual",
+      targetKey: "scenarioValue.target.txGammaDual",
+      firmwareKey: "scenarioValue.firmware.v410",
+      bandKey: "scenarioValue.band.dual",
       connection: "connected",
     },
-    steps: [
-      { id: "discover", state: "complete" },
-      { id: "identify", state: "complete" },
-      { id: "crossCheck", state: "active" },
-      { id: "ready", state: "pending" },
-    ],
+    steps: completeSteps,
     evidence: [
       {
         id: "runtime-radio",
         source: "runtime",
-        value: "LR1121 · dual-band",
+        valueKey: "scenarioValue.evidence.lr1121Dual",
         strength: "strong",
       },
-      { id: "usb-mcu", source: "usb", value: "ESP32-S3", strength: "weak" },
+      {
+        id: "catalog-target",
+        source: "catalog",
+        valueKey: "scenarioValue.target.txGammaDual",
+        strength: "strong",
+      },
     ],
-    sessionId: "MOCK-DUAL-E221",
+    sessionDisplayKey: "scenarioValue.session.dualBand",
   },
   {
     id: "ambiguous",
@@ -156,11 +157,12 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
     confidence: "ambiguous",
     device: {
       kind: "receiver",
-      manufacturer: "Not confirmed",
-      model: "ESP8285 receiver",
-      target: "2 possible targets",
-      firmware: "ExpressLRS 3.5.3",
-      band: "2.4 GHz",
+      manufacturerKey: "scenarioValue.manufacturer.unconfirmed",
+      modelKey: "scenarioValue.model.esp8285Receiver",
+      targetId: null,
+      targetKey: "scenarioValue.target.ambiguous",
+      firmwareKey: "scenarioValue.firmware.v353",
+      bandKey: "scenarioValue.band.2g4",
       connection: "connected",
     },
     steps: [
@@ -170,15 +172,20 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       { id: "ready", state: "blocked" },
     ],
     evidence: [
-      { id: "usb-mcu", source: "usb", value: "ESP8285", strength: "weak" },
+      {
+        id: "usb-mcu",
+        source: "usb",
+        valueKey: "scenarioValue.evidence.esp8285",
+        strength: "weak",
+      },
       {
         id: "catalog-candidates",
         source: "catalog",
-        value: "Candidate A · Candidate B",
+        valueKey: "scenarioValue.evidence.ambiguousCandidates",
         strength: "supporting",
       },
     ],
-    sessionId: "MOCK-AMB-912D",
+    sessionDisplayKey: "scenarioValue.session.ambiguous",
   },
   {
     id: "reconnecting",
@@ -186,11 +193,12 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
     confidence: "confirmed",
     device: {
       kind: "receiver",
-      manufacturer: "Synthetic fixture",
-      model: "RX Reconnect",
-      target: "fixture.rx.reconnect-2g4",
-      firmware: "ExpressLRS 4.1.0",
-      band: "2.4 GHz",
+      manufacturerKey: "scenarioValue.manufacturer.synthetic",
+      modelKey: "scenarioValue.model.rxReconnect",
+      targetId: "fixture.rx.beta-subghz",
+      targetKey: "scenarioValue.target.rxBetaSubGhz",
+      firmwareKey: "scenarioValue.firmware.v410",
+      bandKey: "scenarioValue.band.subGhz",
       connection: "reconnecting",
     },
     steps: [
@@ -203,17 +211,17 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       {
         id: "runtime-target",
         source: "runtime",
-        value: "fixture.rx.reconnect-2g4",
+        valueKey: "scenarioValue.target.rxBetaSubGhz",
         strength: "strong",
       },
       {
         id: "reconnect-wait",
         source: "mdns",
-        value: "Awaiting the same device session",
+        valueKey: "scenarioValue.evidence.awaitSameSession",
         strength: "supporting",
       },
     ],
-    sessionId: "MOCK-RECON-33E8",
+    sessionDisplayKey: "scenarioValue.session.reconnecting",
   },
   {
     id: "disconnected",
@@ -226,7 +234,7 @@ export const mockScenarios: readonly MockScenarioViewModel[] = [
       { id: "ready", state: "pending" },
     ],
     evidence: [],
-    sessionId: "NO-SESSION",
+    sessionDisplayKey: "scenarioValue.session.none",
   },
 ];
 
