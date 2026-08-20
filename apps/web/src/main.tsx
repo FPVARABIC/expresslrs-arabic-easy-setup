@@ -5,7 +5,11 @@ import { defaultLocale, getDirection } from "@elrs-easy/i18n";
 import { App } from "./App";
 import { BindingPreviewLab } from "./BindingPreviewLab";
 import { FirmwarePreviewLab } from "./FirmwarePreviewLab";
+import { SoftwareLabIndex } from "./SoftwareLabIndex";
+import { SoftwareLabLauncher } from "./SoftwareLabLauncher";
+import { resolveApplicationView } from "./view-model/applicationView";
 import "./styles.css";
+import "./software-lab-navigation.css";
 
 document.documentElement.lang = defaultLocale;
 document.documentElement.dir = getDirection(defaultLocale);
@@ -16,14 +20,19 @@ if (!root) {
   throw new Error("Application root element is missing");
 }
 
-const selectedView = new URLSearchParams(window.location.search).get("view");
+const selectedView = resolveApplicationView(window.location.search);
 const selectedApplication =
-  selectedView === "binding-preview" ? (
+  selectedView === "SOFTWARE_LABS" ? (
+    <SoftwareLabIndex />
+  ) : selectedView === "BINDING_PREVIEW" ? (
     <BindingPreviewLab />
-  ) : selectedView === "firmware-preview" ? (
+  ) : selectedView === "FIRMWARE_PREVIEW" ? (
     <FirmwarePreviewLab />
   ) : (
-    <App />
+    <>
+      <App />
+      <SoftwareLabLauncher />
+    </>
   );
 
 createRoot(root).render(<StrictMode>{selectedApplication}</StrictMode>);
