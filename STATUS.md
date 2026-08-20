@@ -3,14 +3,16 @@
 | Field | Value |
 | --- | --- |
 | Date | 2026-08-20 |
-| Current phase | Milestone 3 — Preview-bound Easy Binding simulation |
-| Current branch | `feat/m3-binding-preview-simulation` |
-| Current review | [Draft PR #4](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/pull/4), stacked on M2A [Draft PR #3](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/pull/3) |
+| Canonical repository | `FPVARABIC/expresslrs-arabic-easy-setup` |
+| Current phase | Milestone 4 — Provenance-bound Firmware Update simulation |
+| Current branch | `feat/m4-firmware-update-preview-simulation` |
+| Current review | [Draft PR #5](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/5), stacked on M3 [Draft PR #4](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/4) and M2A [Draft PR #3](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/3) |
 | Stable upstream | ExpressLRS 4.1.0 / `a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6` |
 | Development reference | `73ce820ba51437f73f31686233b607c58e188e7b` |
 | Hardware validation | **None; explicitly deferred by the owner** |
-| Real-device writes | **Disabled** |
-| Firmware modifications | None |
+| Physical writes | **Disabled** |
+| Real Firmware artifact | **None** |
+| Firmware source modifications | None |
 | Performance claims | None |
 | Current validation | `CODE_REVIEWED`, `BUILD_TESTED`, `MOCK_EXERCISED`, `SIMULATION_ONLY` |
 
@@ -51,31 +53,66 @@ checkpoints. This file is the current operational snapshot.
 
 ### Milestone 3 software-only Binding candidate
 
-- `BindingProvider` currently admits only `SYNTHETIC_ONLY` execution authority.
-- A read-only Core preview now declares the exact Synthetic Target, provider,
+- `BindingProvider` admits only `SYNTHETIC_ONLY` execution authority.
+- A read-only Core preview declares the exact Synthetic Target, provider,
   device, catalog digest, operation effect, verification requirements, and
   fixed blockers.
-- Confirmation is unavailable unless the descriptor is connected, identity is
-  confirmed, the catalog and Target are approved, guided Binding is declared,
-  runtime capability evidence exists, and authority is Synthetic.
-- Approval is immutable and bound to operation, preview, provider, device,
-  Target, catalog digest, authority, and canonical UTC timestamp.
-- Immediately before execution, Core re-reads live identity/capabilities,
-  rebuilds the preview, and compares every approval field. Stale, altered,
-  malformed, or accessor-backed approval data fails before any Binding command.
-- Command completion is still not success. The same device must reconnect, the
-  same Target must be re-identified, and `LINK_ESTABLISHED` must be verified.
-- An isolated Arabic-first Web lab at `?view=binding-preview` exercises the same
-  contract using only Mock/Synthetic providers and no network request.
-- M3 code checkpoint
-  `eb902b521110a87609a18635919bc056b558450e` passed official
-  [GitHub Actions run #17](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32413640550):
-  25 test files, 350/350 tests, formatting, ESLint, TypeScript, nine-package
+- Approval is bound to operation, preview, provider, device, Target, catalog,
+  authority, and canonical UTC timestamp.
+- Core re-reads live identity/capabilities and rebuilds the preview before any
+  Synthetic Binding command.
+- Success still requires same-device reconnect, same-Target re-identification,
+  and `LINK_ESTABLISHED` verification.
+- The isolated Arabic-first Web lab at `?view=binding-preview` uses only
+  Mock/Synthetic providers and no network request.
+- M3 documented head
+  `d66fce582620a21700ef69febb4b2160f6083157` passed official GitHub Actions run
+  #18 with 350/350 tests and all build, dependency, license, security, and
+  documentation gates green.
+
+### Milestone 4 software-only Firmware Update candidate
+
+- `FirmwareUpdateProvider` admits only `SYNTHETIC_ONLY` execution authority.
+- Artifact descriptors and `ArtifactProvenance` are rebuilt through a safe
+  own-data-property boundary with bounded values, strict SHA formats, and a
+  canonical UTC build timestamp.
+- Provenance Target and artifact SHA-256 must bind the exact artifact before
+  device reads.
+- Preview preparation can validate only the deterministic Synthetic artifact
+  and read identity/capabilities; it cannot prepare, write, reboot, reconnect,
+  or verify Firmware.
+- Confirmation is unavailable unless authority is Synthetic, the descriptor is
+  connected, integrity is confirmed, identity is `CONFIRMED`, catalog/Target
+  are approved, update capability is evidence-backed, compatibility is
+  `COMPATIBLE`, and a complete verification plan exists.
+- The preview declares Firmware replacement, reboot, and link interruption
+  before confirmation.
+- Approval is bound to operation, provider, device, Target, catalog digest,
+  artifact Target/version/SHA-256, every provenance field, Synthetic authority,
+  and verification-plan ID.
+- Immediately before execution, Core revalidates the artifact, re-reads live
+  identity/capabilities, reevaluates compatibility, rebuilds the preview, and
+  compares every approval field. Stale, altered, malformed, or accessor-backed
+  data fails before prepare/write.
+- Write completion is not success. Reboot, same-device reconnect, same-Target
+  identity, and exact expected Firmware version remain mandatory.
+- The isolated Arabic-first Web lab at `?view=firmware-preview` offers
+  compatible, major-version-mismatch, and provenance-mismatch scenarios, uses
+  only Mock/Synthetic providers, and performs no network request.
+- The fixture is Synthetic metadata only. It contains no Firmware bytes and
+  records `synthetic-node-24-no-firmware-build` as its toolchain identity.
+- M4 code/Web checkpoint
+  `6033a44a48cd1c65431d58e57c03f3be23a0a7d4` passed official
+  [GitHub Actions run #22](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32417030765):
+  28 test files, 369/369 tests, formatting, ESLint, TypeScript, nine-package
   boundaries, security headers, production build, 272-entry frozen lockfile,
   248-record license policy, and high-severity advisory audit all passed.
 
 ## Current documentation
 
+- [M4 architecture](docs/architecture/milestone-4-firmware-update-simulation.md).
+- [ADR-0012: provenance-bound Synthetic Firmware Update approval](docs/adr/ADR-0012-provenance-bound-firmware-update-approval.md).
+- [M4 acceptance evidence](docs/testing/milestone-4-firmware-update-simulation-acceptance.md).
 - [M3 architecture](docs/architecture/milestone-3-binding-simulation.md).
 - [ADR-0011: preview-bound Synthetic Binding approval](docs/adr/ADR-0011-preview-bound-binding-approval.md).
 - [M3 acceptance evidence](docs/testing/milestone-3-binding-simulation-acceptance.md).
@@ -85,12 +122,11 @@ checkpoints. This file is the current operational snapshot.
 
 ## In progress
 
-- Complete official CI for the M3 documentation checkpoint and update Draft PR
-  #4 with the final immutable evidence.
-- Conduct owner review of the M1, M2A, and M3 software candidates when desired.
+- Commit and run official CI for the complete M4 documentation checkpoint.
+- Update Draft PR #5 with the immutable documentation head and official run.
+- Conduct owner review of the M1, M2A, M3, and M4 software candidates when
+  desired.
 - Continue software-only product construction without requiring physical tests.
-- Generalize the preview/approval pattern for the next sensitive simulated
-  workflow while preserving artifact provenance and verified postconditions.
 
 ## Deferred physical gates
 
@@ -101,7 +137,10 @@ block Core, Mock, simulation, UX, documentation, or CI work:
   device-AP, disconnect/reconnect, and mobile matrix;
 - authenticated or independently corroborated real Target identity;
 - real Binding provider and provider-specific link verification;
-- real Firmware artifact/toolchain provenance and write verification;
+- exact real Firmware bytes plus reproducible source/patch/configuration/
+  toolchain provenance;
+- physical Firmware write, reboot, power-loss, rollback, recovery, reconnect,
+  Target, and version verification;
 - Android USB/serial/permission behavior;
 - controlled RF/bench/flight performance measurement.
 
@@ -119,19 +158,20 @@ block Core, Mock, simulation, UX, documentation, or CI work:
 
 ## Next software-only work
 
-1. Keep Draft PR #4 green and documented; do not merge or release from this
+1. Keep Draft PR #5 green and documented; do not merge or release from this
    checkpoint.
-2. Extend the preview-bound contract to the simulated Firmware Update path,
-   requiring artifact provenance, compatibility, explicit effects, and a
-   verification plan before confirmation.
-3. Improve the normal Arabic-first product navigation so software-only labs are
-   discoverable without weakening route and provider isolation.
-4. Preserve `SYNTHETIC_ONLY` as the sole Binding authority and keep every real
-   write path disabled until a separate physical-validation gate is explicitly
-   opened.
+2. Integrate discoverable navigation to the isolated M3/M4 software labs in the
+   normal Arabic-first shell without weakening route, provider, or safety-label
+   isolation.
+3. Extract a versioned artifact-intake and provenance-validation boundary for
+   deterministic fixtures, still without accepting real Firmware bytes or
+   physical execution authority.
+4. Preserve `SYNTHETIC_ONLY` as the sole Binding and Firmware Update execution
+   authority until separate physical-validation gates are explicitly opened.
 
 ## Non-claims
 
 This project does not currently claim hardware support, successful physical
-Binding, safe physical Firmware update, authenticated device identity, RF
-improvement, range, stability, latency, telemetry benefit, or release readiness.
+Binding, a real Firmware artifact, a reproducible physical Firmware build, safe
+physical Firmware update, authenticated device identity, RF improvement, range,
+stability, latency, telemetry benefit, or release readiness.

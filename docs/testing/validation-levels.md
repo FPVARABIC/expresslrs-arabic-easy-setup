@@ -38,3 +38,12 @@ For the M3 Binding candidate, automated Core/Web tests can support
 `CODE_REVIEWED`, `BUILD_TESTED`, `MOCK_EXERCISED`, and `SIMULATION_ONLY`. A
 verified Synthetic `LINK_ESTABLISHED` result proves only the deterministic
 contract; it is not physical Binding evidence.
+
+For the M4 Firmware Update candidate, automated Core/Web tests can support
+`CODE_REVIEWED`, `BUILD_TESTED`, `MOCK_EXERCISED`, and `SIMULATION_ONLY` for the
+artifact/provenance schema, preview, approval, state machine, and exact-version
+postcondition contract. A successful Synthetic `EXPECTED_FIRMWARE_OBSERVED`
+result proves only deterministic in-memory orchestration. The fixture contains
+no Firmware bytes and explicitly records that no Firmware build occurred; it is
+not `BENCH_TESTED`, `HARDWARE_TESTED`, a real artifact, or physical flash
+evidence.
