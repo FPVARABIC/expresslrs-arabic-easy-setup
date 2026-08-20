@@ -103,13 +103,15 @@ interface ResponseReader {
 const providerId = "expresslrs-local-http-config";
 const evidenceSourceKind = "expresslrs-http-config";
 const maximumResponseBytes = 256 * 1024;
+const maximumResponseChunks = 4_096;
 const maximumFactLength = 256;
 const defaultTimeoutMs = 8_000;
 const maximumTimeoutMs = 60_000;
 const safeDeviceId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const safeDomainToken = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const unsafeFactUnicode = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-const jsonContentType = /^application\/json(?:\s*;|\s*$)/iu;
+const jsonContentType =
+  /^application\/json(?:\s*;\s*charset\s*=\s*(?:"utf-8"|utf-8))?\s*$/iu;
 let deviceSequence = 0;
 // Discovery runs before Core has a concrete DeviceDescriptor to lease. Keep a
 // narrow transport-level guard so two provider instances in the same host
@@ -572,12 +574,93 @@ function defaultBrowserFetch(): BrowserFetch {
   return globalThis.fetch.bind(globalThis);
 }
 
-function cancelReader(reader: ResponseReader): void {
+function trackTransportCleanup(
+  transport: TransportSettlementTracker,
+  cleanup: () => unknown,
+): void {
   try {
-    void reader.cancel?.().catch(() => undefined);
+    const completion = cleanup();
+    if (
+      (typeof completion !== "object" && typeof completion !== "function") ||
+      completion === null
+    ) {
+      transport.markCleanupUnproven();
+      return;
+    }
+    // Stream cancellation is specified to return a genuine Promise. Invoke the
+    // intrinsic Promise method directly so a hostile thenable cannot change a
+    // dynamic `then` getter between validation and assimilation. Discard the
+    // fulfillment value as well, avoiding any secondary thenable assimilation.
+    const observedCompletion = new Promise<void>((resolve, reject) => {
+      Reflect.apply(Promise.prototype.then, completion, [
+        () => resolve(),
+        (error: unknown) => reject(error),
+      ]);
+    });
+    const cleanupPromise = transport.trackCleanup(observedCompletion);
+    void cleanupPromise.catch(() => undefined);
   } catch {
+    transport.markCleanupUnproven();
     // Best-effort resource release only. Never replace the stable adapter error
     // with a raw stream implementation error.
+  }
+}
+
+function cancelReader(
+  reader: ResponseReader,
+  transport: TransportSettlementTracker,
+): void {
+  let cancel: unknown;
+  try {
+    cancel = Reflect.get(reader, "cancel");
+  } catch {
+    transport.markCleanupUnproven();
+    return;
+  }
+  if (typeof cancel !== "function") {
+    transport.markCleanupUnproven();
+    return;
+  }
+  trackTransportCleanup(transport, () => Reflect.apply(cancel, reader, []));
+}
+
+function cancelResponseBody(
+  response: unknown,
+  transport: TransportSettlementTracker,
+): void {
+  if (typeof response !== "object" || response === null) {
+    return;
+  }
+  let body: unknown;
+  try {
+    body = Reflect.get(response, "body") as unknown;
+    if (body === null || body === undefined) {
+      return;
+    }
+    if (typeof body !== "object" && typeof body !== "function") {
+      transport.markCleanupUnproven();
+      return;
+    }
+    const cancel = Reflect.get(body, "cancel") as unknown;
+    if (typeof cancel === "function") {
+      trackTransportCleanup(transport, () => Reflect.apply(cancel, body, []));
+      return;
+    }
+    const getReader = Reflect.get(body, "getReader") as unknown;
+    if (typeof getReader !== "function") {
+      transport.markCleanupUnproven();
+      return;
+    }
+    const reader = Reflect.apply(getReader, body, []) as unknown;
+    if (typeof reader === "object" && reader !== null) {
+      cancelReader(reader as ResponseReader, transport);
+      return;
+    }
+    transport.markCleanupUnproven();
+  } catch {
+    transport.markCleanupUnproven();
+    // The response is hostile runtime input. Abort still runs at the caller;
+    // never surface cleanup diagnostics or attacker-controlled values.
   }
 }
 
@@ -599,9 +682,61 @@ function copyByteChunk(value: unknown): Uint8Array | null {
 
 class LocalHttpRequestAborted extends Error {}
 
+class TransportSettlementTracker {
+  #pending = 0;
+  #cleanupUnproven = false;
+  #idleWaiters: Array<() => void> = [];
+
+  public track<T>(promise: Promise<T>): Promise<T> {
+    this.#pending += 1;
+    return promise.finally(() => {
+      this.#pending -= 1;
+      if (this.#pending === 0) {
+        const waiters = this.#idleWaiters;
+        this.#idleWaiters = [];
+        for (const resolve of waiters) {
+          resolve();
+        }
+      }
+    });
+  }
+
+  public trackCleanup<T>(promise: Promise<T>): Promise<T> {
+    return this.track(
+      promise.catch((error: unknown) => {
+        this.#cleanupUnproven = true;
+        throw error;
+      }),
+    );
+  }
+
+  public markCleanupUnproven(): void {
+    this.#cleanupUnproven = true;
+  }
+
+  public isIdle(): boolean {
+    return this.#pending === 0;
+  }
+
+  public isSafeToRelease(): boolean {
+    return this.isIdle() && !this.#cleanupUnproven;
+  }
+
+  public whenIdle(): Promise<void> {
+    if (this.isIdle()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.#idleWaiters.push(resolve);
+    });
+  }
+}
+
 async function readBoundedBody(
   response: unknown,
   aborted: Promise<never>,
+  transport: TransportSettlementTracker,
+  onReaderAcquired: () => void,
 ): Promise<Uint8Array> {
   if (typeof response !== "object" || response === null) {
     throw operationError(
@@ -699,12 +834,18 @@ async function readBoundedBody(
       false,
     );
   }
+  onReaderAcquired();
 
-  const chunks: Uint8Array[] = [];
+  const bytes = new Uint8Array(maximumResponseBytes);
   let received = 0;
+  let chunkCount = 0;
+  let streamCompleted = false;
   try {
     while (true) {
-      const result = await Promise.race([reader.read(), aborted]);
+      const pendingRead = transport.track(
+        Promise.resolve().then(() => reader.read()),
+      );
+      const result = await Promise.race([pendingRead, aborted]);
       if (!isPlainObject(result) || typeof result.done !== "boolean") {
         throw operationError(
           "PROVIDER_UNSUPPORTED",
@@ -713,30 +854,37 @@ async function readBoundedBody(
         );
       }
       if (result.done) {
+        streamCompleted = true;
         break;
       }
       const chunk = copyByteChunk(result.value);
-      if (chunk === null) {
+      if (chunk === null || chunk.byteLength === 0) {
         throw operationError(
           "PROVIDER_UNSUPPORTED",
           "LOCAL_HTTP_BODY_CHUNK_INVALID",
           false,
         );
       }
+      chunkCount += 1;
+      if (chunkCount > maximumResponseChunks) {
+        throw operationError(
+          "PROVIDER_UNSUPPORTED",
+          "LOCAL_HTTP_BODY_CHUNK_LIMIT_EXCEEDED",
+          false,
+        );
+      }
       received += chunk.byteLength;
       if (received > maximumResponseBytes) {
-        cancelReader(reader);
         throw operationError(
           "PROVIDER_UNSUPPORTED",
           "LOCAL_HTTP_RESPONSE_TOO_LARGE",
           false,
         );
       }
-      chunks.push(chunk);
+      bytes.set(chunk, received - chunk.byteLength);
     }
   } catch (error: unknown) {
     if (error instanceof LocalHttpRequestAborted) {
-      cancelReader(reader);
       throw error;
     }
     if (error instanceof CoreOperationError) {
@@ -748,6 +896,9 @@ async function readBoundedBody(
       true,
     );
   } finally {
+    if (!streamCompleted) {
+      cancelReader(reader, transport);
+    }
     try {
       reader.releaseLock?.();
     } catch {
@@ -755,13 +906,7 @@ async function readBoundedBody(
     }
   }
 
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  return bytes.slice(0, received);
 }
 
 function parseJsonBody(bytes: Uint8Array): SafeSettings {
@@ -793,10 +938,12 @@ async function fetchSafeSettings(input: {
   readonly fetch: BrowserFetch;
   readonly timeoutMs: number;
   readonly signal?: CancellationSignal;
+  readonly transport: TransportSettlementTracker;
 }): Promise<SafeSettings> {
   assertNotAborted(input.signal);
   const controller = new AbortController();
   let abortKind: "CALLER" | "TIMEOUT" | null = null;
+  let requestAbandoned = false;
   const callerSignal = input.signal;
   const onCallerAbort = (): void => {
     if (abortKind === null) {
@@ -816,29 +963,53 @@ async function fetchSafeSettings(input: {
   const aborted = new Promise<never>((_resolve, reject) => {
     controller.signal.addEventListener(
       "abort",
-      () => reject(new LocalHttpRequestAborted()),
+      () => {
+        requestAbandoned = true;
+        reject(new LocalHttpRequestAborted());
+      },
       { once: true },
     );
   });
+  let response: unknown;
+  let requestCompleted = false;
+  let readerAcquired = false;
 
   try {
-    const response = await Promise.race([
-      Promise.resolve().then(() =>
-        input.fetch(`${input.origin}/config`, {
-          method: "GET",
-          mode: "cors",
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          referrerPolicy: "no-referrer",
-          headers: { Accept: "application/json" },
-          signal: controller.signal,
+    const fetchCompletion = input.transport.track(
+      Promise.resolve()
+        .then(() =>
+          input.fetch(`${input.origin}/config`, {
+            method: "GET",
+            mode: "cors",
+            cache: "no-store",
+            credentials: "omit",
+            redirect: "error",
+            referrerPolicy: "no-referrer",
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+          }),
+        )
+        .then((candidate) => {
+          // Fetch implementations injected by a Host may ignore Abort and
+          // resolve later. Take ownership of that late body while the tracked
+          // Fetch lifecycle is still pending, so the origin cannot be released
+          // before cleanup settles.
+          if (requestAbandoned) {
+            cancelResponseBody(candidate, input.transport);
+          }
+          return candidate;
         }),
-      ),
-      aborted,
-    ]);
+    );
+    response = await Promise.race([fetchCompletion, aborted]);
     assertNotAborted(callerSignal);
-    const bytes = await readBoundedBody(response, aborted);
+    const bytes = await readBoundedBody(
+      response,
+      aborted,
+      input.transport,
+      () => {
+        readerAcquired = true;
+      },
+    );
     assertNotAborted(callerSignal);
     const settings = parseJsonBody(bytes);
     assertNotAborted(callerSignal);
@@ -849,6 +1020,7 @@ async function fetchSafeSettings(input: {
         true,
       );
     }
+    requestCompleted = true;
     return settings;
   } catch (error: unknown) {
     if (callerSignal?.aborted === true || abortKind === "CALLER") {
@@ -866,11 +1038,40 @@ async function fetchSafeSettings(input: {
     }
     throw operationError("CONNECTION_LOST", "LOCAL_HTTP_REQUEST_FAILED", true);
   } finally {
+    if (!requestCompleted) {
+      requestAbandoned = true;
+      controller.abort();
+      if (!readerAcquired) {
+        cancelResponseBody(response, input.transport);
+      }
+    }
     globalThis.clearTimeout(timeout);
     if (callerSignal !== undefined && supportsAbortEvents(callerSignal)) {
       callerSignal.removeEventListener("abort", onCallerAbort);
     }
   }
+}
+
+interface LocalHttpSettingsAttempt {
+  readonly result: Promise<SafeSettings>;
+  readonly isTransportSafeToRelease: () => boolean;
+  readonly whenTransportSettled: Promise<boolean>;
+}
+
+function startFetchSafeSettings(
+  input: Omit<Parameters<typeof fetchSafeSettings>[0], "transport">,
+): LocalHttpSettingsAttempt {
+  const transport = new TransportSettlementTracker();
+  const result = fetchSafeSettings({ ...input, transport });
+  const releaseState = async (): Promise<boolean> => {
+    await transport.whenIdle();
+    return transport.isSafeToRelease();
+  };
+  return Object.freeze({
+    result,
+    isTransportSafeToRelease: () => transport.isSafeToRelease(),
+    whenTransportSettled: result.then(releaseState, releaseState),
+  });
 }
 
 /**
@@ -921,13 +1122,15 @@ export class ExpressLrsLocalHttpDiscoveryProvider implements DiscoveryProvider {
 
     activeOrigins.add(this.#origin);
     this.#state = "LOADING";
+    let attempt: LocalHttpSettingsAttempt | null = null;
     try {
-      const settings = await fetchSafeSettings({
+      attempt = startFetchSafeSettings({
         origin: this.#origin,
         fetch: this.#fetch,
         timeoutMs: this.#timeoutMs,
         ...(signal === undefined ? {} : { signal }),
       });
+      const settings = await attempt.result;
       assertNotAborted(signal);
       this.#snapshot = makeSnapshot({
         settings,
@@ -937,7 +1140,21 @@ export class ExpressLrsLocalHttpDiscoveryProvider implements DiscoveryProvider {
       this.#state = "READY";
       return Object.freeze([this.#snapshot.descriptor]);
     } finally {
-      activeOrigins.delete(this.#origin);
+      const releaseOrigin = (): void => {
+        activeOrigins.delete(this.#origin);
+      };
+      if (attempt === null || attempt.isTransportSafeToRelease()) {
+        releaseOrigin();
+      } else {
+        // A non-compliant Fetch/stream may ignore Abort. Keep this origin
+        // quarantined until its actual transport promise settles so an
+        // immediate retry cannot overlap requests to the same device.
+        void attempt.whenTransportSettled.then((safeToRelease) => {
+          if (safeToRelease) {
+            releaseOrigin();
+          }
+        });
+      }
       if (this.#snapshot === null) {
         this.#state = "IDLE";
       }

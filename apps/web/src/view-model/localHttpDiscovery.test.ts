@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { BrowserFetch } from "@elrs-easy/platform-browser";
 
 import {
+  compareLocalHttpIdentitySnapshots,
+  createLocalHttpSupportReport,
   expressLrsLocalHttpOrigins,
   runLocalHttpDiscovery,
 } from "./localHttpDiscovery.js";
@@ -53,6 +55,13 @@ describe("Web Local HTTP discovery composition", () => {
     expect(outcome.verificationPassed).toBe(true);
     expect(outcome.confidence).toBe("UNKNOWN");
     expect(outcome.retryable).toBe(false);
+    expect(outcome.stageCategories).toEqual([
+      "PREPARING",
+      "DISCOVERING",
+      "IDENTIFYING",
+      "VERIFYING",
+      "SUCCESS",
+    ]);
     expect(outcome.facts).toEqual([
       { key: "product", value: "Example WiFi Receiver" },
       { key: "target", value: "EXAMPLE_RX_2400" },
@@ -95,6 +104,7 @@ describe("Web Local HTTP discovery composition", () => {
     expect(outcome.verificationPassed).toBe(false);
     expect(outcome.retryable).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
+    expect(outcome.stageCategories).toEqual(["CANCELLED"]);
   });
 
   it("maps a malformed device response to a structured non-success", async () => {
@@ -111,6 +121,11 @@ describe("Web Local HTTP discovery composition", () => {
     expect(outcome.factsCollected).toBe(false);
     expect(outcome.errorCode).toBe("PROVIDER_UNSUPPORTED");
     expect(outcome.retryable).toBe(false);
+    expect(outcome.stageCategories).toEqual([
+      "PREPARING",
+      "DISCOVERING",
+      "FAILED",
+    ]);
   });
 
   it.each([
@@ -194,5 +209,93 @@ describe("Web Local HTTP discovery composition", () => {
     expect(originReads).toBe(1);
     expect(fetchReads).toBe(1);
     expect(signalReads).toBe(1);
+  });
+
+  it("publishes a fixed progress timeline and isolates observer failures", async () => {
+    const stages: string[] = [];
+    const outcome = await runLocalHttpDiscovery({
+      origin: expressLrsLocalHttpOrigins[0],
+      fetch: async () => configResponse(),
+      onProgress(stage) {
+        stages.push(stage);
+        if (stage === "DISCOVERING") {
+          throw new Error("observer-secret-must-not-affect-read");
+        }
+      },
+    });
+
+    expect(outcome.state).toBe("SUCCESS");
+    expect(stages).toEqual([
+      "PREPARING",
+      "DISCOVERING",
+      "IDENTIFYING",
+      "VERIFYING",
+      "SUCCESS",
+    ]);
+  });
+
+  it("compares only the minimum in-memory identity envelope", () => {
+    const baseline = [
+      { key: "target", value: "EXAMPLE_RX_2400" },
+      { key: "version", value: "4.1.0" },
+      { key: "role", value: "RX" },
+      { key: "product", value: "First label" },
+    ] as const;
+
+    expect(
+      compareLocalHttpIdentitySnapshots(baseline, [
+        ...baseline.slice(0, 3),
+        { key: "product", value: "Changed label" },
+      ]),
+    ).toBe("CONSISTENT");
+    expect(
+      compareLocalHttpIdentitySnapshots(baseline, [
+        { key: "target", value: "DIFFERENT_RX" },
+        { key: "version", value: "4.1.0" },
+        { key: "role", value: "RX" },
+      ]),
+    ).toBe("CHANGED");
+    expect(
+      compareLocalHttpIdentitySnapshots(baseline, [
+        { key: "target", value: "EXAMPLE_RX_2400" },
+        { key: "version", value: "4.1.0" },
+      ]),
+    ).toBe("CHANGED");
+  });
+
+  it("builds a fixed-category support report without device values", async () => {
+    const outcome = await runLocalHttpDiscovery({
+      origin: expressLrsLocalHttpOrigins[0],
+      fetch: async () => configResponse(),
+    });
+    const report = createLocalHttpSupportReport({
+      outcome,
+      attempts: 2,
+      baselineAvailable: true,
+      reconnectState: "CONSISTENT",
+    });
+    const serialized = JSON.stringify(report);
+
+    expect(report.operation).toMatchObject({
+      outcome: "SUCCESS",
+      verificationPassed: true,
+      attempts: 2,
+      reconnectState: "CONSISTENT",
+    });
+    expect(report.evidenceSummary.factCategories).toEqual([
+      "PRODUCT",
+      "TARGET",
+      "FIRMWARE_VERSION",
+      "FIRMWARE_COMMIT",
+      "DEVICE_ROLE",
+      "RADIO_FAMILY",
+      "FREQUENCY_BAND",
+      "REGULATORY_DOMAIN_HIGH",
+      "CUSTOM_HARDWARE_PRESENT",
+    ]);
+    expect(serialized).not.toContain("EXAMPLE_RX_2400");
+    expect(serialized).not.toContain("Example WiFi Receiver");
+    expect(serialized).not.toContain("4.1.0");
+    expect(serialized).not.toContain("http://10.0.0.1");
   });
 });

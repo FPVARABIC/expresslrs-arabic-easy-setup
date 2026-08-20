@@ -402,6 +402,9 @@ describe("Firmware Update with a synthetic provider", () => {
 
     expect(operation.state).toBe("RECOVERY_REQUIRED");
     expect(operation.error?.code).toBe("VERIFICATION_FAILED");
+    expect(operation.error?.reason).toBe(
+      "POST_WRITE_FIRMWARE_VERIFICATION_FAILED",
+    );
   });
 
   it("rejects a contradictory provider verification at runtime", async () => {
@@ -419,14 +422,22 @@ describe("Firmware Update with a synthetic provider", () => {
 
     expect(operation.state).toBe("RECOVERY_REQUIRED");
     expect(operation.verificationPassed).toBe(false);
-    expect(operation.error?.reason).toBe("ARTIFACT_NOT_VERIFIED");
+    expect(operation.error?.reason).toBe(
+      "POST_WRITE_FIRMWARE_VERIFICATION_FAILED",
+    );
   });
 
   it("keeps the outcome unknown when write completion is not confirmed", async () => {
+    let getterCalls = 0;
     const operation = await run(
       new ScriptedFirmwareUpdateProvider({
         initial: sensitiveOperationFixtures.initial,
-        writeReceipt: { writeCompleted: false } as never,
+        writeReceipt: Object.defineProperty({}, "writeCompleted", {
+          get() {
+            getterCalls += 1;
+            throw new Error("wifi-password-secret");
+          },
+        }) as never,
       }),
     );
 
@@ -436,6 +447,56 @@ describe("Firmware Update with a synthetic provider", () => {
     expect(operation.error?.reason).toBe(
       "FIRMWARE_WRITE_COMPLETION_NOT_CONFIRMED",
     );
+    expect(getterCalls).toBe(0);
+  });
+
+  it("does not copy provider verification diagnostics into recovery output", async () => {
+    const secret = "WIFI_PASSWORD_SECRET_ABC123";
+    const operation = await run(
+      new ScriptedFirmwareUpdateProvider({
+        initial: sensitiveOperationFixtures.initial,
+        verification: {
+          valid: false,
+          observedTargetId: secret,
+          observedFirmwareVersion: secret,
+          reason: secret,
+        } as never,
+      }),
+      { operationId: "update-secret-verification" },
+    );
+
+    expect(operation.error?.reason).toBe(
+      "POST_WRITE_FIRMWARE_VERIFICATION_FAILED",
+    );
+    expect(JSON.stringify(operation)).not.toContain(secret);
+  });
+
+  it("does not execute an update-capability accessor outside the error boundary", async () => {
+    const provider = new ScriptedFirmwareUpdateProvider({
+      initial: sensitiveOperationFixtures.initial,
+    });
+    let getterCalls = 0;
+    Object.defineProperty(provider, "updateCapabilityId", {
+      configurable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error("WIFI_PASSWORD_SECRET_ABC123");
+      },
+    });
+
+    const operation = await run(provider, {
+      operationId: "update-hostile-capability-id",
+    });
+
+    expect(operation.state).toBe("FAILED");
+    expect(operation.error).toMatchObject({
+      code: "PROVIDER_UNSUPPORTED",
+      reason: "FIRMWARE_UPDATE_PROVIDER_FAILED_UNEXPECTEDLY",
+      details: {},
+    });
+    expect(provider.calls).toEqual([]);
+    expect(getterCalls).toBe(0);
+    expect(JSON.stringify(operation)).not.toContain("SECRET_ABC123");
   });
 
   it("does not write when the user has not confirmed the operation", async () => {

@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node ../../scripts/check-security-headers.mjs --built",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@elrs-easy/compatibility": "workspace:*",
+    "@elrs-easy/diagnostics": "workspace:*",
     "@elrs-easy/device": "workspace:*",
     "@elrs-easy/domain": "workspace:*",
     "@elrs-easy/i18n": "workspace:*",

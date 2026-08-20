@@ -14,6 +14,14 @@ export type AuditOutcome = (typeof auditOutcomes)[number];
 export type AuditDetailValue = string | number | boolean;
 export type AuditDetails = Readonly<Record<string, AuditDetailValue>>;
 
+export const auditRedactionCategories = Object.freeze([
+  "SENSITIVE_FIELD",
+  "UNREVIEWED_FIELD",
+  "UNSAFE_VALUE",
+  "INPUT_UNREADABLE",
+] as const);
+export type AuditRedactionCategory = (typeof auditRedactionCategories)[number];
+
 export const allowedAuditDetailFields = [
   "appVersion",
   "artifactSha256",
@@ -38,14 +46,43 @@ export const allowedAuditDetailFields = [
 
 export type AllowedAuditDetailField = (typeof allowedAuditDetailFields)[number];
 
-const allowedAuditDetailFieldSet: ReadonlySet<string> = new Set(
-  allowedAuditDetailFields,
-);
+const knownSensitiveAuditFields = Object.freeze([
+  "accessToken",
+  "apiKey",
+  "binding-identity",
+  "binding_phrase",
+  "bindingIdentity",
+  "bindingPhrase",
+  "credential",
+  "credentials",
+  "deviceSerial",
+  "deviceUID",
+  "hardware_serial_identifier",
+  "hardwareSerial",
+  "mac",
+  "macAddress",
+  "passwd",
+  "passphrase",
+  "password",
+  "privateKey",
+  "refresh-token",
+  "secret",
+  "serial",
+  "serialNumber",
+  "token",
+  "tokens",
+  "uid",
+  "wifi_passphrase",
+  "wifiKey",
+  "wifiPassword",
+  "wifiPsk",
+] as const);
 
 export interface ScrubbedAuditDetails {
   readonly details: AuditDetails;
-  readonly redactedFields: readonly string[];
-  readonly excludedFields: readonly string[];
+  readonly redactedFieldCount: number;
+  readonly excludedFieldCount: number;
+  readonly redactionCategories: readonly AuditRedactionCategory[];
 }
 
 export interface AuditEvent {
@@ -62,8 +99,9 @@ export interface AuditEvent {
   readonly severity: AuditSeverity;
   readonly providerId?: string;
   readonly safeDetails: AuditDetails;
-  readonly redactedFields: readonly string[];
-  readonly excludedFields: readonly string[];
+  readonly redactedFieldCount: number;
+  readonly excludedFieldCount: number;
+  readonly redactionCategories: readonly AuditRedactionCategory[];
 }
 
 export interface CreateAuditEventInput {
@@ -92,6 +130,9 @@ function fieldTokens(field: string): readonly string[] {
 
 /** Identifies known secret or stable hardware-identifier field names. */
 export function isSensitiveAuditField(field: string): boolean {
+  if (field.length > 256) {
+    return true;
+  }
   const tokens = fieldTokens(field);
   const tokenSet = new Set(tokens);
 
@@ -137,10 +178,6 @@ export function isSensitiveAuditField(field: string): boolean {
     tokenSet.has("identifier") ||
     tokenSet.has("id")
   );
-}
-
-function compareFields(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function isAuditDetailValue(value: unknown): value is AuditDetailValue {
@@ -193,31 +230,63 @@ export function scrubAuditDetails(
   details: Readonly<Record<string, unknown>>,
 ): ScrubbedAuditDetails {
   const safeDetails: Record<string, AuditDetailValue> = {};
-  const redactedFields: string[] = [];
-  const excludedFields: string[] = [];
+  const categories = new Set<AuditRedactionCategory>();
+  let redactedFieldCount = 0;
+  let excludedFieldCount = 0;
+  const increment = (value: number, amount = 1): number =>
+    Math.min(999, value + amount);
 
-  for (const [field, value] of Object.entries(details).sort(([left], [right]) =>
-    compareFields(left, right),
-  )) {
-    if (isSensitiveAuditField(field)) {
-      redactedFields.push(field);
+  // Never enumerate provider-owned input. Pull only a fixed set of reviewed
+  // keys through own data descriptors, so unknown-key floods and accessors
+  // cannot trigger unbounded work or displace an allowlisted field.
+  for (const field of knownSensitiveAuditFields) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(details, field);
+    } catch {
+      excludedFieldCount = increment(excludedFieldCount);
+      categories.add("INPUT_UNREADABLE");
       continue;
     }
-    if (!allowedAuditDetailFieldSet.has(field) || !isAuditDetailValue(value)) {
-      excludedFields.push(field);
+    if (descriptor === undefined) {
       continue;
     }
-    if (!isSafeAuditDetailValue(field, value)) {
-      redactedFields.push(field);
+    redactedFieldCount = increment(redactedFieldCount);
+    categories.add("SENSITIVE_FIELD");
+  }
+
+  for (const field of allowedAuditDetailFields) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(details, field);
+    } catch {
+      excludedFieldCount = increment(excludedFieldCount);
+      categories.add("INPUT_UNREADABLE");
       continue;
     }
-    safeDetails[field] = value;
+    if (descriptor === undefined) {
+      continue;
+    }
+    if (!("value" in descriptor) || !isAuditDetailValue(descriptor.value)) {
+      excludedFieldCount = increment(excludedFieldCount);
+      categories.add("UNREVIEWED_FIELD");
+      continue;
+    }
+    if (!isSafeAuditDetailValue(field, descriptor.value)) {
+      redactedFieldCount = increment(redactedFieldCount);
+      categories.add("UNSAFE_VALUE");
+      continue;
+    }
+    safeDetails[field] = descriptor.value;
   }
 
   return Object.freeze({
     details: Object.freeze(safeDetails),
-    redactedFields: Object.freeze(redactedFields),
-    excludedFields: Object.freeze(excludedFields),
+    redactedFieldCount,
+    excludedFieldCount,
+    redactionCategories: Object.freeze(
+      auditRedactionCategories.filter((category) => categories.has(category)),
+    ),
   });
 }
 
@@ -285,7 +354,8 @@ export function createAuditEvent(input: CreateAuditEventInput): AuditEvent {
           providerId: requireIdentifier(input.providerId, "Audit provider id"),
         }),
     safeDetails: scrubbed.details,
-    redactedFields: scrubbed.redactedFields,
-    excludedFields: scrubbed.excludedFields,
+    redactedFieldCount: scrubbed.redactedFieldCount,
+    excludedFieldCount: scrubbed.excludedFieldCount,
+    redactionCategories: scrubbed.redactionCategories,
   });
 }

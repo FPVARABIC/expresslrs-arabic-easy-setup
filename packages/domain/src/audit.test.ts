@@ -51,15 +51,9 @@ describe("audit privacy", () => {
       errorCode: "TARGET_UNKNOWN",
       targetId: "fixture.rx.alpha",
     });
-    expect(scrubbed.redactedFields).toEqual([
-      "binding_phrase",
-      "deviceUID",
-      "wifiPassword",
-    ]);
-    expect(scrubbed.excludedFields).toEqual([
-      "arbitraryAdapterField",
-      "rawResponse",
-    ]);
+    expect(scrubbed.redactedFieldCount).toBe(3);
+    expect(scrubbed.excludedFieldCount).toBe(0);
+    expect(scrubbed.redactionCategories).toEqual(["SENSITIVE_FIELD"]);
     expect(JSON.stringify(scrubbed)).not.toContain("do-not-log");
     expect(JSON.stringify(scrubbed)).not.toContain("also-secret");
     expect(JSON.stringify(scrubbed)).not.toContain("private-uid");
@@ -78,14 +72,9 @@ describe("audit privacy", () => {
     });
 
     expect(scrubbed.details).toEqual({ coreVersion: "1.0.0" });
-    expect(scrubbed.redactedFields).toEqual([
-      "artifactSha256",
-      "bytesWritten",
-      "providerId",
-      "targetId",
-      "totalBytes",
-    ]);
-    expect(scrubbed.excludedFields).toEqual(["deviceId"]);
+    expect(scrubbed.redactedFieldCount).toBe(5);
+    expect(scrubbed.excludedFieldCount).toBe(0);
+    expect(scrubbed.redactionCategories).toEqual(["UNSAFE_VALUE"]);
     expect(JSON.stringify(scrubbed)).not.toContain("secret@example");
     expect(JSON.stringify(scrubbed)).not.toContain("do-not-export");
   });
@@ -109,10 +98,93 @@ describe("audit privacy", () => {
     expect(event.sequence).toBe(3);
     expect(event.safeDetails.targetId).toBe("fixture.rx.alpha");
     expect(event.safeDetails).not.toHaveProperty("accessToken");
-    expect(event.redactedFields).toEqual(["accessToken"]);
+    expect(event.redactedFieldCount).toBe(1);
+    expect(event.excludedFieldCount).toBe(0);
+    expect(event.redactionCategories).toEqual(["SENSITIVE_FIELD"]);
     expect(Object.isFrozen(event)).toBe(true);
     expect(Object.isFrozen(event.safeDetails)).toBe(true);
-    expect(Object.isFrozen(event.redactedFields)).toBe(true);
+    expect(Object.isFrozen(event.redactionCategories)).toBe(true);
+  });
+
+  it("never echoes malicious field names through support metadata", () => {
+    const secretField = "wifiPassword_TOPSECRET-BINDING-PHRASE";
+    const unknownField = "unknown_LEAKME123";
+    const scrubbed = scrubAuditDetails({
+      [secretField]: "x",
+      [unknownField]: "y",
+    });
+    const serialized = JSON.stringify(scrubbed);
+
+    expect(scrubbed).toMatchObject({
+      details: {},
+      redactedFieldCount: 0,
+      excludedFieldCount: 0,
+    });
+    expect(scrubbed.redactionCategories).toEqual([]);
+    expect(serialized).not.toContain(secretField);
+    expect(serialized).not.toContain(unknownField);
+    expect(serialized).not.toContain("TOPSECRET");
+    expect(serialized).not.toContain("LEAKME123");
+  });
+
+  it("pulls only fixed descriptors under unknown-key floods", () => {
+    let descriptorReads = 0;
+    let getterReads = 0;
+    const flooded = Object.fromEntries(
+      Array.from({ length: 5_000 }, (_, index) => [
+        `unknown_${index}`,
+        "value",
+      ]),
+    );
+    Object.defineProperty(flooded, "targetId", {
+      enumerable: true,
+      value: "fixture.rx.alpha",
+    });
+    Object.defineProperty(flooded, "providerId", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return "must-not-run";
+      },
+    });
+    const bounded = scrubAuditDetails(
+      new Proxy(flooded, {
+        ownKeys() {
+          throw new Error("unbounded enumeration must not run");
+        },
+        getOwnPropertyDescriptor(target, property) {
+          descriptorReads += 1;
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+      }),
+    );
+
+    expect(bounded.details).toEqual({ targetId: "fixture.rx.alpha" });
+    expect(bounded.excludedFieldCount).toBe(1);
+    expect(bounded.redactionCategories).toEqual(["UNREVIEWED_FIELD"]);
+    expect(descriptorReads).toBeGreaterThan(0);
+    expect(descriptorReads).toBeLessThanOrEqual(64);
+    expect(getterReads).toBe(0);
+  });
+
+  it("fails closed within a fixed descriptor budget on unreadable input", () => {
+    const unreadable = scrubAuditDetails(
+      new Proxy(
+        {},
+        {
+          getOwnPropertyDescriptor() {
+            throw new Error("password=not-exported");
+          },
+        },
+      ),
+    );
+
+    expect(unreadable.details).toEqual({});
+    expect(unreadable.redactedFieldCount).toBe(0);
+    expect(unreadable.excludedFieldCount).toBeGreaterThan(0);
+    expect(unreadable.excludedFieldCount).toBeLessThanOrEqual(64);
+    expect(unreadable.redactionCategories).toEqual(["INPUT_UNREADABLE"]);
+    expect(JSON.stringify(unreadable)).not.toContain("not-exported");
   });
 
   it("rejects an invalid event sequence", () => {

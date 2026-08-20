@@ -78,6 +78,9 @@ importers:
       '@elrs-easy/compatibility':
         specifier: workspace:*
         version: link:../../packages/compatibility
+      '@elrs-easy/diagnostics':
+        specifier: workspace:*
+        version: link:../../packages/diagnostics
       '@elrs-easy/device':
         specifier: workspace:*
         version: link:../../packages/device
@@ -144,6 +147,12 @@ importers:
         version: link:../domain
 
   packages/device:
+    dependencies:
+      '@elrs-easy/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/diagnostics:
     dependencies:
       '@elrs-easy/domain':
         specifier: workspace:*

@@ -1,4 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import type {
+  ReadOnlyReconnectState,
+  ReadOnlyStageCategory,
+} from "@elrs-easy/diagnostics";
 import { scrubAuditDetails } from "@elrs-easy/domain";
 import {
   createTranslator,
@@ -26,6 +37,8 @@ import {
   type FoundationDemoOutcome,
 } from "./view-model/foundationDemo";
 import {
+  compareLocalHttpIdentitySnapshots,
+  createLocalHttpSupportReport,
   expressLrsLocalHttpOrigins,
   runLocalHttpDiscovery,
   type ExpressLrsLocalHttpOrigin,
@@ -90,15 +103,27 @@ const realOriginDefinitions: readonly {
   { origin: expressLrsLocalHttpOrigins[2], labelKey: "real.origin.tx" },
 ];
 
-const cancelledLocalHttpOutcome: LocalHttpDiscoveryOutcome = Object.freeze({
-  state: "CANCELLED",
-  factsCollected: false,
-  verificationPassed: false,
-  confidence: "UNKNOWN",
-  errorCode: null,
-  retryable: false,
-  facts: Object.freeze([]),
-});
+function cancelledLocalHttpOutcome(
+  observedStages: readonly ReadOnlyStageCategory[],
+): LocalHttpDiscoveryOutcome {
+  const stageCategories = Object.freeze([
+    ...observedStages.filter(
+      (stage) =>
+        stage !== "SUCCESS" && stage !== "FAILED" && stage !== "CANCELLED",
+    ),
+    "CANCELLED" as const,
+  ]);
+  return Object.freeze({
+    state: "CANCELLED",
+    factsCollected: false,
+    verificationPassed: false,
+    confidence: "UNKNOWN",
+    errorCode: null,
+    retryable: false,
+    facts: Object.freeze([]),
+    stageCategories,
+  });
+}
 
 export function App() {
   const [locale, setLocale] = useState<Locale>(defaultLocale);
@@ -115,9 +140,25 @@ export function App() {
   const [realOutcome, setRealOutcome] =
     useState<LocalHttpDiscoveryOutcome | null>(null);
   const [realRunning, setRealRunning] = useState(false);
+  const [realProgress, setRealProgress] = useState<
+    readonly ReadOnlyStageCategory[]
+  >([]);
+  const [realReconnectState, setRealReconnectState] =
+    useState<ReadOnlyReconnectState>("NOT_ATTEMPTED");
+  const [realAttempts, setRealAttempts] = useState(0);
+  const [realCopyState, setRealCopyState] = useState<CopyState>("idle");
+  const [realCopyRunning, setRealCopyRunning] = useState(false);
   const demoRequestSequence = useRef(0);
   const realRequestSequence = useRef(0);
+  const realAttemptSequence = useRef(0);
+  const realCopyRequestSequence = useRef(0);
   const realAbortController = useRef<AbortController | null>(null);
+  const realBaselineFacts = useRef<readonly LocalHttpDeviceFact[] | null>(null);
+  const realProgressStages = useRef<readonly ReadOnlyStageCategory[]>([]);
+  const realReconnectPending = useRef(false);
+  const realFocusResultAfterRun = useRef(false);
+  const realCancelButton = useRef<HTMLButtonElement | null>(null);
+  const realResultSummary = useRef<HTMLDivElement | null>(null);
   const t = useMemo(() => createTranslator(locale), [locale]);
   const scenario = getMockScenario(scenarioId);
   const selectedTaskDefinition = taskDefinitions.find(
@@ -149,13 +190,33 @@ export function App() {
     [],
   );
 
+  useEffect(() => {
+    if (realRunning) {
+      realCancelButton.current?.focus();
+    } else if (realFocusResultAfterRun.current) {
+      realResultSummary.current?.focus();
+      realFocusResultAfterRun.current = false;
+    }
+  }, [realRunning]);
+
   function selectRealOrigin(origin: ExpressLrsLocalHttpOrigin) {
     realRequestSequence.current += 1;
+    realCopyRequestSequence.current += 1;
     realAbortController.current?.abort();
     realAbortController.current = null;
     setRealOrigin(origin);
     setRealOutcome(null);
     setRealRunning(false);
+    setRealProgress([]);
+    setRealReconnectState("NOT_ATTEMPTED");
+    setRealAttempts(0);
+    setRealCopyState("idle");
+    setRealCopyRunning(false);
+    realAttemptSequence.current = 0;
+    realBaselineFacts.current = null;
+    realProgressStages.current = [];
+    realReconnectPending.current = false;
+    realFocusResultAfterRun.current = false;
   }
 
   async function readRealDevice() {
@@ -163,15 +224,73 @@ export function App() {
     const controller = new AbortController();
     realAbortController.current = controller;
     const requestId = ++realRequestSequence.current;
+    const attemptNumber = ++realAttemptSequence.current;
+    const baseline = realBaselineFacts.current;
+    realCopyRequestSequence.current += 1;
+    realProgressStages.current = [];
+    realFocusResultAfterRun.current = false;
     setRealOutcome(null);
     setRealRunning(true);
+    setRealProgress([]);
+    setRealReconnectState(
+      realReconnectPending.current ? "REQUIRED" : "NOT_ATTEMPTED",
+    );
+    setRealAttempts(attemptNumber);
+    setRealCopyState("idle");
+    setRealCopyRunning(false);
     try {
       const outcome = await runLocalHttpDiscovery({
         origin: realOrigin,
         signal: controller.signal,
+        onProgress(stage) {
+          if (realRequestSequence.current !== requestId) {
+            return;
+          }
+          realProgressStages.current = realProgressStages.current.includes(
+            stage,
+          )
+            ? realProgressStages.current
+            : [...realProgressStages.current, stage];
+          setRealProgress((current) =>
+            current.includes(stage) ? current : [...current, stage],
+          );
+        },
       });
       if (realRequestSequence.current === requestId) {
+        realFocusResultAfterRun.current =
+          document.activeElement === realCancelButton.current;
         setRealOutcome(outcome);
+        setRealProgress(outcome.stageCategories);
+        realProgressStages.current = outcome.stageCategories;
+        if (outcome.state === "SUCCESS") {
+          if (baseline === null) {
+            realBaselineFacts.current = outcome.facts;
+            setRealReconnectState("NOT_ATTEMPTED");
+            realReconnectPending.current = false;
+          } else if (realReconnectPending.current) {
+            setRealReconnectState(
+              compareLocalHttpIdentitySnapshots(baseline, outcome.facts),
+            );
+            realReconnectPending.current = false;
+          } else {
+            setRealReconnectState("NOT_ATTEMPTED");
+          }
+        } else if (
+          outcome.state === "FAILED" &&
+          outcome.errorCode === "CONNECTION_LOST" &&
+          baseline !== null
+        ) {
+          realReconnectPending.current = true;
+          setRealReconnectState("REQUIRED");
+        } else if (realReconnectPending.current) {
+          // Once a baseline read has been followed by a confirmed connection
+          // loss, keep the comparison pending through cancellation, DEVICE_BUSY
+          // quarantine, or another intermediate failure. Only a successful
+          // comparison or an explicit origin change resolves this state.
+          setRealReconnectState("REQUIRED");
+        } else {
+          setRealReconnectState("NOT_ATTEMPTED");
+        }
       }
     } finally {
       if (realRequestSequence.current === requestId) {
@@ -183,10 +302,54 @@ export function App() {
 
   function cancelRealDeviceRead() {
     realRequestSequence.current += 1;
+    realCopyRequestSequence.current += 1;
     realAbortController.current?.abort();
     realAbortController.current = null;
+    const outcome = cancelledLocalHttpOutcome(realProgressStages.current);
+    realFocusResultAfterRun.current =
+      document.activeElement === realCancelButton.current;
     setRealRunning(false);
-    setRealOutcome(cancelledLocalHttpOutcome);
+    setRealOutcome(outcome);
+    setRealProgress(outcome.stageCategories);
+    realProgressStages.current = outcome.stageCategories;
+    setRealReconnectState(
+      realReconnectPending.current ? "REQUIRED" : "NOT_ATTEMPTED",
+    );
+    setRealCopyState("idle");
+    setRealCopyRunning(false);
+  }
+
+  async function copyRealSupportDetails() {
+    if (realOutcome === null) {
+      return;
+    }
+    const requestId = ++realCopyRequestSequence.current;
+    const outcome = realOutcome;
+    const attempts = realAttempts;
+    const baselineAvailable = realBaselineFacts.current !== null;
+    const reconnectState = realReconnectState;
+    setRealCopyState("idle");
+    setRealCopyRunning(true);
+    try {
+      const report = createLocalHttpSupportReport({
+        outcome,
+        attempts,
+        baselineAvailable,
+        reconnectState,
+      });
+      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      if (realCopyRequestSequence.current === requestId) {
+        setRealCopyState("copied");
+      }
+    } catch {
+      if (realCopyRequestSequence.current === requestId) {
+        setRealCopyState("failed");
+      }
+    } finally {
+      if (realCopyRequestSequence.current === requestId) {
+        setRealCopyRunning(false);
+      }
+    }
   }
 
   function selectScenario(nextScenario: MockScenarioId) {
@@ -247,8 +410,9 @@ export function App() {
       {
         schemaVersion: "1",
         safeDetails: scrubbed.details,
-        redactedFields: scrubbed.redactedFields,
-        excludedFields: scrubbed.excludedFields,
+        redactedFieldCount: scrubbed.redactedFieldCount,
+        excludedFieldCount: scrubbed.excludedFieldCount,
+        redactionCategories: scrubbed.redactionCategories,
       },
       null,
       2,
@@ -347,13 +511,24 @@ export function App() {
           origin={realOrigin}
           outcome={realOutcome}
           running={realRunning}
+          progress={realProgress}
+          reconnectState={realReconnectState}
+          copyState={realCopyState}
+          copyRunning={realCopyRunning}
           t={t}
           onOriginChange={selectRealOrigin}
           onRead={() => void readRealDevice()}
           onCancel={cancelRealDeviceRead}
+          onCopy={() => void copyRealSupportDetails()}
+          cancelButtonRef={realCancelButton}
+          resultSummaryRef={realResultSummary}
         />
 
-        <div className="mock-divider" aria-hidden="true">
+        <div
+          className="mock-divider"
+          role="separator"
+          aria-label={t("real.mockDivider")}
+        >
           <span>{t("real.mockDivider")}</span>
         </div>
 
@@ -367,7 +542,11 @@ export function App() {
             <span className="mock-badge">{t("status.mockBadge")}</span>
           </div>
 
-          <div className="scenario-list" role="list">
+          <div
+            className="scenario-list"
+            role="group"
+            aria-label={t("home.mockHelp")}
+          >
             {mockScenarios.map((item) => (
               <button
                 key={item.id}
@@ -635,20 +814,63 @@ function RealDeviceReadPanel({
   origin,
   outcome,
   running,
+  progress,
+  reconnectState,
+  copyState,
+  copyRunning,
   t,
   onOriginChange,
   onRead,
   onCancel,
+  onCopy,
+  cancelButtonRef,
+  resultSummaryRef,
 }: {
   locale: Locale;
   origin: ExpressLrsLocalHttpOrigin;
   outcome: LocalHttpDiscoveryOutcome | null;
   running: boolean;
+  progress: readonly ReadOnlyStageCategory[];
+  reconnectState: ReadOnlyReconnectState;
+  copyState: CopyState;
+  copyRunning: boolean;
   t: Translator;
   onOriginChange: (origin: ExpressLrsLocalHttpOrigin) => void;
   onRead: () => void;
   onCancel: () => void;
+  onCopy: () => void;
+  cancelButtonRef: RefObject<HTMLButtonElement | null>;
+  resultSummaryRef: RefObject<HTMLDivElement | null>;
 }) {
+  const connectionFailed = outcome?.state === "FAILED";
+  const showConnectionHelp = outcome?.errorCode === "CONNECTION_LOST";
+  const showChangeOriginHelp = outcome?.errorCode === "PROVIDER_UNSUPPORTED";
+  const canRead = !running && (!connectionFailed || outcome.retryable);
+  const readAction = connectionFailed
+    ? t("real.retryAction")
+    : outcome?.state === "SUCCESS"
+      ? t("real.refreshAction")
+      : t("real.readAction");
+  const originDescriptionIds = [
+    "real-origin-help",
+    ...(showConnectionHelp ? ["real-connection-help"] : []),
+    ...(showChangeOriginHelp ? ["real-change-origin-help"] : []),
+  ].join(" ");
+  const resultDescriptionIds = [
+    ...(showConnectionHelp ? ["real-connection-help"] : []),
+    ...(showChangeOriginHelp ? ["real-change-origin-help"] : []),
+    ...(reconnectState === "NOT_ATTEMPTED" ? [] : ["real-reconnect-status"]),
+  ];
+  const localizedError =
+    outcome?.state === "FAILED"
+      ? t("real.errorDescription", {
+          message: translateOperationError(
+            locale,
+            outcome.errorCode ?? "INTERNAL_ERROR",
+          ),
+        })
+      : null;
+
   return (
     <section
       className="real-device-panel"
@@ -688,6 +910,7 @@ function RealDeviceReadPanel({
               id="expresslrs-local-origin"
               value={origin}
               disabled={running}
+              aria-describedby={originDescriptionIds}
               onChange={(event) => {
                 const selected = expressLrsLocalHttpOrigins.find(
                   (candidate) => candidate === event.currentTarget.value,
@@ -705,85 +928,240 @@ function RealDeviceReadPanel({
             </select>
           </label>
 
-          <p className="real-idle-help">{t("real.idleHelp")}</p>
+          <p className="real-idle-help" id="real-origin-help">
+            {t("real.idleHelp")}
+          </p>
+          {showConnectionHelp || showChangeOriginHelp ? (
+            <div
+              className="real-connection-help"
+              id={showConnectionHelp ? "real-connection-help" : undefined}
+            >
+              {showConnectionHelp ? <p>{t("real.connectionHelp")}</p> : null}
+              {showChangeOriginHelp ? (
+                <p id="real-change-origin-help">{t("real.changeOriginHelp")}</p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="real-device-actions">
             {running ? (
               <button
+                ref={cancelButtonRef}
                 className="secondary-button"
                 type="button"
                 onClick={onCancel}
               >
                 {t("real.cancelAction")}
               </button>
-            ) : outcome?.state !== "FAILED" || outcome.retryable ? (
+            ) : canRead ? (
               <button className="primary-button" type="button" onClick={onRead}>
                 <CableIcon />
-                {outcome?.state === "FAILED"
-                  ? t("real.retryAction")
-                  : t("real.readAction")}
+                {readAction}
               </button>
             ) : null}
           </div>
         </div>
 
-        <div className="real-device-result" aria-live="polite">
-          {running ? (
-            <div className="real-result-state is-loading" role="status">
-              <span className="real-state-icon" aria-hidden="true">
-                <SignalIcon />
-              </span>
-              <div>
-                <strong>{t("real.loading")}</strong>
-                <p>{t("real.noSecrets")}</p>
+        <div className="real-device-result">
+          {outcome !== null ? (
+            <p
+              className="sr-only"
+              role={outcome?.state === "FAILED" ? "alert" : "status"}
+              aria-atomic="true"
+            >
+              {outcome.state === "SUCCESS"
+                ? t("real.successTitle")
+                : outcome.state === "FAILED"
+                  ? `${t("real.errorTitle")} ${localizedError ?? ""}`
+                  : t("real.cancelled")}
+            </p>
+          ) : null}
+          <div
+            ref={resultSummaryRef}
+            className="real-result-summary"
+            tabIndex={-1}
+            aria-describedby={
+              resultDescriptionIds.length === 0
+                ? undefined
+                : resultDescriptionIds.join(" ")
+            }
+          >
+            {running ? (
+              <div className="real-result-state is-loading">
+                <span className="real-state-icon" aria-hidden="true">
+                  <SignalIcon />
+                </span>
+                <div>
+                  <strong>{t("real.loading")}</strong>
+                  <p>{t("real.noSecrets")}</p>
+                </div>
               </div>
-            </div>
-          ) : outcome?.state === "SUCCESS" ? (
-            <RealDeviceSuccess outcome={outcome} t={t} />
-          ) : outcome?.state === "FAILED" ? (
-            <div className="real-result-state is-error" role="alert">
-              <span className="real-state-icon" aria-hidden="true">
-                <AlertIcon />
-              </span>
-              <div>
-                <strong>{t("real.errorTitle")}</strong>
-                <p>
-                  {t("real.errorDescription", {
-                    message: translateOperationError(
-                      locale,
-                      outcome.errorCode ?? "INTERNAL_ERROR",
-                    ),
-                  })}
-                </p>
-                {!outcome.retryable ? (
-                  <p>{t("real.retryUnavailable")}</p>
+            ) : outcome?.state === "SUCCESS" ? (
+              <RealDeviceSuccess outcome={outcome} t={t} />
+            ) : outcome?.state === "FAILED" ? (
+              <div className="real-result-state is-error">
+                <span className="real-state-icon" aria-hidden="true">
+                  <AlertIcon />
+                </span>
+                <div>
+                  <strong>{t("real.errorTitle")}</strong>
+                  <p>{localizedError}</p>
+                  {!outcome.retryable ? (
+                    <p>{t("real.retryUnavailable")}</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : outcome?.state === "CANCELLED" ? (
+              <div className="real-result-state">
+                <span className="real-state-icon" aria-hidden="true">
+                  <ShieldIcon />
+                </span>
+                <div>
+                  <strong>{t("real.cancelled")}</strong>
+                  <p>{t("real.noSecrets")}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="real-result-state">
+                <span className="real-state-icon" aria-hidden="true">
+                  <ShieldCheckIcon />
+                </span>
+                <div>
+                  <strong>{t("real.readOnlyBadge")}</strong>
+                  <p>{t("real.noSecrets")}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {running || progress.length > 0 ? (
+            <RealReadProgress progress={progress} running={running} t={t} />
+          ) : null}
+
+          {reconnectState !== "NOT_ATTEMPTED" ? (
+            <p
+              id="real-reconnect-status"
+              className={`real-reconnect-note ${reconnectState === "CHANGED" || reconnectState === "REQUIRED" ? "is-warning" : "is-consistent"}`}
+            >
+              {t(realReconnectMessage(reconnectState))}
+            </p>
+          ) : null}
+
+          {outcome !== null ? (
+            <div className="real-support">
+              <p>{t("real.support.privacy")}</p>
+              <div className="real-support-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={onCopy}
+                  disabled={copyRunning}
+                  aria-busy={copyRunning}
+                >
+                  {copyRunning
+                    ? t("real.support.copying")
+                    : t("real.support.copyAction")}
+                </button>
+                {copyState !== "idle" ? (
+                  <p
+                    className={`clipboard-status ${copyState === "failed" ? "is-error" : ""}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {copyState === "failed"
+                      ? t("real.support.copyFailed")
+                      : t("real.support.copied")}
+                  </p>
                 ) : null}
               </div>
             </div>
-          ) : outcome?.state === "CANCELLED" ? (
-            <div className="real-result-state" role="status">
-              <span className="real-state-icon" aria-hidden="true">
-                <ShieldIcon />
-              </span>
-              <div>
-                <strong>{t("real.cancelled")}</strong>
-                <p>{t("real.noSecrets")}</p>
-              </div>
-            </div>
-          ) : (
-            <div className="real-result-state" role="status">
-              <span className="real-state-icon" aria-hidden="true">
-                <ShieldCheckIcon />
-              </span>
-              <div>
-                <strong>{t("real.readOnlyBadge")}</strong>
-                <p>{t("real.noSecrets")}</p>
-              </div>
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
   );
+}
+
+function RealReadProgress({
+  progress,
+  running,
+  t,
+}: {
+  progress: readonly ReadOnlyStageCategory[];
+  running: boolean;
+  t: Translator;
+}) {
+  const latest = progress.at(-1);
+
+  return (
+    <section className="real-progress" aria-labelledby="real-progress-heading">
+      <h3 id="real-progress-heading">{t("real.progress.heading")}</h3>
+      {running && latest !== undefined ? (
+        <p className="sr-only" role="status" aria-atomic="true">
+          {t(realProgressMessage(latest))}
+        </p>
+      ) : null}
+      <ol className="real-progress-list">
+        {progress.map((stage) => (
+          <li
+            key={stage}
+            className={`real-progress-item ${stage === latest ? "is-current" : "is-observed"} ${stage === "FAILED" || stage === "CANCELLED" ? "is-terminal" : ""}`}
+            aria-current={running && stage === latest ? "step" : undefined}
+          >
+            <span aria-hidden="true">
+              {realProgressMarker(stage, latest, running)}
+            </span>
+            {t(realProgressMessage(stage))}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function realProgressMarker(
+  stage: ReadOnlyStageCategory,
+  latest: ReadOnlyStageCategory | undefined,
+  running: boolean,
+): string {
+  if (stage === latest && running) {
+    return "…";
+  }
+  if (stage === "FAILED") {
+    return "!";
+  }
+  if (stage === "CANCELLED") {
+    return "×";
+  }
+  if (stage === "SUCCESS" || latest === "SUCCESS") {
+    return "✓";
+  }
+  return "•";
+}
+
+function realProgressMessage(stage: ReadOnlyStageCategory): MessageKey {
+  const messages: Readonly<Record<ReadOnlyStageCategory, MessageKey>> = {
+    PREPARING: "real.progress.preparing",
+    DISCOVERING: "real.progress.discovering",
+    IDENTIFYING: "real.progress.identifying",
+    VERIFYING: "real.progress.verifying",
+    SUCCESS: "real.progress.success",
+    FAILED: "real.progress.failed",
+    CANCELLED: "real.progress.cancelled",
+  };
+  return messages[stage];
+}
+
+function realReconnectMessage(
+  state: Exclude<ReadOnlyReconnectState, "NOT_ATTEMPTED">,
+): MessageKey {
+  const messages: Readonly<
+    Record<Exclude<ReadOnlyReconnectState, "NOT_ATTEMPTED">, MessageKey>
+  > = {
+    REQUIRED: "real.reconnect.required",
+    CONSISTENT: "real.reconnect.consistent",
+    CHANGED: "real.reconnect.changed",
+  };
+  return messages[state];
 }
 
 function RealDeviceSuccess({
@@ -794,7 +1172,7 @@ function RealDeviceSuccess({
   t: Translator;
 }) {
   return (
-    <div className="real-success" role="status">
+    <div className="real-success">
       <div className="real-success-heading">
         <span className="real-state-icon" aria-hidden="true">
           <CheckIcon />
@@ -824,6 +1202,7 @@ function RealDeviceSuccess({
           <p>{t("real.unknownDescription")}</p>
         </div>
       </div>
+      <p className="real-snapshot-note">{t("real.snapshotNotice")}</p>
       <p className="real-privacy-note">{t("real.noSecrets")}</p>
     </div>
   );

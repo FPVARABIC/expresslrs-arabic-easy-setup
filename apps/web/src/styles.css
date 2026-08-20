@@ -78,7 +78,9 @@ button {
 }
 
 button:focus-visible,
-a:focus-visible {
+a:focus-visible,
+select:focus-visible,
+[tabindex="-1"]:focus-visible {
   outline: 3px solid rgba(65, 217, 231, 0.54);
   outline-offset: 3px;
 }
@@ -663,13 +665,14 @@ svg {
 }
 
 .primary-button {
+  min-height: 44px;
   padding: 0.55rem 0.8rem;
   border: 1px solid rgba(65, 217, 231, 0.45);
   border-radius: 10px;
   background: rgba(65, 217, 231, 0.18);
   color: var(--text);
   cursor: pointer;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   font-weight: 750;
 }
 
@@ -1181,12 +1184,13 @@ svg {
   align-items: center;
   gap: 0.45rem;
   flex: 0 0 auto;
+  min-height: 44px;
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: var(--surface-soft);
   cursor: pointer;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -1199,7 +1203,7 @@ svg {
   min-height: 1.2em;
   margin: 0.55rem 0 0;
   color: var(--mint);
-  font-size: 0.66rem;
+  font-size: 0.75rem;
 }
 
 .clipboard-status.is-error {
@@ -1244,11 +1248,13 @@ svg {
 .real-result-state p,
 .real-success-heading p,
 .real-identity-warning p,
+.real-snapshot-note,
 .real-privacy-note,
 .real-idle-help,
+.real-connection-help p,
 .wifi-impact p {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   line-height: 1.8;
 }
 
@@ -1272,7 +1278,7 @@ svg {
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   white-space: nowrap;
-  font-size: 0.64rem;
+  font-size: 0.75rem;
   font-weight: 740;
 }
 
@@ -1352,7 +1358,7 @@ svg {
 }
 
 .wifi-impact h3 {
-  font-size: 0.78rem;
+  font-size: 0.875rem;
 }
 
 .origin-field {
@@ -1363,7 +1369,7 @@ svg {
 
 .origin-field > span {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 0.8125rem;
   font-weight: 700;
 }
 
@@ -1399,7 +1405,7 @@ svg {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 42px;
+  min-height: 44px;
 }
 
 .real-device-actions .primary-button svg {
@@ -1457,7 +1463,7 @@ svg {
 
 .real-success-heading > div > strong,
 .real-result-state strong {
-  font-size: 0.82rem;
+  font-size: 0.9375rem;
 }
 
 .real-facts {
@@ -1477,13 +1483,13 @@ svg {
 
 .real-facts dt {
   color: var(--text-muted);
-  font-size: 0.62rem;
+  font-size: 0.75rem;
 }
 
 .real-facts dd {
   margin: 0.22rem 0 0;
   overflow-wrap: anywhere;
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   font-weight: 690;
 }
 
@@ -1501,11 +1507,125 @@ svg {
 
 .real-identity-warning strong {
   color: var(--amber);
-  font-size: 0.74rem;
+  font-size: 0.875rem;
 }
 
-.real-privacy-note {
+.real-result-summary {
+  min-width: 0;
+  border-radius: 14px;
+}
+
+.real-result-summary:focus-visible {
+  outline-color: rgba(101, 230, 179, 0.62);
+}
+
+.real-connection-help {
+  display: grid;
+  gap: 0.45rem;
   margin-block-start: 0.7rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(255, 127, 139, 0.2);
+  border-radius: 12px;
+  background: var(--danger-soft);
+}
+
+.real-connection-help p,
+.real-snapshot-note,
+.real-privacy-note {
+  margin: 0.7rem 0 0;
+}
+
+.real-progress,
+.real-support {
+  margin-block-start: 0.9rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-soft);
+}
+
+.real-progress h3 {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.real-progress-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.real-progress-item {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.real-progress-item > span {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--mint-soft);
+  color: var(--mint);
+  font-weight: 800;
+}
+
+.real-progress-item.is-current {
+  color: var(--text);
+}
+
+.real-progress-item.is-current > span {
+  background: var(--cyan-soft);
+  color: var(--cyan);
+}
+
+.real-progress-item.is-terminal > span {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.real-reconnect-note {
+  margin: 0.9rem 0 0;
+  padding: 0.8rem;
+  border: 1px solid rgba(101, 230, 179, 0.22);
+  border-radius: 12px;
+  background: var(--mint-soft);
+  color: var(--mint);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.real-reconnect-note.is-warning {
+  border-color: rgba(245, 189, 101, 0.25);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.real-support > p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+}
+
+.real-support-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-block-start: 0.7rem;
+}
+
+.real-support-actions .clipboard-status {
+  margin: 0;
 }
 
 .mock-divider {
@@ -1514,7 +1634,7 @@ svg {
   gap: 0.8rem;
   margin-block: 2.2rem 1rem;
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 0.8125rem;
   font-weight: 730;
 }
 

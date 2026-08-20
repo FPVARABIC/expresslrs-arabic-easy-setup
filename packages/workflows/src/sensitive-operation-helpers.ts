@@ -5,6 +5,7 @@ import {
 } from "@elrs-easy/device";
 import {
   CoreOperationError,
+  operationErrorCodes,
   type CancellationSignal,
   type Capability,
   type DeviceDescriptor,
@@ -18,6 +19,31 @@ import type { IdentityReader } from "./sensitive-operation-contracts.js";
 export interface InspectedDevice {
   readonly identity: DeviceIdentityResolution;
   readonly capabilities: readonly Capability[];
+}
+
+/**
+ * Reads only an own data property from provider-owned runtime output. Accessor
+ * properties are treated as absent so provider getters cannot execute while a
+ * Workflow is validating receipts, verification results, or metadata.
+ */
+export function readProviderDataProperty(
+  value: unknown,
+  key: PropertyKey,
+): unknown {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    return undefined;
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Providers are untrusted and may ignore cancellation on their own. */
@@ -104,22 +130,47 @@ export function safeOperationError(
   error: unknown,
   fallbackReason: string,
 ): OperationError {
-  if (error instanceof CoreOperationError) {
-    return error.operationError;
+  let isCoreOperationError = false;
+  try {
+    isCoreOperationError = error instanceof CoreOperationError;
+  } catch {
+    // A Proxy may trap prototype inspection. Treat it as an unclassified error.
   }
-  return {
+  if (isCoreOperationError) {
+    const providerOperationError = readProviderDataProperty(
+      error,
+      "operationError",
+    );
+    const code = readProviderDataProperty(providerOperationError, "code");
+    const retryable = readProviderDataProperty(
+      providerOperationError,
+      "retryable",
+    );
+    if (
+      typeof code === "string" &&
+      operationErrorCodes.includes(
+        code as (typeof operationErrorCodes)[number],
+      ) &&
+      typeof retryable === "boolean"
+    ) {
+      return Object.freeze({
+        code: code as (typeof operationErrorCodes)[number],
+        // Never forward a provider-controlled reason or detail value. Even an
+        // allowlisted-looking token can contain a Binding Phrase or credential.
+        reason: fallbackReason,
+        details: Object.freeze({}),
+        retryable,
+      });
+    }
+  }
+  return Object.freeze({
     code: "INTERNAL_ERROR",
     reason: fallbackReason,
-    details: {},
+    details: Object.freeze({}),
     retryable: true,
-  };
+  });
 }
 
 export function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    error.name === "AbortError"
-  );
+  return readProviderDataProperty(error, "name") === "AbortError";
 }

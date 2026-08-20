@@ -5,6 +5,7 @@
   },
   "include": [
     "packages/domain/src/**/*.ts",
+    "packages/diagnostics/src/**/*.ts",
     "packages/device/src/**/*.ts",
     "packages/compatibility/src/**/*.ts",
     "packages/workflows/src/**/*.ts",

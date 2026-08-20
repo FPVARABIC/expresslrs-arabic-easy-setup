@@ -35,14 +35,43 @@ export const en = {
   "real.origin.rx": "Receiver (RX) · elrs_rx.local",
   "real.origin.tx": "Transmitter (TX) · elrs_tx.local",
   "real.readAction": "Read device information",
+  "real.refreshAction": "Read device information again",
   "real.cancelAction": "Cancel read",
   "real.retryAction": "Try again",
   "real.loading": "Reading the device configuration safely…",
   "real.idleHelp":
     "Your browser may request Local Network Access. No Binding, update, reboot, or configuration request is sent.",
+  "real.connectionHelp":
+    "If the read fails, check Wi-Fi mode, the network, the selected address, and Local Network Access permission. The browser may also block the request because of CORS, or the connection may time out.",
+  "real.changeOriginHelp":
+    "If this address does not work, choose another official address that matches how your device is connected, then start a new read.",
   "real.readOnlyBadge": "GET /config only",
   "real.unvalidatedBadge": "Hardware validation pending",
   "real.reportedBadge": "Device-reported",
+  "real.snapshotNotice":
+    "This is a snapshot from the last completed read, not a live connection status.",
+  "real.progress.heading": "Read progress",
+  "real.progress.preparing": "Preparing a read-only request",
+  "real.progress.discovering": "Trying to reach the selected device address",
+  "real.progress.identifying": "Reading the device-reported identity facts",
+  "real.progress.verifying":
+    "Checking safe fields and excluding sensitive data",
+  "real.progress.success": "The latest read is complete",
+  "real.progress.failed": "The read stopped before completion",
+  "real.progress.cancelled": "The read was cancelled",
+  "real.support.copyAction": "Copy safe support details",
+  "real.support.copying": "Copying safe support details…",
+  "real.support.copied": "Safe support details copied",
+  "real.support.copyFailed":
+    "Could not copy the support details. Check clipboard permission and try again.",
+  "real.support.privacy":
+    "The copied details exclude the Binding identifier (UID), Wi-Fi network name (SSID), credentials, passwords, the raw response, and stable device identifiers.",
+  "real.reconnect.consistent":
+    "After connectivity was restored, the reported Target, Firmware version, and TX/RX role matched the first successful read.",
+  "real.reconnect.changed":
+    "After connectivity was restored, at least one reported Target, Firmware version, or TX/RX role differed from the first successful read. Review it before continuing.",
+  "real.reconnect.required":
+    "Put the device back in Wi-Fi mode, make sure you are on the correct network, then read it again.",
   "real.successTitle": "Device facts collected",
   "real.successDescription":
     "Success here means only that safe reported fields were collected and rebuilt. It does not confirm the Target or hardware support.",
@@ -222,7 +251,8 @@ export const en = {
   "error.DEVICE_NOT_FOUND": "The device could not be found.",
   "error.DEVICE_BUSY": "Another operation is using this device.",
   "error.PERMISSION_DENIED": "Permission to access the device was denied.",
-  "error.CONNECTION_LOST": "The connection to the device was lost.",
+  "error.CONNECTION_LOST":
+    "The device could not be reached, or the read stopped before completion.",
   "error.IDENTITY_UNKNOWN": "The device identity could not be confirmed.",
   "error.IDENTITY_AMBIGUOUS":
     "More than one device Target matches the available evidence.",

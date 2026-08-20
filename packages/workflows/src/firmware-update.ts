@@ -3,7 +3,11 @@ import {
   type FirmwareArtifactDescriptor,
   type TargetCatalog,
 } from "@elrs-easy/compatibility";
-import type { DeviceSessionManager } from "@elrs-easy/device";
+import {
+  rebuildDiscoveryDescriptors,
+  rebuildProviderId,
+  type DeviceSessionManager,
+} from "@elrs-easy/device";
 import type {
   CancellationSignal,
   DeviceDescriptor,
@@ -17,6 +21,7 @@ import {
   identityGateError,
   inspectHeldDevice,
   isAbortError,
+  readProviderDataProperty,
   releaseIfHeld,
   safeOperationError,
 } from "./sensitive-operation-helpers.js";
@@ -78,8 +83,6 @@ export async function runFirmwareUpdate(input: {
     ...input.artifact,
   });
   const provider = input.provider;
-  const providerId = provider.id;
-  const updateCapabilityId = provider.updateCapabilityId;
   const sessions = input.sessions;
   const catalog = input.catalog;
   const userConfirmed = input.userConfirmed;
@@ -95,10 +98,16 @@ export async function runFirmwareUpdate(input: {
   let session: DeviceSession | null = null;
   let writeStarted = false;
   let writeCompleted = false;
+  let providerId: string;
+  let updateCapabilityId: string;
 
   try {
     assertNotAborted(signal);
     machine.transition("PREPARING");
+    providerId = rebuildProviderId(readProviderDataProperty(provider, "id"));
+    updateCapabilityId = rebuildProviderId(
+      readProviderDataProperty(provider, "updateCapabilityId"),
+    );
     assertNotAborted(signal);
     if (!hasRuntimeArtifactShape(artifact)) {
       return machine.fail({
@@ -182,8 +191,7 @@ export async function runFirmwareUpdate(input: {
     writeStarted = true;
     const receipt = await provider.writeFirmware(session, artifact, signal);
     writeCompleted =
-      (receipt as { readonly writeCompleted?: unknown }).writeCompleted ===
-      true;
+      readProviderDataProperty(receipt, "writeCompleted") === true;
     assertNotAborted(signal);
     if (!writeCompleted) {
       return machine.endUncertain("UNKNOWN_STATE", {
@@ -194,14 +202,14 @@ export async function runFirmwareUpdate(input: {
       });
     }
     sessions.assertHeld(session);
+    const bytesWritten = readProviderDataProperty(receipt, "bytesWritten");
+    const totalBytes = readProviderDataProperty(receipt, "totalBytes");
     machine.transition("WRITE_COMPLETED", {
       messageCode: "PROVIDER_WRITE_COMPLETED",
-      ...(receipt.bytesWritten === undefined
+      ...(bytesWritten === undefined
         ? {}
-        : { bytesWritten: receipt.bytesWritten }),
-      ...(receipt.totalBytes === undefined
-        ? {}
-        : { totalBytes: receipt.totalBytes }),
+        : { bytesWritten: bytesWritten as number }),
+      ...(totalBytes === undefined ? {} : { totalBytes: totalBytes as number }),
     });
     assertNotAborted(signal);
 
@@ -214,12 +222,12 @@ export async function runFirmwareUpdate(input: {
 
     machine.transition("RECONNECTING");
     assertNotAborted(signal);
-    const reconnectedDescriptor = await provider.reconnect(
+    const reportedReconnectedDescriptor = await provider.reconnect(
       descriptor.id,
       signal,
     );
     assertNotAborted(signal);
-    if (reconnectedDescriptor === null) {
+    if (reportedReconnectedDescriptor === null) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
         code: "RECOVERY_REQUIRED",
         reason: "DEVICE_DID_NOT_RETURN_AFTER_FIRMWARE_WRITE",
@@ -227,14 +235,17 @@ export async function runFirmwareUpdate(input: {
         retryable: true,
       });
     }
+    const [reconnectedDescriptor] = rebuildDiscoveryDescriptors([
+      reportedReconnectedDescriptor,
+    ]);
+    if (reconnectedDescriptor === undefined) {
+      throw new Error("Core descriptor rebuild returned no value");
+    }
     if (reconnectedDescriptor.id !== descriptor.id) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
         code: "VERIFICATION_FAILED",
         reason: "POST_WRITE_DEVICE_DESCRIPTOR_DID_NOT_MATCH",
-        details: {
-          expectedDeviceId: descriptor.id,
-          observedDeviceId: reconnectedDescriptor.id,
-        },
+        details: {},
         retryable: false,
       });
     }
@@ -258,11 +269,7 @@ export async function runFirmwareUpdate(input: {
       return machine.endUncertain("RECOVERY_REQUIRED", {
         code: "TARGET_MISMATCH",
         reason: "POST_WRITE_TARGET_VERIFICATION_FAILED",
-        details: {
-          expectedTargetId,
-          observedTargetId:
-            reconnected.identity.selectedTargetId ?? "unresolved",
-        },
+        details: { expectedTargetId },
         retryable: false,
       });
     }
@@ -276,21 +283,28 @@ export async function runFirmwareUpdate(input: {
     );
     assertNotAborted(signal);
     sessions.assertHeld(session);
+    const verificationValid = readProviderDataProperty(verification, "valid");
+    const verificationReason = readProviderDataProperty(verification, "reason");
+    const observedTargetId = readProviderDataProperty(
+      verification,
+      "observedTargetId",
+    );
+    const observedFirmwareVersion = readProviderDataProperty(
+      verification,
+      "observedFirmwareVersion",
+    );
     const verificationPassed =
-      (verification as { readonly valid?: unknown }).valid === true &&
-      (verification as { readonly reason?: unknown }).reason ===
-        "EXPECTED_FIRMWARE_OBSERVED" &&
-      verification.observedTargetId === expectedTargetId &&
-      verification.observedFirmwareVersion === artifact.firmwareVersion;
+      verificationValid === true &&
+      verificationReason === "EXPECTED_FIRMWARE_OBSERVED" &&
+      observedTargetId === expectedTargetId &&
+      observedFirmwareVersion === artifact.firmwareVersion;
     if (!verificationPassed) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
         code: "VERIFICATION_FAILED",
-        reason: verification.reason,
+        reason: "POST_WRITE_FIRMWARE_VERIFICATION_FAILED",
         details: {
           expectedTargetId,
-          observedTargetId: verification.observedTargetId ?? "unresolved",
           expectedVersion: artifact.firmwareVersion,
-          observedVersion: verification.observedFirmwareVersion ?? "unresolved",
         },
         retryable: true,
       });

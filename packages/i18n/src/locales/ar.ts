@@ -36,14 +36,42 @@ export const ar = {
   "real.origin.rx": "المستقبل (RX) · elrs_rx.local",
   "real.origin.tx": "المرسل (TX) · elrs_tx.local",
   "real.readAction": "قراءة معلومات الجهاز",
+  "real.refreshAction": "إعادة قراءة معلومات الجهاز",
   "real.cancelAction": "إلغاء القراءة",
   "real.retryAction": "إعادة المحاولة",
   "real.loading": "نقرأ إعدادات الجهاز بصورة آمنة…",
   "real.idleHelp":
     "قد يطلب المتصفح إذن الوصول إلى الشبكة المحلية. لن يُرسل أي طلب ربط أو تحديث أو إعادة تشغيل أو تغيير إعداد.",
+  "real.connectionHelp":
+    "إذا تعذرت القراءة، فتحقق من وضع Wi-Fi والشبكة والعنوان وإذن الوصول إلى الشبكة المحلية. قد يمنع المتصفح الطلب بسبب سياسة الأمان (CORS)، أو قد تنتهي مهلة الاتصال.",
+  "real.changeOriginHelp":
+    "إذا لم يعمل هذا العنوان، فاختر عنوانًا رسميًا آخر يناسب طريقة اتصال جهازك، ثم ابدأ قراءة جديدة.",
   "real.readOnlyBadge": "GET /config فقط",
   "real.unvalidatedBadge": "بانتظار التحقق على العتاد",
   "real.reportedBadge": "أبلغ عنه الجهاز",
+  "real.snapshotNotice":
+    "هذه لقطة من آخر قراءة مكتملة، وليست حالة اتصال مباشرة.",
+  "real.progress.heading": "مراحل القراءة",
+  "real.progress.preparing": "نجهّز طلبًا للقراءة فقط",
+  "real.progress.discovering": "نحاول الوصول إلى عنوان الجهاز المختار",
+  "real.progress.identifying": "نقرأ معلومات الهوية التي أبلغ عنها الجهاز",
+  "real.progress.verifying": "نتحقق من الحقول الآمنة ونستبعد البيانات الحساسة",
+  "real.progress.success": "اكتملت آخر قراءة",
+  "real.progress.failed": "توقفت القراءة قبل أن تكتمل",
+  "real.progress.cancelled": "أُلغيت القراءة",
+  "real.support.copyAction": "نسخ تفاصيل الدعم الآمنة",
+  "real.support.copying": "جارٍ نسخ تفاصيل الدعم الآمنة…",
+  "real.support.copied": "نُسخت تفاصيل الدعم الآمنة",
+  "real.support.copyFailed":
+    "تعذر نسخ تفاصيل الدعم. تحقق من إذن الحافظة ثم حاول مرة أخرى.",
+  "real.support.privacy":
+    "لا تتضمن التفاصيل المنسوخة معرّف الربط (UID)، أو اسم شبكة Wi-Fi (SSID)، أو بيانات الدخول، أو كلمات المرور، أو الاستجابة الخام، أو أي معرّف ثابت للجهاز.",
+  "real.reconnect.consistent":
+    "بعد استعادة الاتصال، تطابقت قيم Target وإصدار Firmware ونوع TX/RX المبلّغ عنها مع أول قراءة ناجحة.",
+  "real.reconnect.changed":
+    "بعد استعادة الاتصال، اختلفت قيمة واحدة أو أكثر من Target وإصدار Firmware ونوع TX/RX المبلّغ عنها عن أول قراءة ناجحة. راجعها قبل المتابعة.",
+  "real.reconnect.required":
+    "أعد الجهاز إلى وضع Wi-Fi وتأكد من الاتصال بالشبكة الصحيحة، ثم أعد القراءة.",
   "real.successTitle": "تم جمع معلومات الجهاز",
   "real.successDescription":
     "النجاح هنا يعني فقط جمع الحقول الآمنة وإعادة بنائها. لا يعني تأكيد Target أو اعتماد دعم هذا العتاد.",
@@ -219,7 +247,8 @@ export const ar = {
   "error.DEVICE_NOT_FOUND": "تعذر العثور على الجهاز.",
   "error.DEVICE_BUSY": "توجد عملية أخرى تستخدم هذا الجهاز.",
   "error.PERMISSION_DENIED": "تم رفض إذن الوصول إلى الجهاز.",
-  "error.CONNECTION_LOST": "انقطع الاتصال بالجهاز.",
+  "error.CONNECTION_LOST":
+    "تعذر الوصول إلى الجهاز، أو توقفت القراءة قبل أن تكتمل.",
   "error.IDENTITY_UNKNOWN": "تعذر تأكيد هوية الجهاز.",
   "error.IDENTITY_AMBIGUOUS":
     "تطابق أكثر من Target مع الأدلة المتاحة، لذلك توقفت العملية.",

@@ -14,6 +14,7 @@ const repositoryRoot = path.resolve(
  */
 const allowedWorkspaceDependencies = new Map([
   ["@elrs-easy/domain", new Set()],
+  ["@elrs-easy/diagnostics", new Set(["@elrs-easy/domain"])],
   ["@elrs-easy/device", new Set(["@elrs-easy/domain"])],
   ["@elrs-easy/compatibility", new Set(["@elrs-easy/domain"])],
   [
@@ -42,6 +43,7 @@ const allowedWorkspaceDependencies = new Map([
     "@elrs-easy/web",
     new Set([
       "@elrs-easy/compatibility",
+      "@elrs-easy/diagnostics",
       "@elrs-easy/domain",
       "@elrs-easy/device",
       "@elrs-easy/workflows",

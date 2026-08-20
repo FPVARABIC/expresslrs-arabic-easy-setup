@@ -1,5 +1,9 @@
 import type { TargetCatalog } from "@elrs-easy/compatibility";
-import type { DeviceSessionManager } from "@elrs-easy/device";
+import {
+  rebuildDiscoveryDescriptors,
+  rebuildProviderId,
+  type DeviceSessionManager,
+} from "@elrs-easy/device";
 import type {
   CancellationSignal,
   DeviceDescriptor,
@@ -13,6 +17,7 @@ import {
   identityGateError,
   inspectHeldDevice,
   isAbortError,
+  readProviderDataProperty,
   releaseIfHeld,
   safeOperationError,
 } from "./sensitive-operation-helpers.js";
@@ -53,7 +58,6 @@ export async function runEasyBinding(input: {
   const operationId = input.operationId;
   const descriptor: DeviceDescriptor = Object.freeze({ ...input.descriptor });
   const provider = input.provider;
-  const providerId = provider.id;
   const sessions = input.sessions;
   const catalog = input.catalog;
   const userConfirmed = input.userConfirmed;
@@ -69,10 +73,12 @@ export async function runEasyBinding(input: {
   let session: DeviceSession | null = null;
   let commandStarted = false;
   let commandCompleted = false;
+  let providerId: string;
 
   try {
     assertNotAborted(signal);
     machine.transition("PREPARING");
+    providerId = rebuildProviderId(readProviderDataProperty(provider, "id"));
     assertNotAborted(signal);
     machine.transition("IDENTIFYING");
     assertNotAborted(signal);
@@ -120,8 +126,7 @@ export async function runEasyBinding(input: {
     commandStarted = true;
     const receipt = await provider.executeBinding(session, signal);
     commandCompleted =
-      (receipt as { readonly commandCompleted?: unknown }).commandCompleted ===
-      true;
+      readProviderDataProperty(receipt, "commandCompleted") === true;
     assertNotAborted(signal);
     if (!commandCompleted) {
       return machine.endUncertain("UNKNOWN_STATE", {
@@ -139,12 +144,12 @@ export async function runEasyBinding(input: {
       messageCode: "BINDING_COMMAND_COMPLETED_RECONNECTING",
     });
     assertNotAborted(signal);
-    const reconnectedDescriptor = await provider.reconnect(
+    const reportedReconnectedDescriptor = await provider.reconnect(
       descriptor.id,
       signal,
     );
     assertNotAborted(signal);
-    if (reconnectedDescriptor === null) {
+    if (reportedReconnectedDescriptor === null) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
         code: "RECOVERY_REQUIRED",
         reason: "DEVICE_DID_NOT_RETURN_AFTER_BINDING",
@@ -152,14 +157,17 @@ export async function runEasyBinding(input: {
         retryable: true,
       });
     }
+    const [reconnectedDescriptor] = rebuildDiscoveryDescriptors([
+      reportedReconnectedDescriptor,
+    ]);
+    if (reconnectedDescriptor === undefined) {
+      throw new Error("Core descriptor rebuild returned no value");
+    }
     if (reconnectedDescriptor.id !== descriptor.id) {
       return machine.endUncertain("UNKNOWN_STATE", {
         code: "VERIFICATION_FAILED",
         reason: "RECONNECTED_DEVICE_DESCRIPTOR_DID_NOT_MATCH",
-        details: {
-          expectedDeviceId: descriptor.id,
-          observedDeviceId: reconnectedDescriptor.id,
-        },
+        details: {},
         retryable: false,
       });
     }
@@ -183,11 +191,7 @@ export async function runEasyBinding(input: {
       return machine.endUncertain("UNKNOWN_STATE", {
         code: "TARGET_MISMATCH",
         reason: "RECONNECTED_DEVICE_IDENTITY_DID_NOT_MATCH",
-        details: {
-          expectedTargetId,
-          observedTargetId:
-            reconnected.identity.selectedTargetId ?? "unresolved",
-        },
+        details: { expectedTargetId },
         retryable: false,
       });
     }
@@ -198,13 +202,12 @@ export async function runEasyBinding(input: {
     assertNotAborted(signal);
     sessions.assertHeld(session);
     const verificationPassed =
-      (verification as { readonly linked?: unknown }).linked === true &&
-      (verification as { readonly reason?: unknown }).reason ===
-        "LINK_ESTABLISHED";
+      readProviderDataProperty(verification, "linked") === true &&
+      readProviderDataProperty(verification, "reason") === "LINK_ESTABLISHED";
     if (!verificationPassed) {
       return machine.fail({
         code: "VERIFICATION_FAILED",
-        reason: verification.reason,
+        reason: "BINDING_LINK_VERIFICATION_FAILED",
         details: { targetId: expectedTargetId },
         retryable: true,
       });

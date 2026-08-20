@@ -146,7 +146,7 @@ describe("Easy Binding with a synthetic provider", () => {
 
       expect(operation.state).toBe("FAILED");
       expect(operation.error?.code).toBe("VERIFICATION_FAILED");
-      expect(operation.error?.reason).toBe(reason);
+      expect(operation.error?.reason).toBe("BINDING_LINK_VERIFICATION_FAILED");
       expect(operation.history).toContain("VERIFYING");
     });
   }
@@ -299,20 +299,67 @@ describe("Easy Binding with a synthetic provider", () => {
 
     expect(operation.state).toBe("FAILED");
     expect(operation.verificationPassed).toBe(false);
-    expect(operation.error?.reason).toBe("MODEL_MISMATCH");
+    expect(operation.error?.reason).toBe("BINDING_LINK_VERIFICATION_FAILED");
   });
 
   it("keeps command outcome unknown when completion is not confirmed", async () => {
+    let getterCalls = 0;
     const operation = await run(
       new ScriptedBindingProvider({
         initial: sensitiveOperationFixtures.initial,
-        executionReceipt: { commandCompleted: false } as never,
+        executionReceipt: Object.defineProperty({}, "commandCompleted", {
+          get() {
+            getterCalls += 1;
+            throw new Error("binding-phrase-secret");
+          },
+        }) as never,
       }),
     );
 
     expect(operation.state).toBe("UNKNOWN_STATE");
     expect(operation.verificationPassed).toBe(false);
     expect(operation.history).not.toContain("RECONNECTING");
+    expect(getterCalls).toBe(0);
+  });
+
+  it("does not copy provider verification diagnostics into a failure", async () => {
+    const secret = "BINDING_PHRASE_SECRET_ABC123";
+    const operation = await run(
+      new ScriptedBindingProvider({
+        initial: sensitiveOperationFixtures.initial,
+        verification: { linked: false, reason: secret } as never,
+      }),
+      "binding-secret-verification",
+    );
+
+    expect(operation.error?.reason).toBe("BINDING_LINK_VERIFICATION_FAILED");
+    expect(JSON.stringify(operation)).not.toContain(secret);
+  });
+
+  it("does not execute a provider id accessor outside the error boundary", async () => {
+    const provider = new ScriptedBindingProvider({
+      initial: sensitiveOperationFixtures.initial,
+    });
+    let getterCalls = 0;
+    Object.defineProperty(provider, "id", {
+      configurable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error("BINDING_PHRASE_SECRET_ABC123");
+      },
+    });
+
+    const operation = await run(provider, "binding-hostile-provider-id");
+
+    expect(operation.state).toBe("FAILED");
+    expect(operation.error).toMatchObject({
+      code: "PROVIDER_UNSUPPORTED",
+      reason: "BINDING_PROVIDER_FAILED_UNEXPECTEDLY",
+      details: {},
+    });
+    expect(provider.calls).toEqual([]);
+    expect(getterCalls).toBe(0);
+    expect(JSON.stringify(operation)).not.toContain("SECRET_ABC123");
   });
 
   it("re-identifies from the beginning on a retry attempt", async () => {

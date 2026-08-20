@@ -7,7 +7,7 @@ import {
   identityClaims,
   identityResolutionReasons,
 } from "@elrs-easy/domain";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ExpressLrsLocalHttpDiscoveryProvider,
@@ -19,6 +19,12 @@ import {
 } from "./local-http-discovery-provider.js";
 
 const observedAt = new Date("2026-08-20T12:00:00.000Z");
+
+afterEach(async () => {
+  // Successful cancellation may release the per-origin quarantine in the next
+  // task after the original adapter error has already reached the caller.
+  await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+});
 
 const completePayload = {
   settings: {
@@ -64,19 +70,47 @@ function jsonResponse(
   });
 }
 
+function lockedResponse(contentType = "application/json") {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(value) {
+      controller = value;
+    },
+    pull: async () => new Promise<never>(() => undefined),
+  });
+  const response = new Response(stream, {
+    status: 200,
+    headers: { "content-type": contentType },
+  });
+  const body = response.body!;
+  const reader = body.getReader();
+  const pendingRead = reader.read();
+  const cancel = vi.spyOn(body, "cancel");
+  return {
+    response,
+    cancel,
+    async releaseExternalReader() {
+      controller.error(new Error("TEST_EXTERNAL_READER_RELEASED"));
+      await pendingRead.catch(() => undefined);
+      reader.releaseLock();
+    },
+  };
+}
+
 function provider(
   input: {
     readonly origin?: ExpressLrsLocalHttpOrigin;
     readonly fetch?: BrowserFetch;
     readonly timeoutMs?: number;
     readonly createDeviceId?: () => string;
+    readonly now?: () => Date;
   } = {},
 ): ExpressLrsLocalHttpDiscoveryProvider {
   return new ExpressLrsLocalHttpDiscoveryProvider({
     origin: input.origin ?? "http://10.0.0.1",
     fetch: input.fetch ?? (async () => jsonResponse()),
     timeoutMs: input.timeoutMs ?? 1_000,
-    now: () => observedAt,
+    now: input.now ?? (() => observedAt),
     createDeviceId: input.createDeviceId ?? (() => "ephemeral-test-device"),
   });
 }
@@ -311,6 +345,46 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     },
   );
 
+  it.each([
+    ["TX", true, false, "LOW_BAND", true],
+    ["RX", false, true, "HIGH_BAND", false],
+  ] as const)(
+    "maps a %s single-band snapshot without model-specific branches",
+    async (role, hasLowBand, hasHighBand, expectedBand, customHardware) => {
+      const adapter = provider({
+        fetch: async () =>
+          jsonResponse({
+            settings: {
+              target: `reference.${role.toLowerCase()}.test`,
+              version: "4.1.0",
+              "module-type": role,
+              has_low_band: hasLowBand,
+              has_high_band: hasHighBand,
+              custom_hardware: customHardware,
+            },
+            config: {},
+          }),
+      });
+      const descriptor = (await adapter.discover())[0]!;
+      const evidence = await adapter.readIdentity(session(descriptor.id));
+      const capabilities = await adapter.readCapabilities(
+        session(descriptor.id),
+      );
+
+      expect(
+        evidence.find((item) => item.claim === identityClaims.deviceRole)
+          ?.rawValue,
+      ).toBe(role);
+      expect(
+        evidence.find((item) => item.claim === identityClaims.frequencyBand)
+          ?.rawValue,
+      ).toBe(expectedBand);
+      expect(
+        capabilities.find((item) => item.id === "custom-hardware")?.available,
+      ).toBe(customHardware);
+    },
+  );
+
   it("serializes concurrent provider instances for the same origin", async () => {
     let releaseFetch!: (response: unknown) => void;
     const heldResponse = new Promise<unknown>((resolve) => {
@@ -342,6 +416,26 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
 
     const afterRelease = provider({ fetch: async () => jsonResponse() });
     await expect(afterRelease.discover()).resolves.toHaveLength(1);
+  });
+
+  it("rejects concurrent discovery on the same provider instance", async () => {
+    let releaseFetch!: (response: unknown) => void;
+    const heldResponse = new Promise<unknown>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const fetch = vi.fn<BrowserFetch>(async () => heldResponse);
+    const adapter = provider({ fetch });
+
+    const firstDiscovery = adapter.discover();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    await expectCoreError(
+      adapter.discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_DISCOVERY_ALREADY_RUNNING",
+    );
+
+    releaseFetch(jsonResponse());
+    await expect(firstDiscovery).resolves.toHaveLength(1);
   });
 
   it("ignores unknown fields and permits missing optional fields", async () => {
@@ -431,6 +525,52 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     expect(error.message).not.toContain("PRIVATE_UID");
   });
 
+  it("rejects malformed UTF-8 before JSON parsing", async () => {
+    const adapter = provider({
+      fetch: async () =>
+        new Response(new Uint8Array([0xc3, 0x28]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_BODY_ENCODING_INVALID",
+    );
+  });
+
+  it.each([
+    ["application/json", true],
+    ["application/json; charset=utf-8", true],
+    ['APPLICATION/JSON; CHARSET="UTF-8"', true],
+    ["application/json; totally-invalid-trailing-junk", false],
+    ["application/json; charset=iso-8859-1", false],
+    ["application/json, text/html", false],
+  ] as const)(
+    "enforces the strict JSON Content-Type grammar: %s",
+    async (contentType, accepted) => {
+      const adapter = provider({
+        fetch: async () =>
+          new Response(JSON.stringify(completePayload), {
+            status: 200,
+            headers: { "content-type": contentType },
+          }),
+      });
+
+      if (accepted) {
+        await expect(adapter.discover()).resolves.toHaveLength(1);
+      } else {
+        await expectCoreError(
+          adapter.discover(),
+          "PROVIDER_UNSUPPORTED",
+          "LOCAL_HTTP_CONTENT_TYPE_INVALID",
+        );
+      }
+    },
+  );
+
   it.each([
     [
       async () =>
@@ -467,15 +607,107 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     },
   );
 
-  it("rejects an oversized Content-Length before reading", async () => {
-    const body = new ReadableStream<Uint8Array>({
-      pull() {
-        throw new Error("BODY_MUST_NOT_BE_READ");
+  it.each(["-1", "01", "1.5", "NaN", "9007199254740992"])(
+    "rejects malformed Content-Length %s",
+    async (contentLength) => {
+      const adapter = provider({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "content-length": contentLength,
+            },
+          }),
+      });
+
+      await expectCoreError(
+        adapter.discover(),
+        "PROVIDER_UNSUPPORTED",
+        "LOCAL_HTTP_CONTENT_LENGTH_INVALID",
+      );
+    },
+  );
+
+  it.each([
+    {
+      label: "headers",
+      reason: "LOCAL_HTTP_HEADERS_INVALID",
+      response: {
+        status: 200,
+        redirected: false,
+        headers: null,
+        body: null,
       },
+    },
+    {
+      label: "body stream",
+      reason: "LOCAL_HTTP_BODY_STREAM_REQUIRED",
+      response: {
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: null,
+      },
+    },
+    {
+      label: "body reader",
+      reason: "LOCAL_HTTP_BODY_READER_INVALID",
+      response: {
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: { cancel: async () => undefined, getReader: () => null },
+      },
+    },
+  ])("rejects an invalid $label boundary", async ({ response, reason }) => {
+    const adapter = provider({ fetch: async () => response });
+
+    await expectCoreError(adapter.discover(), "PROVIDER_UNSUPPORTED", reason);
+  });
+
+  it("cancels and quarantines a rejected response until cleanup settles", async () => {
+    let settleCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      settleCleanup = resolve;
     });
+    const cancel = vi.fn(async () => cleanup);
+    const adapter = provider({
+      fetch: async () => ({
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "text/html" }),
+        body: {
+          cancel,
+          getReader() {
+            throw new Error("REJECTED_BODY_MUST_NOT_BE_READ");
+          },
+        },
+      }),
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_CONTENT_TYPE_INVALID",
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await expectCoreError(
+      provider().discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+
+    settleCleanup();
+    await vi.waitFor(async () => {
+      await expect(provider().discover()).resolves.toHaveLength(1);
+    });
+  });
+
+  it("rejects an oversized Content-Length before reading", async () => {
     const adapter = provider({
       fetch: async () =>
-        new Response(body, {
+        new Response("{}", {
           status: 200,
           headers: {
             "content-type": "application/json",
@@ -514,9 +746,130 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     );
   });
 
-  it("maps a timeout while fetch is pending to CONNECTION_LOST", async () => {
+  it.each([
+    [new Uint8Array(), "LOCAL_HTTP_BODY_CHUNK_INVALID"],
+    ["not-a-byte-view", "LOCAL_HTTP_BODY_CHUNK_INVALID"],
+  ] as const)("rejects an invalid streamed chunk %#", async (value, reason) => {
     const adapter = provider({
-      fetch: async () => new Promise<never>(() => undefined),
+      fetch: async () => ({
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: {
+          getReader() {
+            return {
+              async read() {
+                return { done: false, value };
+              },
+              async cancel() {},
+              releaseLock() {},
+            };
+          },
+        },
+      }),
+    });
+
+    await expectCoreError(adapter.discover(), "PROVIDER_UNSUPPORTED", reason);
+  });
+
+  it("maps a rejected stream read and tracks reader cancellation", async () => {
+    const secret = "PRIVATE_STREAM_IMPLEMENTATION_DETAIL";
+    const cancel = vi.fn(async () => undefined);
+    const adapter = provider({
+      fetch: async () => ({
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: {
+          getReader() {
+            return {
+              async read() {
+                throw new Error(secret);
+              },
+              cancel,
+              releaseLock() {},
+            };
+          },
+        },
+      }),
+    });
+
+    const error = await expectCoreError(
+      adapter.discover(),
+      "CONNECTION_LOST",
+      "LOCAL_HTTP_BODY_READ_FAILED",
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(error.operationError)).not.toContain(secret);
+  });
+
+  it("bounds streamed chunk count even below the byte limit", async () => {
+    let reads = 0;
+    const adapter = provider({
+      fetch: async () => ({
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: {
+          getReader() {
+            return {
+              async read() {
+                reads += 1;
+                return { done: false, value: new Uint8Array([0x20]) };
+              },
+              async cancel() {},
+              releaseLock() {},
+            };
+          },
+        },
+      }),
+      timeoutMs: 1_000,
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_BODY_CHUNK_LIMIT_EXCEEDED",
+    );
+    expect(reads).toBe(4_097);
+  });
+
+  it.each([
+    [0, "LOCAL_HTTP_TIMEOUT_INVALID"],
+    [60_001, "LOCAL_HTTP_TIMEOUT_INVALID"],
+  ] as const)("rejects an invalid timeout %s", (timeoutMs, reason) => {
+    expect(() => provider({ timeoutMs })).toThrowError(
+      expect.objectContaining({
+        operationError: expect.objectContaining({ reason }),
+      }),
+    );
+  });
+
+  it("rejects invalid generated ids and clocks without echoing values", async () => {
+    const secret = "PRIVATE_DEVICE_ID_WITH SPACE";
+    const invalidId = provider({ createDeviceId: () => secret });
+    const idError = await expectCoreError(
+      invalidId.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_DEVICE_ID_INVALID",
+    );
+    expect(JSON.stringify(idError.operationError)).not.toContain(secret);
+
+    const invalidClock = provider({ now: () => new Date(Number.NaN) });
+    await expectCoreError(
+      invalidClock.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_CLOCK_INVALID",
+    );
+  });
+
+  it("maps a timeout while fetch is pending to CONNECTION_LOST", async () => {
+    let settleFetch!: (response: unknown) => void;
+    const pendingFetch = new Promise<unknown>((resolve) => {
+      settleFetch = resolve;
+    });
+    const adapter = provider({
+      fetch: async () => pendingFetch,
       timeoutMs: 5,
     });
 
@@ -525,11 +878,74 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
       "CONNECTION_LOST",
       "LOCAL_HTTP_REQUEST_TIMEOUT",
     );
-    await expect(provider().discover()).resolves.toHaveLength(1);
+    await expectCoreError(
+      provider().discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+
+    settleFetch(jsonResponse());
+    await vi.waitFor(async () => {
+      await expect(provider().discover()).resolves.toHaveLength(1);
+    });
+  });
+
+  it("owns a late response body until its cleanup settles", async () => {
+    let settleFetch!: (response: unknown) => void;
+    const pendingFetch = new Promise<unknown>((resolve) => {
+      settleFetch = resolve;
+    });
+    let settleCleanup!: () => void;
+    const pendingCleanup = new Promise<void>((resolve) => {
+      settleCleanup = resolve;
+    });
+    const cancel = vi.fn(async () => pendingCleanup);
+    const adapter = provider({
+      fetch: async () => pendingFetch,
+      timeoutMs: 5,
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "CONNECTION_LOST",
+      "LOCAL_HTTP_REQUEST_TIMEOUT",
+    );
+    await expectCoreError(
+      provider().discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+
+    settleFetch({
+      status: 200,
+      redirected: false,
+      headers: new Headers({ "content-type": "application/json" }),
+      body: {
+        cancel,
+        getReader() {
+          throw new Error("LATE_BODY_MUST_ONLY_BE_CANCELLED");
+        },
+      },
+    });
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    await expectCoreError(
+      provider().discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+
+    settleCleanup();
+    await vi.waitFor(async () => {
+      await expect(provider().discover()).resolves.toHaveLength(1);
+    });
   });
 
   it("keeps the timeout active while the response body is hung", async () => {
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
       pull: async () => new Promise<never>(() => undefined),
     });
     const adapter = provider({
@@ -546,19 +962,38 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
       "CONNECTION_LOST",
       "LOCAL_HTTP_REQUEST_TIMEOUT",
     );
+    // Reader cancellation settles the tracked stream transport, so a fresh
+    // explicit attempt may proceed after the timeout.
+    await vi.waitFor(async () => {
+      await expect(provider().discover()).resolves.toHaveLength(1);
+    });
+    bodyController.error(new Error("TEST_STREAM_ALREADY_RELEASED"));
   });
 
   it("propagates caller cancellation while fetch is pending", async () => {
+    let settleFetch!: (response: unknown) => void;
+    const pendingFetch = new Promise<unknown>((resolve) => {
+      settleFetch = resolve;
+    });
     const controller = new AbortController();
     const adapter = provider({
-      fetch: async () => new Promise<never>(() => undefined),
+      fetch: async () => pendingFetch,
     });
     const discovery = adapter.discover(controller.signal);
 
     controller.abort();
 
     await expect(discovery).rejects.toMatchObject({ name: "AbortError" });
-    await expect(provider().discover()).resolves.toHaveLength(1);
+    await expectCoreError(
+      provider().discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+
+    settleFetch(jsonResponse());
+    await vi.waitFor(async () => {
+      await expect(provider().discover()).resolves.toHaveLength(1);
+    });
   });
 
   it("propagates caller cancellation while the body stream is pending", async () => {
@@ -566,7 +1001,11 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     const readStarted = new Promise<void>((resolve) => {
       bodyReadStarted = resolve;
     });
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
       pull: async () => {
         bodyReadStarted();
         return new Promise<never>(() => undefined);
@@ -586,6 +1025,8 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     controller.abort();
 
     await expect(discovery).rejects.toMatchObject({ name: "AbortError" });
+    await expect(provider().discover()).resolves.toHaveLength(1);
+    bodyController.error(new Error("TEST_STREAM_ALREADY_RELEASED"));
   });
 
   it("does not leak a rejected fetch diagnostic", async () => {
@@ -734,6 +1175,105 @@ describe("ExpressLrsLocalHttpDiscoveryProvider", () => {
     expect(
       Object.isFrozen(expressLrsLocalHttpCapabilityAssessment.limitations),
     ).toBe(true);
+  });
+
+  it("keeps a late locked response quarantined when body cancellation rejects", async () => {
+    const origin = expressLrsLocalHttpOrigins[0];
+    let settleFetch!: (response: unknown) => void;
+    const pendingFetch = new Promise<unknown>((resolve) => {
+      settleFetch = resolve;
+    });
+    const locked = lockedResponse();
+    const adapter = provider({
+      origin,
+      fetch: async () => pendingFetch,
+      timeoutMs: 5,
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "CONNECTION_LOST",
+      "LOCAL_HTTP_REQUEST_TIMEOUT",
+    );
+    settleFetch(locked.response);
+    await vi.waitFor(() => expect(locked.cancel).toHaveBeenCalledTimes(1));
+    await expectCoreError(
+      provider({ origin }).discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+    await locked.releaseExternalReader();
+  });
+
+  it("rejects a dynamic thenable without releasing early response quarantine", async () => {
+    const origin = expressLrsLocalHttpOrigins[1];
+    let thenGetterCalls = 0;
+    const dynamicThenable = Object.defineProperty({}, "then", {
+      get() {
+        thenGetterCalls += 1;
+        return thenGetterCalls === 1
+          ? () => new Promise<never>(() => undefined)
+          : undefined;
+      },
+    });
+    const cancel = vi.fn(() => dynamicThenable);
+    const adapter = provider({
+      origin,
+      fetch: async () => ({
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "text/html" }),
+        body: {
+          cancel,
+          getReader() {
+            throw new Error("PRIVATE_BODY_MUST_NOT_BE_READ");
+          },
+        },
+      }),
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_CONTENT_TYPE_INVALID",
+    );
+    expect(cancel).toHaveBeenCalledTimes(1);
+    // The cleanup boundary requires a genuine Promise and never evaluates the
+    // attacker-controlled then getter, so its settlement cannot be forged.
+    expect(thenGetterCalls).toBe(0);
+    await expectCoreError(
+      provider({ origin }).discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
+  });
+
+  it("keeps cleanup unproven when cancel is absent and reader acquisition throws", async () => {
+    const origin = expressLrsLocalHttpOrigins[2];
+    const getReader = vi.fn(() => {
+      throw new Error("PRIVATE_CLEANUP_FAILURE");
+    });
+    const adapter = provider({
+      origin,
+      fetch: async () => ({
+        status: 200,
+        redirected: false,
+        headers: new Headers({ "content-type": "text/html" }),
+        body: { getReader },
+      }),
+    });
+
+    await expectCoreError(
+      adapter.discover(),
+      "PROVIDER_UNSUPPORTED",
+      "LOCAL_HTTP_CONTENT_TYPE_INVALID",
+    );
+    expect(getReader).toHaveBeenCalledTimes(1);
+    await expectCoreError(
+      provider({ origin }).discover(),
+      "DEVICE_BUSY",
+      "LOCAL_HTTP_ORIGIN_ALREADY_IN_USE",
+    );
   });
 });
 

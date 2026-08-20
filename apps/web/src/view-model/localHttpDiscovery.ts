@@ -1,4 +1,12 @@
 import { InMemoryTargetCatalog } from "@elrs-easy/compatibility";
+import {
+  createReadOnlyDiagnosticReport,
+  readOnlyStageCategories,
+  type ReadOnlyDiagnosticReport,
+  type ReadOnlyFactCategory,
+  type ReadOnlyReconnectState,
+  type ReadOnlyStageCategory,
+} from "@elrs-easy/diagnostics";
 import { ExclusiveDeviceSessionManager } from "@elrs-easy/device";
 import {
   CoreOperationError,
@@ -44,7 +52,10 @@ export interface LocalHttpDiscoveryOutcome {
   readonly errorCode: OperationErrorCode | null;
   readonly retryable: boolean;
   readonly facts: readonly LocalHttpDeviceFact[];
+  readonly stageCategories: readonly ReadOnlyStageCategory[];
 }
+
+export type LocalHttpProgressObserver = (stage: ReadOnlyStageCategory) => void;
 
 const emptyTargetCatalog = new InMemoryTargetCatalog(
   {
@@ -91,6 +102,7 @@ function terminalOutcome(input: {
   readonly state: "FAILED" | "CANCELLED";
   readonly errorCode?: OperationErrorCode;
   readonly retryable?: boolean;
+  readonly stageCategories: readonly ReadOnlyStageCategory[];
 }): LocalHttpDiscoveryOutcome {
   return Object.freeze({
     state: input.state,
@@ -100,7 +112,31 @@ function terminalOutcome(input: {
     errorCode: input.errorCode ?? null,
     retryable: input.retryable ?? false,
     facts: Object.freeze([]),
+    stageCategories: Object.freeze([...input.stageCategories]),
   });
+}
+
+function addProgressStage(
+  stages: Set<ReadOnlyStageCategory>,
+  value: unknown,
+  observer?: LocalHttpProgressObserver,
+): void {
+  if (
+    typeof value !== "string" ||
+    !readOnlyStageCategories.includes(value as ReadOnlyStageCategory)
+  ) {
+    return;
+  }
+  const stage = value as ReadOnlyStageCategory;
+  if (stages.has(stage)) {
+    return;
+  }
+  stages.add(stage);
+  try {
+    observer?.(stage);
+  } catch {
+    // Host observability must not affect the read or expose callback errors.
+  }
 }
 
 function factsFromEvidence(
@@ -135,6 +171,7 @@ export async function runLocalHttpDiscovery(input: {
   readonly origin: ExpressLrsLocalHttpOrigin;
   readonly signal?: CancellationSignal;
   readonly fetch?: BrowserFetch;
+  readonly onProgress?: LocalHttpProgressObserver;
 }): Promise<LocalHttpDiscoveryOutcome> {
   // Snapshot getter-backed host input exactly once before construction or any
   // network await. The request origin and its stable endpoint id must never
@@ -142,6 +179,8 @@ export async function runLocalHttpDiscovery(input: {
   const origin = input.origin;
   const signal = input.signal;
   const browserFetch = input.fetch;
+  const onProgress = input.onProgress;
+  const stages = new Set<ReadOnlyStageCategory>();
   try {
     const provider = new ExpressLrsLocalHttpDiscoveryProvider({
       origin,
@@ -156,11 +195,18 @@ export async function runLocalHttpDiscovery(input: {
     });
     const operation = await module.discover({
       operationId: `web-local-http-discovery-${++operationSequence}`,
+      onProgress(snapshot) {
+        addProgressStage(stages, snapshot.state, onProgress);
+      },
       ...(signal === undefined ? {} : { signal }),
     });
 
     if (operation.state === "CANCELLED") {
-      return terminalOutcome({ state: "CANCELLED" });
+      addProgressStage(stages, "CANCELLED", onProgress);
+      return terminalOutcome({
+        state: "CANCELLED",
+        stageCategories: [...stages],
+      });
     }
     const device = operation.result?.devices[0];
     if (operation.state !== "SUCCESS" || device === undefined) {
@@ -168,6 +214,7 @@ export async function runLocalHttpDiscovery(input: {
         state: "FAILED",
         errorCode: operation.error?.code ?? "INTERNAL_ERROR",
         retryable: operation.error?.retryable ?? false,
+        stageCategories: [...stages],
       });
     }
 
@@ -179,13 +226,16 @@ export async function runLocalHttpDiscovery(input: {
       errorCode: null,
       retryable: false,
       facts: factsFromEvidence(device.snapshot.evidence),
+      stageCategories: Object.freeze([...stages]),
     });
   } catch (error: unknown) {
     if (error instanceof CoreOperationError) {
+      addProgressStage(stages, "FAILED", onProgress);
       return terminalOutcome({
         state: "FAILED",
         errorCode: error.operationError.code,
         retryable: error.operationError.retryable,
+        stageCategories: [...stages],
       });
     }
     if (
@@ -194,8 +244,90 @@ export async function runLocalHttpDiscovery(input: {
       "name" in error &&
       error.name === "AbortError"
     ) {
-      return terminalOutcome({ state: "CANCELLED" });
+      addProgressStage(stages, "CANCELLED", onProgress);
+      return terminalOutcome({
+        state: "CANCELLED",
+        stageCategories: [...stages],
+      });
     }
-    return terminalOutcome({ state: "FAILED", errorCode: "INTERNAL_ERROR" });
+    addProgressStage(stages, "FAILED", onProgress);
+    return terminalOutcome({
+      state: "FAILED",
+      errorCode: "INTERNAL_ERROR",
+      stageCategories: [...stages],
+    });
   }
+}
+
+const diagnosticFactCategory: Readonly<
+  Record<LocalHttpFactKey, ReadOnlyFactCategory>
+> = Object.freeze({
+  product: "PRODUCT",
+  target: "TARGET",
+  version: "FIRMWARE_VERSION",
+  commit: "FIRMWARE_COMMIT",
+  role: "DEVICE_ROLE",
+  radio: "RADIO_FAMILY",
+  band: "FREQUENCY_BAND",
+  regLow: "REGULATORY_DOMAIN_LOW",
+  regHigh: "REGULATORY_DOMAIN_HIGH",
+  custom: "CUSTOM_HARDWARE_PRESENT",
+});
+
+function safeFactValue(
+  facts: readonly LocalHttpDeviceFact[],
+  key: LocalHttpFactKey,
+): string | null {
+  try {
+    const fact = facts.find(
+      (candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        candidate.key === key &&
+        typeof candidate.value === "string",
+    );
+    return fact?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compares only the minimum self-reported identity envelope in memory. A
+ * match means consistent snapshots, never authenticated physical identity.
+ */
+export function compareLocalHttpIdentitySnapshots(
+  baseline: readonly LocalHttpDeviceFact[],
+  current: readonly LocalHttpDeviceFact[],
+): "CONSISTENT" | "CHANGED" {
+  for (const key of ["target", "version", "role"] as const) {
+    const before = safeFactValue(baseline, key);
+    const after = safeFactValue(current, key);
+    if (before === null || after === null || before !== after) {
+      return "CHANGED";
+    }
+  }
+  return "CONSISTENT";
+}
+
+export function createLocalHttpSupportReport(input: {
+  readonly outcome: LocalHttpDiscoveryOutcome;
+  readonly attempts: number;
+  readonly baselineAvailable: boolean;
+  readonly reconnectState: ReadOnlyReconnectState;
+}): ReadOnlyDiagnosticReport {
+  return createReadOnlyDiagnosticReport({
+    outcome: input.outcome.state,
+    confidence: input.outcome.confidence,
+    errorCode: input.outcome.errorCode,
+    retryable: input.outcome.retryable,
+    verificationPassed: input.outcome.verificationPassed,
+    attempts: input.attempts,
+    baselineAvailable: input.baselineAvailable,
+    reconnectState: input.reconnectState,
+    factCategories: input.outcome.facts.map(
+      (fact) => diagnosticFactCategory[fact.key],
+    ),
+    stageCategories: input.outcome.stageCategories,
+  });
 }

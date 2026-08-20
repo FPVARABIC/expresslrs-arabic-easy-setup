@@ -10,14 +10,17 @@ import {
   type IdentityEvidenceTrustPolicy,
 } from "@elrs-easy/device";
 import {
-  CoreOperationError,
   type CancellationSignal,
   type DeviceIdentityResolution,
   type DeviceSnapshot,
-  type OperationError,
   type OperationRecord,
 } from "@elrs-easy/domain";
 
+import {
+  isAbortError,
+  readProviderDataProperty,
+  safeOperationError,
+} from "./sensitive-operation-helpers.js";
 import {
   VerifiedOperationMachine,
   type OperationObserver,
@@ -32,27 +35,6 @@ export interface DiscoveredDevice {
 export interface ReadOnlyDiscoveryResult {
   readonly providerId: string;
   readonly devices: readonly DiscoveredDevice[];
-}
-
-function safeError(error: unknown): OperationError {
-  if (error instanceof CoreOperationError) {
-    return error.operationError;
-  }
-  return {
-    code: "INTERNAL_ERROR",
-    reason: "DISCOVERY_PROVIDER_FAILED",
-    details: {},
-    retryable: true,
-  };
-}
-
-function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    error.name === "AbortError"
-  );
 }
 
 /**
@@ -104,7 +86,9 @@ export async function runReadOnlyDiscovery(input: {
     assertNotAborted(signal);
     // Read and validate the provider's public id once after PREPARING so a
     // malformed adapter produces a structured FAILED operation.
-    const providerId = rebuildProviderId(provider.id);
+    const providerId = rebuildProviderId(
+      readProviderDataProperty(provider, "id"),
+    );
     assertNotAborted(signal);
     machine.transition("DISCOVERING");
     assertNotAborted(signal);
@@ -189,6 +173,6 @@ export async function runReadOnlyDiscovery(input: {
         messageCode: "OPERATION_CANCELLED",
       });
     }
-    return machine.fail(safeError(error));
+    return machine.fail(safeOperationError(error, "DISCOVERY_PROVIDER_FAILED"));
   }
 }

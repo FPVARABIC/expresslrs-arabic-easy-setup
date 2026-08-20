@@ -26,6 +26,34 @@ describe("Arabic-first message catalogs", () => {
     }
   });
 
+  it("has complete Arabic messages for real read progress, support, and reconnect states", () => {
+    const requiredKeys = [
+      "real.progress.heading",
+      "real.progress.preparing",
+      "real.progress.discovering",
+      "real.progress.identifying",
+      "real.progress.verifying",
+      "real.progress.success",
+      "real.progress.failed",
+      "real.progress.cancelled",
+      "real.support.copyAction",
+      "real.support.copying",
+      "real.support.copied",
+      "real.support.copyFailed",
+      "real.support.privacy",
+      "real.reconnect.consistent",
+      "real.reconnect.changed",
+      "real.reconnect.required",
+    ] as const satisfies readonly MessageKey[];
+    const arabicCatalog: Partial<Record<MessageKey, string>> = ar;
+
+    expect(
+      requiredKeys.filter(
+        (key) => (arabicCatalog[key]?.trim().length ?? 0) === 0,
+      ),
+    ).toEqual([]);
+  });
+
   it("retains the explicit English fallback for optional debug text", () => {
     expect(translate("ar", "debug.englishOnly")).toBe(
       "English fallback verified",

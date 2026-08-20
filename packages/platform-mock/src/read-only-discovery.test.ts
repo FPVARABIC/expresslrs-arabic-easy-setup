@@ -2,6 +2,7 @@ import {
   ExclusiveDeviceSessionManager,
   type DiscoveryProvider,
 } from "@elrs-easy/device";
+import { CoreOperationError } from "@elrs-easy/domain";
 import { runReadOnlyDiscovery } from "@elrs-easy/workflows";
 import { describe, expect, it } from "vitest";
 
@@ -99,6 +100,80 @@ describe("runReadOnlyDiscovery with synthetic families", () => {
     ).not.toThrow();
   });
 
+  it("drops provider-controlled error diagnostics at the workflow boundary", async () => {
+    const secret = "binding_phrase_S3CRET_ABC123";
+    const secretReason = "BINDING_PHRASE_SECRET_ABC123";
+    const provider = {
+      id: "hostile-error-provider",
+      async discover() {
+        throw new CoreOperationError({
+          code: "CONNECTION_LOST",
+          reason: secretReason,
+          details: {
+            targetId: secret,
+            providerId: "credential_shaped_but_valid_token",
+          },
+          retryable: true,
+        });
+      },
+      async readIdentity() {
+        return [];
+      },
+      async readCapabilities() {
+        return [];
+      },
+    } satisfies DiscoveryProvider;
+
+    const operation = await runReadOnlyDiscovery({
+      operationId: "discovery-hostile-provider-error",
+      provider,
+      sessions: sessions(),
+      catalog: syntheticTargetCatalog,
+    });
+    const serialized = JSON.stringify(operation);
+
+    expect(operation.state).toBe("FAILED");
+    expect(operation.error).toMatchObject({
+      code: "CONNECTION_LOST",
+      reason: "DISCOVERY_PROVIDER_FAILED",
+      details: {},
+      retryable: true,
+    });
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(secretReason);
+    expect(serialized).not.toContain("credential_shaped");
+  });
+
+  it("does not execute a provider id accessor at the workflow boundary", async () => {
+    const provider = new MockDiscoveryProvider([fixtureById("known-tx-2g4")]);
+    let getterCalls = 0;
+    Object.defineProperty(provider, "id", {
+      configurable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error("WIFI_PASSWORD_SECRET_ABC123");
+      },
+    });
+
+    const operation = await runReadOnlyDiscovery({
+      operationId: "discovery-hostile-provider-id",
+      provider,
+      sessions: sessions(),
+      catalog: syntheticTargetCatalog,
+    });
+
+    expect(operation.state).toBe("FAILED");
+    expect(operation.error).toMatchObject({
+      code: "PROVIDER_UNSUPPORTED",
+      reason: "DISCOVERY_PROVIDER_FAILED",
+      details: {},
+      retryable: false,
+    });
+    expect(provider.calls).toEqual([]);
+    expect(getterCalls).toBe(0);
+    expect(JSON.stringify(operation)).not.toContain("SECRET_ABC123");
+  });
+
   it("reports an explicit cancellation instead of an internal failure", async () => {
     const provider = new MockDiscoveryProvider([fixtureById("known-tx-2g4")]);
     const operation = await runReadOnlyDiscovery({
@@ -142,7 +217,7 @@ describe("runReadOnlyDiscovery with synthetic families", () => {
 
     expect(operation.state).toBe("FAILED");
     expect(operation.error?.code).toBe("IDENTITY_AMBIGUOUS");
-    expect(operation.error?.reason).toBe("DUPLICATE_DEVICE_DESCRIPTOR_ID");
+    expect(operation.error?.reason).toBe("DISCOVERY_PROVIDER_FAILED");
     expect(identityReads).toBe(0);
     expect(operation.history).not.toContain("IDENTIFYING");
   });
@@ -176,7 +251,7 @@ describe("runReadOnlyDiscovery with synthetic families", () => {
 
       expect(operation.state).toBe("FAILED");
       expect(operation.error?.code).toBe("CONNECTION_LOST");
-      expect(operation.error?.reason).toBe("DISCOVERED_DEVICE_NOT_CONNECTED");
+      expect(operation.error?.reason).toBe("DISCOVERY_PROVIDER_FAILED");
       expect(identityReads).toBe(0);
       expect(operation.history).not.toContain("IDENTIFYING");
     },
