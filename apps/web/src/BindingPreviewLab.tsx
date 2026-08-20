@@ -39,11 +39,6 @@ export function BindingPreviewLab() {
 
   useEffect(() => {
     const requestId = ++requestSequence.current;
-    setPreparation(null);
-    setOutcome(null);
-    setLabError(null);
-    setPreparing(true);
-    setRunning(false);
 
     void prepareBindingPreviewLab(scenarioId)
       .then((nextPreparation) => {
@@ -62,6 +57,19 @@ export function BindingPreviewLab() {
         }
       });
   }, [scenarioId]);
+
+  function selectScenario(nextScenarioId: BindingPreviewLabScenarioId) {
+    if (nextScenarioId === scenarioId) {
+      return;
+    }
+    requestSequence.current += 1;
+    setScenarioId(nextScenarioId);
+    setPreparation(null);
+    setOutcome(null);
+    setLabError(null);
+    setPreparing(true);
+    setRunning(false);
+  }
 
   async function confirmPreview() {
     if (preparation?.preview.status !== "READY") {
@@ -169,7 +177,7 @@ export function BindingPreviewLab() {
                   (candidate) => candidate.id === event.currentTarget.value,
                 );
                 if (next !== undefined) {
-                  setScenarioId(next.id);
+                  selectScenario(next.id);
                 }
               }}
             >
@@ -201,11 +209,11 @@ export function BindingPreviewLab() {
               <dl className="technical-grid">
                 <div>
                   <dt>{t("device.target")}</dt>
-                  <dd>{
-                    preview.targetDisplayName ??
-                    preview.targetId ??
-                    t("device.unknown")
-                  }</dd>
+                  <dd>
+                    {preview.targetDisplayName ??
+                      preview.targetId ??
+                      t("device.unknown")}
+                  </dd>
                 </div>
                 <div>
                   <dt>{t("advanced.provider")}</dt>
@@ -234,9 +242,7 @@ export function BindingPreviewLab() {
                     <code>{preview.changeCodes.join(" · ")}</code>
                   </p>
                   <p>
-                    <code>
-                      {preview.verificationRequirements.join(" · ")}
-                    </code>
+                    <code>{preview.verificationRequirements.join(" · ")}</code>
                   </p>
                   <p>
                     <code>{preview.catalogContentDigest}</code>

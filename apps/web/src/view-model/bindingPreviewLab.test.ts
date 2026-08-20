@@ -52,9 +52,9 @@ describe("Binding preview Web lab view-model", () => {
     expect(preparation.preview.blockers.map((item) => item.code)).toContain(
       "RUNTIME_GUIDED_BIND_NOT_AVAILABLE",
     );
-    await expect(runPreparedBindingPreviewLab(preparation)).rejects.toThrowError(
-      "A blocked Binding preview cannot be approved",
-    );
+    await expect(
+      runPreparedBindingPreviewLab(preparation),
+    ).rejects.toThrowError("A blocked Binding preview cannot be approved");
   });
 
   it("rejects a Target-altered displayed preview before any success claim", async () => {

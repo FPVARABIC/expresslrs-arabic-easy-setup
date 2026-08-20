@@ -77,7 +77,9 @@ function createHarness(fixtureId: string) {
       providers: {
         discovery: new MockDiscoveryProvider([fixture]),
         binding: new ScriptedBindingProvider({ initial: fixture }),
-        firmwareUpdate: new ScriptedFirmwareUpdateProvider({ initial: fixture }),
+        firmwareUpdate: new ScriptedFirmwareUpdateProvider({
+          initial: fixture,
+        }),
       },
       sessions: new ExclusiveDeviceSessionManager({
         clock: { now: () => now },
