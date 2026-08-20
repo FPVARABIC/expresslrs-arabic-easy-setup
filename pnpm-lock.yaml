@@ -75,6 +75,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@elrs-easy/compatibility':
+        specifier: workspace:*
+        version: link:../../packages/compatibility
       '@elrs-easy/device':
         specifier: workspace:*
         version: link:../../packages/device
@@ -84,6 +87,9 @@ importers:
       '@elrs-easy/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@elrs-easy/platform-browser':
+        specifier: workspace:*
+        version: link:../../packages/platform-browser
       '@elrs-easy/platform-mock':
         specifier: workspace:*
         version: link:../../packages/platform-mock
@@ -154,6 +160,15 @@ importers:
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+
+  packages/platform-browser:
+    dependencies:
+      '@elrs-easy/device':
+        specifier: workspace:*
+        version: link:../device
+      '@elrs-easy/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/platform-mock:
     dependencies:

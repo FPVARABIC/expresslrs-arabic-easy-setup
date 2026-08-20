@@ -1,8 +1,42 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { translate } from "@elrs-easy/i18n";
+import type { BrowserFetch } from "@elrs-easy/platform-browser";
 import { App } from "./App";
+
+function realDeviceResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      settings: {
+        product_name: "Example WiFi Receiver",
+        target: "EXAMPLE_RX_2400",
+        version: "4.1.0",
+        "git-commit": "a9d4a9c",
+        "module-type": "RX",
+        "radio-type": "SX128X",
+        has_low_band: false,
+        has_high_band: true,
+        reg_domain_high: "ISM_2400",
+        custom_hardware: false,
+        ssid: "private-device-ssid",
+      },
+      config: { uid: [1, 2, 3, 4, 5, 6] },
+      options: {
+        "wifi-ssid": "private-home-network",
+        "wifi-password": "private-password",
+      },
+    }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    },
+  );
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("Arabic-first Web foundation", () => {
   it("renders Easy Mode in Arabic and applies RTL from the first app render", () => {
@@ -17,7 +51,12 @@ describe("Arabic-first Web foundation", () => {
       screen.getByRole("button", { name: /ربط جهاز جديد/ }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("أجهزة محاكاة فقط", { exact: false }),
+      screen.getByText("قراءة Wi-Fi تجريبية فقط", { exact: false }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "اقرأ معلومات جهاز ExpressLRS عبر Wi-Fi",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -35,6 +74,135 @@ describe("Arabic-first Web foundation", () => {
         level: 1,
       }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Read your ExpressLRS device over Wi-Fi",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not contact the local network before explicit user intent", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    render(<App />);
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reads one official endpoint and presents only unvalidated reported facts", async () => {
+    const user = userEvent.setup();
+    const fetch = vi.fn<BrowserFetch>(async () => realDeviceResponse());
+    vi.stubGlobal("fetch", fetch);
+    render(<App />);
+
+    await user.click(
+      screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
+    );
+
+    expect(
+      await screen.findByText("تم جمع معلومات الجهاز"),
+    ).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]?.[0]).toBe("http://10.0.0.1/config");
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+      redirect: "error",
+    });
+    expect(screen.getByText("Example WiFi Receiver")).toBeInTheDocument();
+    expect(screen.getByText("EXAMPLE_RX_2400")).toBeInTheDocument();
+    expect(screen.getByText("أبلغ عنه الجهاز")).toBeInTheDocument();
+    expect(screen.getByText("Target غير مؤكّد")).toBeInTheDocument();
+    expect(screen.queryByText("private-device-ssid")).not.toBeInTheDocument();
+    expect(screen.queryByText("private-home-network")).not.toBeInTheDocument();
+    expect(screen.queryByText("private-password")).not.toBeInTheDocument();
+    expect(screen.queryByText("1,2,3,4,5,6")).not.toBeInTheDocument();
+  });
+
+  it("cancels an in-flight local read and ignores its stale completion", async () => {
+    const user = userEvent.setup();
+    let requestSignal: AbortSignal | undefined;
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const fetch = vi.fn(
+      async (_url: string, init: RequestInit) =>
+        new Promise<Response>((resolve) => {
+          requestSignal = init.signal as AbortSignal;
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<App />);
+
+    await user.click(
+      screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
+    );
+    expect(
+      await screen.findByText("نقرأ إعدادات الجهاز بصورة آمنة…"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "إلغاء القراءة" }));
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(
+      await screen.findByText("أُلغيت القراءة. لم يُطلب أي تغيير على الجهاز."),
+    ).toBeInTheDocument();
+
+    resolveFetch?.(realDeviceResponse());
+    await Promise.resolve();
+    expect(screen.queryByText("تم جمع معلومات الجهاز")).not.toBeInTheDocument();
+  });
+
+  it("shows a localized retry path after a read failure", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("missing", { status: 404 })),
+    );
+    render(<App />);
+
+    await user.click(
+      screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
+    );
+
+    expect(await screen.findByText("تعذرت قراءة الجهاز")).toBeInTheDocument();
+    expect(
+      screen.getByText("السبب: انقطع الاتصال بالجهاز."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "إعادة المحاولة" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("تم جمع معلومات الجهاز")).not.toBeInTheDocument();
+  });
+
+  it("does not offer a blind retry for a non-retryable device schema", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ settings: {}, config: {} }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    render(<App />);
+
+    await user.click(
+      screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
+    );
+
+    expect(await screen.findByText("تعذرت قراءة الجهاز")).toBeInTheDocument();
+    expect(
+      screen.getByText("لا تفيد إعادة المحاولة التلقائية", { exact: false }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "إعادة المحاولة" }),
+    ).not.toBeInTheDocument();
   });
 
   it("localizes the selected scenario values in Arabic and English", async () => {

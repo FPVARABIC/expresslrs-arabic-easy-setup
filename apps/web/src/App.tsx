@@ -25,6 +25,14 @@ import {
   runFoundationDemo,
   type FoundationDemoOutcome,
 } from "./view-model/foundationDemo";
+import {
+  expressLrsLocalHttpOrigins,
+  runLocalHttpDiscovery,
+  type ExpressLrsLocalHttpOrigin,
+  type LocalHttpDeviceFact,
+  type LocalHttpDiscoveryOutcome,
+  type LocalHttpFactKey,
+} from "./view-model/localHttpDiscovery";
 
 type TaskId = "bind" | "update" | "setup" | "diagnose";
 type CopyState = "idle" | "copied" | "failed";
@@ -73,6 +81,25 @@ const taskDefinitions: readonly TaskDefinition[] = [
   },
 ];
 
+const realOriginDefinitions: readonly {
+  readonly origin: ExpressLrsLocalHttpOrigin;
+  readonly labelKey: MessageKey;
+}[] = [
+  { origin: expressLrsLocalHttpOrigins[0], labelKey: "real.origin.ap" },
+  { origin: expressLrsLocalHttpOrigins[1], labelKey: "real.origin.rx" },
+  { origin: expressLrsLocalHttpOrigins[2], labelKey: "real.origin.tx" },
+];
+
+const cancelledLocalHttpOutcome: LocalHttpDiscoveryOutcome = Object.freeze({
+  state: "CANCELLED",
+  factsCollected: false,
+  verificationPassed: false,
+  confidence: "UNKNOWN",
+  errorCode: null,
+  retryable: false,
+  facts: Object.freeze([]),
+});
+
 export function App() {
   const [locale, setLocale] = useState<Locale>(defaultLocale);
   const [advanced, setAdvanced] = useState(false);
@@ -83,7 +110,14 @@ export function App() {
   );
   const [demoRunning, setDemoRunning] = useState(false);
   const [copyState, setCopyState] = useState<CopyState>("idle");
+  const [realOrigin, setRealOrigin] =
+    useState<ExpressLrsLocalHttpOrigin>("http://10.0.0.1");
+  const [realOutcome, setRealOutcome] =
+    useState<LocalHttpDiscoveryOutcome | null>(null);
+  const [realRunning, setRealRunning] = useState(false);
   const demoRequestSequence = useRef(0);
+  const realRequestSequence = useRef(0);
+  const realAbortController = useRef<AbortController | null>(null);
   const t = useMemo(() => createTranslator(locale), [locale]);
   const scenario = getMockScenario(scenarioId);
   const selectedTaskDefinition = taskDefinitions.find(
@@ -105,6 +139,55 @@ export function App() {
     document.documentElement.dir = direction;
     document.title = t("app.name");
   }, [direction, locale, t]);
+
+  useEffect(
+    () => () => {
+      realRequestSequence.current += 1;
+      realAbortController.current?.abort();
+      realAbortController.current = null;
+    },
+    [],
+  );
+
+  function selectRealOrigin(origin: ExpressLrsLocalHttpOrigin) {
+    realRequestSequence.current += 1;
+    realAbortController.current?.abort();
+    realAbortController.current = null;
+    setRealOrigin(origin);
+    setRealOutcome(null);
+    setRealRunning(false);
+  }
+
+  async function readRealDevice() {
+    realAbortController.current?.abort();
+    const controller = new AbortController();
+    realAbortController.current = controller;
+    const requestId = ++realRequestSequence.current;
+    setRealOutcome(null);
+    setRealRunning(true);
+    try {
+      const outcome = await runLocalHttpDiscovery({
+        origin: realOrigin,
+        signal: controller.signal,
+      });
+      if (realRequestSequence.current === requestId) {
+        setRealOutcome(outcome);
+      }
+    } finally {
+      if (realRequestSequence.current === requestId) {
+        realAbortController.current = null;
+        setRealRunning(false);
+      }
+    }
+  }
+
+  function cancelRealDeviceRead() {
+    realRequestSequence.current += 1;
+    realAbortController.current?.abort();
+    realAbortController.current = null;
+    setRealRunning(false);
+    setRealOutcome(cancelledLocalHttpOutcome);
+  }
 
   function selectScenario(nextScenario: MockScenarioId) {
     demoRequestSequence.current += 1;
@@ -258,6 +341,21 @@ export function App() {
             </div>
           </aside>
         </section>
+
+        <RealDeviceReadPanel
+          locale={locale}
+          origin={realOrigin}
+          outcome={realOutcome}
+          running={realRunning}
+          t={t}
+          onOriginChange={selectRealOrigin}
+          onRead={() => void readRealDevice()}
+          onCancel={cancelRealDeviceRead}
+        />
+
+        <div className="mock-divider" aria-hidden="true">
+          <span>{t("real.mockDivider")}</span>
+        </div>
 
         <section className="preview-strip" aria-labelledby="preview-heading">
           <div className="preview-heading">
@@ -531,6 +629,237 @@ export function App() {
 }
 
 type Translator = ReturnType<typeof createTranslator>;
+
+function RealDeviceReadPanel({
+  locale,
+  origin,
+  outcome,
+  running,
+  t,
+  onOriginChange,
+  onRead,
+  onCancel,
+}: {
+  locale: Locale;
+  origin: ExpressLrsLocalHttpOrigin;
+  outcome: LocalHttpDiscoveryOutcome | null;
+  running: boolean;
+  t: Translator;
+  onOriginChange: (origin: ExpressLrsLocalHttpOrigin) => void;
+  onRead: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <section
+      className="real-device-panel"
+      aria-labelledby="real-device-heading"
+      aria-busy={running}
+    >
+      <div className="real-device-heading">
+        <div>
+          <span className="section-kicker">{t("real.kicker")}</span>
+          <h2 id="real-device-heading">{t("real.heading")}</h2>
+          <p>{t("real.description")}</p>
+        </div>
+        <div className="real-device-badges">
+          <span className="read-only-badge">
+            <LockIcon />
+            {t("real.readOnlyBadge")}
+          </span>
+          <span className="validation-badge">{t("real.unvalidatedBadge")}</span>
+        </div>
+      </div>
+
+      <div className="real-device-grid">
+        <div className="real-device-controls">
+          <aside className="wifi-impact" aria-labelledby="wifi-impact-title">
+            <span aria-hidden="true">
+              <SignalIcon />
+            </span>
+            <div>
+              <h3 id="wifi-impact-title">{t("real.impactTitle")}</h3>
+              <p>{t("real.impactDescription")}</p>
+            </div>
+          </aside>
+
+          <label className="origin-field" htmlFor="expresslrs-local-origin">
+            <span>{t("real.originLabel")}</span>
+            <select
+              id="expresslrs-local-origin"
+              value={origin}
+              disabled={running}
+              onChange={(event) => {
+                const selected = expressLrsLocalHttpOrigins.find(
+                  (candidate) => candidate === event.currentTarget.value,
+                );
+                if (selected !== undefined) {
+                  onOriginChange(selected);
+                }
+              }}
+            >
+              {realOriginDefinitions.map((definition) => (
+                <option key={definition.origin} value={definition.origin}>
+                  {t(definition.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="real-idle-help">{t("real.idleHelp")}</p>
+          <div className="real-device-actions">
+            {running ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={onCancel}
+              >
+                {t("real.cancelAction")}
+              </button>
+            ) : outcome?.state !== "FAILED" || outcome.retryable ? (
+              <button className="primary-button" type="button" onClick={onRead}>
+                <CableIcon />
+                {outcome?.state === "FAILED"
+                  ? t("real.retryAction")
+                  : t("real.readAction")}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="real-device-result" aria-live="polite">
+          {running ? (
+            <div className="real-result-state is-loading" role="status">
+              <span className="real-state-icon" aria-hidden="true">
+                <SignalIcon />
+              </span>
+              <div>
+                <strong>{t("real.loading")}</strong>
+                <p>{t("real.noSecrets")}</p>
+              </div>
+            </div>
+          ) : outcome?.state === "SUCCESS" ? (
+            <RealDeviceSuccess outcome={outcome} t={t} />
+          ) : outcome?.state === "FAILED" ? (
+            <div className="real-result-state is-error" role="alert">
+              <span className="real-state-icon" aria-hidden="true">
+                <AlertIcon />
+              </span>
+              <div>
+                <strong>{t("real.errorTitle")}</strong>
+                <p>
+                  {t("real.errorDescription", {
+                    message: translateOperationError(
+                      locale,
+                      outcome.errorCode ?? "INTERNAL_ERROR",
+                    ),
+                  })}
+                </p>
+                {!outcome.retryable ? (
+                  <p>{t("real.retryUnavailable")}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : outcome?.state === "CANCELLED" ? (
+            <div className="real-result-state" role="status">
+              <span className="real-state-icon" aria-hidden="true">
+                <ShieldIcon />
+              </span>
+              <div>
+                <strong>{t("real.cancelled")}</strong>
+                <p>{t("real.noSecrets")}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="real-result-state" role="status">
+              <span className="real-state-icon" aria-hidden="true">
+                <ShieldCheckIcon />
+              </span>
+              <div>
+                <strong>{t("real.readOnlyBadge")}</strong>
+                <p>{t("real.noSecrets")}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RealDeviceSuccess({
+  outcome,
+  t,
+}: {
+  outcome: LocalHttpDiscoveryOutcome;
+  t: Translator;
+}) {
+  return (
+    <div className="real-success" role="status">
+      <div className="real-success-heading">
+        <span className="real-state-icon" aria-hidden="true">
+          <CheckIcon />
+        </span>
+        <div>
+          <strong>{t("real.successTitle")}</strong>
+          <p>{t("real.successDescription")}</p>
+        </div>
+        <span className="reported-badge">{t("real.reportedBadge")}</span>
+      </div>
+
+      <dl className="real-facts">
+        {outcome.facts.map((fact) => (
+          <DeviceFact
+            key={fact.key}
+            label={t(realFactLabel(fact.key))}
+            value={realFactValue(fact, t)}
+            mono={fact.key === "target" || fact.key === "commit"}
+          />
+        ))}
+      </dl>
+
+      <div className="real-identity-warning">
+        <LockIcon />
+        <div>
+          <strong>{t("real.unknownTitle")}</strong>
+          <p>{t("real.unknownDescription")}</p>
+        </div>
+      </div>
+      <p className="real-privacy-note">{t("real.noSecrets")}</p>
+    </div>
+  );
+}
+
+function realFactLabel(key: LocalHttpFactKey): MessageKey {
+  const labels: Record<LocalHttpFactKey, MessageKey> = {
+    product: "real.fact.product",
+    target: "real.fact.target",
+    version: "real.fact.version",
+    commit: "real.fact.commit",
+    role: "real.fact.role",
+    radio: "real.fact.radio",
+    band: "real.fact.band",
+    regLow: "real.fact.regLow",
+    regHigh: "real.fact.regHigh",
+    custom: "real.fact.custom",
+  };
+  return labels[key];
+}
+
+function realFactValue(fact: LocalHttpDeviceFact, t: Translator): string {
+  if (fact.key === "custom") {
+    return fact.value === "true" ? t("real.value.yes") : t("real.value.no");
+  }
+  if (fact.key === "band") {
+    const bands: Readonly<Record<string, MessageKey>> = {
+      LOW_BAND: "real.value.lowBand",
+      HIGH_BAND: "real.value.highBand",
+      DUAL_BAND: "real.value.dualBand",
+    };
+    const key = bands[fact.value];
+    return key === undefined ? t("real.value.unknownBand") : t(key);
+  }
+  return fact.value;
+}
 
 function DeviceOverview({
   scenario,

@@ -13,6 +13,7 @@
       "@elrs-easy/device": ["packages/device/src/index.ts"],
       "@elrs-easy/domain": ["packages/domain/src/index.ts"],
       "@elrs-easy/i18n": ["packages/i18n/src/index.ts"],
+      "@elrs-easy/platform-browser": ["packages/platform-browser/src/index.ts"],
       "@elrs-easy/platform-mock": ["packages/platform-mock/src/index.ts"],
       "@elrs-easy/workflows": ["packages/workflows/src/index.ts"]
     },

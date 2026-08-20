@@ -10,9 +10,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@elrs-easy/compatibility": "workspace:*",
     "@elrs-easy/device": "workspace:*",
     "@elrs-easy/domain": "workspace:*",
     "@elrs-easy/i18n": "workspace:*",
+    "@elrs-easy/platform-browser": "workspace:*",
     "@elrs-easy/platform-mock": "workspace:*",
     "@elrs-easy/workflows": "workspace:*",
     "@fontsource-variable/cairo": "5.3.0",

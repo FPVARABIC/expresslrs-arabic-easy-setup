@@ -5,7 +5,7 @@ export const en = {
   "app.independent":
     "Independent community project — not affiliated with ExpressLRS",
   "app.mockNotice":
-    "Foundation preview — simulated devices only. No hardware writes are enabled.",
+    "Development preview — experimental read-only Wi-Fi access is available. Hardware writes remain disabled, and the Mock lab is separate below.",
   "navigation.skip": "Skip to content",
   "language.arabic": "العربية",
   "language.english": "English",
@@ -23,6 +23,56 @@ export const en = {
   "home.mockLabel": "Preview a device state",
   "home.mockHelp":
     "These scenarios exercise the UI safely until real adapters are validated.",
+  "real.kicker": "Technical spike · read only",
+  "real.heading": "Read your ExpressLRS device over Wi-Fi",
+  "real.description":
+    "Join the device Wi-Fi first, choose one official ExpressLRS address, then start the read explicitly. The app never scans your network.",
+  "real.impactTitle": "Before you connect",
+  "real.impactDescription":
+    "Putting ExpressLRS into Wi-Fi mode stops its normal RF link. A telemetry or control-link disconnect while it is in Wi-Fi mode is expected.",
+  "real.originLabel": "ExpressLRS device address",
+  "real.origin.ap": "Device access point · 10.0.0.1",
+  "real.origin.rx": "Receiver (RX) · elrs_rx.local",
+  "real.origin.tx": "Transmitter (TX) · elrs_tx.local",
+  "real.readAction": "Read device information",
+  "real.cancelAction": "Cancel read",
+  "real.retryAction": "Try again",
+  "real.loading": "Reading the device configuration safely…",
+  "real.idleHelp":
+    "Your browser may request Local Network Access. No Binding, update, reboot, or configuration request is sent.",
+  "real.readOnlyBadge": "GET /config only",
+  "real.unvalidatedBadge": "Hardware validation pending",
+  "real.reportedBadge": "Device-reported",
+  "real.successTitle": "Device facts collected",
+  "real.successDescription":
+    "Success here means only that safe reported fields were collected and rebuilt. It does not confirm the Target or hardware support.",
+  "real.unknownTitle": "Target not confirmed",
+  "real.unknownDescription":
+    "These facts come from one self-reported Firmware source. Binding and update remain blocked until an independent cross-check is available.",
+  "real.errorTitle": "The device could not be read",
+  "real.errorDescription": "Reason: {message}",
+  "real.retryUnavailable":
+    "Automatic retry will not help for this response. Choose another address or a device with a supported version.",
+  "real.cancelled": "The read was cancelled. No device change was requested.",
+  "real.noSecrets":
+    "UID, Wi-Fi options, SSID, password, and the raw response are not retained or displayed.",
+  "real.mockDivider": "Separate deterministic Mock lab",
+  "real.fact.product": "Reported product",
+  "real.fact.target": "Reported Target",
+  "real.fact.version": "Reported Firmware",
+  "real.fact.commit": "Reported commit",
+  "real.fact.role": "Reported device role",
+  "real.fact.radio": "Reported radio family",
+  "real.fact.band": "Reported band capability",
+  "real.fact.regLow": "Reported low-band domain",
+  "real.fact.regHigh": "Reported high-band domain",
+  "real.fact.custom": "Custom hardware reported",
+  "real.value.yes": "Yes",
+  "real.value.no": "No",
+  "real.value.lowBand": "Low band",
+  "real.value.highBand": "High band",
+  "real.value.dualBand": "Low + high band",
+  "real.value.unknownBand": "Not reported",
   "task.bind.title": "Connect a new device",
   "task.bind.description":
     "Pair a transmitter and receiver with the safest supported method.",
