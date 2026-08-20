@@ -11,6 +11,10 @@ export const bindingExecutionAuthorities = ["SYNTHETIC_ONLY"] as const;
 export type BindingExecutionAuthority =
   (typeof bindingExecutionAuthorities)[number];
 
+export const firmwareUpdateExecutionAuthorities = ["SYNTHETIC_ONLY"] as const;
+export type FirmwareUpdateExecutionAuthority =
+  (typeof firmwareUpdateExecutionAuthorities)[number];
+
 export interface IdentityReader {
   readIdentity(
     session: DeviceSession,
@@ -86,6 +90,11 @@ export type FirmwareVerificationResult =
 
 export interface FirmwareUpdateProvider extends IdentityReader {
   readonly id: string;
+  /**
+   * M4 admits only deterministic in-memory writes. A physical writer requires
+   * its own authority value, ADR, provider proof, and hardware acceptance gate.
+   */
+  readonly executionAuthority: FirmwareUpdateExecutionAuthority;
   /** Runtime capability that must be observed before this provider may write. */
   readonly updateCapabilityId: string;
   validateArtifact(

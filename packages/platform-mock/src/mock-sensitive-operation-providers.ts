@@ -215,6 +215,7 @@ export class ScriptedBindingProvider implements BindingProvider {
 
 export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
   public readonly id: string;
+  public readonly executionAuthority = "SYNTHETIC_ONLY" as const;
   public readonly updateCapabilityId: string;
   readonly #initial: SyntheticDeviceFixture;
   readonly #reconnected: SyntheticDeviceFixture;

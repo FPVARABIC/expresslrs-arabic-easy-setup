@@ -16,7 +16,8 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0009: Milestone 1 threat model and trust boundaries — accepted for M1.
 - ADR-0010: read-only Local HTTP discovery — accepted for the M2A technical spike.
 - ADR-0011: preview-bound Synthetic Binding approval — accepted for the M3 software-only slice.
+- ADR-0012: provenance-bound Synthetic Firmware Update approval — accepted for the M4 software-only slice.
 
-Android platform strategy and every real Binding/write authority remain
-intentionally undecided until their separate physical-validation gates are
-opened.
+Android platform strategy and every real Binding/Firmware execution authority
+remain intentionally undecided until their separate physical-validation gates
+are opened.
