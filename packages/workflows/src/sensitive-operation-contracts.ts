@@ -7,6 +7,10 @@ import type {
   DeviceSession,
 } from "@elrs-easy/domain";
 
+export const bindingExecutionAuthorities = ["SYNTHETIC_ONLY"] as const;
+export type BindingExecutionAuthority =
+  (typeof bindingExecutionAuthorities)[number];
+
 export interface IdentityReader {
   readIdentity(
     session: DeviceSession,
@@ -35,6 +39,11 @@ export type BindingVerificationResult =
 
 export interface BindingProvider extends IdentityReader {
   readonly id: string;
+  /**
+   * M3 admits only in-memory Synthetic execution. A future hardware provider
+   * requires a new reviewed authority value and a separate acceptance gate.
+   */
+  readonly executionAuthority: BindingExecutionAuthority;
   prepareBinding(
     session: DeviceSession,
     signal?: CancellationSignal,

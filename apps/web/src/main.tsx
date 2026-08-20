@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { defaultLocale, getDirection } from "@elrs-easy/i18n";
 import { App } from "./App";
+import { BindingPreviewLab } from "./BindingPreviewLab";
 import "./styles.css";
 
 document.documentElement.lang = defaultLocale;
@@ -14,8 +15,10 @@ if (!root) {
   throw new Error("Application root element is missing");
 }
 
+const selectedView = new URLSearchParams(window.location.search).get("view");
+
 createRoot(root).render(
   <StrictMode>
-    <App />
+    {selectedView === "binding-preview" ? <BindingPreviewLab /> : <App />}
   </StrictMode>,
 );

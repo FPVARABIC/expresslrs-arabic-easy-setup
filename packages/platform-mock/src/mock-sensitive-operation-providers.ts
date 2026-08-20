@@ -94,6 +94,7 @@ function fixtureForSession(
 
 export class ScriptedBindingProvider implements BindingProvider {
   public readonly id = "mock-binding";
+  public readonly executionAuthority = "SYNTHETIC_ONLY" as const;
   readonly #initial: SyntheticDeviceFixture;
   readonly #reconnected: SyntheticDeviceFixture;
   readonly #reconnects: boolean;
