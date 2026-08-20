@@ -14,6 +14,11 @@ import {
   type OperationRecord,
 } from "@elrs-easy/domain";
 
+import {
+  prepareEasyBindingPreview,
+  type EasyBindingApproval,
+  type EasyBindingPreview,
+} from "./binding-preview.js";
 import { runEasyBinding, type EasyBindingResult } from "./easy-binding.js";
 import {
   runFirmwareUpdate,
@@ -39,8 +44,8 @@ export interface FoundationModuleProviders {
 }
 
 /**
- * Provisional M1 host boundary. It proves the same Core can be called by Web,
- * Android or a future host without importing React or localized strings.
+ * Provisional M1/M3 host boundary. It proves the same Core can be called by
+ * Web, Android or a future host without importing React or localized strings.
  * Contract versioning is intentionally deferred until the API stabilizes.
  */
 export class FoundationExpressLrsModule {
@@ -88,26 +93,49 @@ export class FoundationExpressLrsModule {
     });
   }
 
+  /** Read-only preflight. It does not consume the eventual operation id. */
+  public previewBinding(input: {
+    readonly operationId: string;
+    readonly descriptor: DeviceDescriptor;
+    readonly signal?: CancellationSignal;
+  }): Promise<EasyBindingPreview> {
+    const operationId = input.operationId;
+    const descriptor = input.descriptor;
+    const signal = input.signal;
+    return prepareEasyBindingPreview({
+      operationId,
+      descriptor,
+      provider: this.#providers.binding,
+      sessions: this.#sessions,
+      catalog: this.#catalog,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  }
+
   public bind(input: {
     readonly operationId: string;
     readonly descriptor: DeviceDescriptor;
-    readonly userConfirmed: boolean;
+    /** Legacy M1 Synthetic path. New callers should provide approval. */
+    readonly userConfirmed?: boolean;
+    readonly approval?: EasyBindingApproval;
     readonly signal?: CancellationSignal;
     readonly onProgress?: OperationObserver<EasyBindingResult>;
   }): Promise<OperationRecord<EasyBindingResult>> {
     const operationId = input.operationId;
     const descriptor = input.descriptor;
     const userConfirmed = input.userConfirmed;
+    const approval = input.approval;
     const signal = input.signal;
     const onProgress = input.onProgress;
     this.#claimOperationId(operationId);
     return runEasyBinding({
       operationId,
       descriptor,
-      userConfirmed,
       provider: this.#providers.binding,
       sessions: this.#sessions,
       catalog: this.#catalog,
+      ...(userConfirmed === undefined ? {} : { userConfirmed }),
+      ...(approval === undefined ? {} : { approval }),
       ...(this.#clock === undefined ? {} : { clock: this.#clock }),
       ...(onProgress === undefined ? {} : { observer: onProgress }),
       ...(signal === undefined ? {} : { signal }),

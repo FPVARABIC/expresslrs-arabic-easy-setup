@@ -12,6 +12,11 @@ import type {
 } from "@elrs-easy/domain";
 
 import {
+  approvalMatchesEasyBindingPreview,
+  buildEasyBindingPreview,
+  type EasyBindingApproval,
+} from "./binding-preview.js";
+import {
   acquireWorkflowSession,
   assertNotAborted,
   identityGateError,
@@ -32,12 +37,14 @@ export interface EasyBindingResult {
   readonly providerId: string;
   readonly deviceId: string;
   readonly targetId: string;
+  readonly previewId: string;
   readonly verification: "LINK_ESTABLISHED";
 }
 
 /**
- * Foundation binding workflow. It is provider-agnostic; Milestone 1 supplies
- * synthetic providers only. A completed command never counts as a bound link.
+ * Foundation binding workflow. It is provider-agnostic at the orchestration
+ * boundary, but the current contract admits Synthetic execution authority
+ * only. A completed command never counts as a bound link.
  */
 export async function runEasyBinding(input: {
   readonly operationId: string;
@@ -45,7 +52,10 @@ export async function runEasyBinding(input: {
   readonly provider: BindingProvider;
   readonly sessions: DeviceSessionManager;
   readonly catalog: TargetCatalog;
-  readonly userConfirmed: boolean;
+  /** Legacy M1 Synthetic confirmation path; new callers should use approval. */
+  readonly userConfirmed?: boolean;
+  /** Approval bound to a previously prepared live preview. */
+  readonly approval?: EasyBindingApproval;
   readonly clock?: WorkflowClock;
   readonly observer?: OperationObserver<EasyBindingResult>;
   readonly signal?: CancellationSignal;
@@ -61,6 +71,7 @@ export async function runEasyBinding(input: {
   const sessions = input.sessions;
   const catalog = input.catalog;
   const userConfirmed = input.userConfirmed;
+  const approval = input.approval;
   const clock = input.clock;
   const observer = input.observer;
   const signal = input.signal;
@@ -94,23 +105,49 @@ export async function runEasyBinding(input: {
     if (identityError !== null) {
       return machine.fail(identityError);
     }
-    const expectedTargetId = initial.identity.selectedTargetId!;
-    const bindingCapability = initial.capabilities.find(
-      (capability) =>
-        capability.id === "guided-bind" && capability.available === true,
-    );
-    if (bindingCapability === undefined) {
+
+    const preview = buildEasyBindingPreview({
+      operationId,
+      descriptor,
+      providerId,
+      executionAuthority: readProviderDataProperty(
+        provider,
+        "executionAuthority",
+      ),
+      identity: initial.identity,
+      capabilities: initial.capabilities,
+      catalog,
+    });
+    if (preview.status !== "READY") {
       return machine.fail({
         code: "PROVIDER_UNSUPPORTED",
-        reason: "BINDING_CAPABILITY_NOT_AVAILABLE",
-        details: { providerId },
+        reason: "BINDING_PREVIEW_BLOCKED",
+        details: { blockerCount: preview.blockers.length },
         retryable: false,
       });
     }
+    const expectedTargetId = preview.targetId!;
 
     machine.transition("WAITING_FOR_CONFIRMATION");
     assertNotAborted(signal);
-    if (!userConfirmed) {
+    if (approval !== undefined && userConfirmed !== undefined) {
+      return machine.fail({
+        code: "PERMISSION_DENIED",
+        reason: "BINDING_CONFIRMATION_MODE_AMBIGUOUS",
+        details: {},
+        retryable: false,
+      });
+    }
+    if (approval !== undefined) {
+      if (!approvalMatchesEasyBindingPreview(preview, approval)) {
+        return machine.fail({
+          code: "PERMISSION_DENIED",
+          reason: "BINDING_APPROVAL_DID_NOT_MATCH_LIVE_PREVIEW",
+          details: {},
+          retryable: false,
+        });
+      }
+    } else if (userConfirmed !== true) {
       return machine.transition("CANCELLED", {
         messageCode: "USER_DID_NOT_CONFIRM_BINDING",
       });
@@ -218,6 +255,7 @@ export async function runEasyBinding(input: {
         providerId,
         deviceId: reconnectedDescriptor.id,
         targetId: expectedTargetId,
+        previewId: preview.previewId,
         verification: "LINK_ESTABLISHED",
       }),
     );
