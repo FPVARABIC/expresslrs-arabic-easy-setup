@@ -9,6 +9,7 @@ import type {
 } from "@elrs-easy/device";
 import {
   CoreOperationError,
+  type ArtifactProvenance,
   type CancellationSignal,
   type DeviceDescriptor,
   type OperationRecord,
@@ -20,6 +21,11 @@ import {
   type EasyBindingPreview,
 } from "./binding-preview.js";
 import { runEasyBinding, type EasyBindingResult } from "./easy-binding.js";
+import {
+  prepareFirmwareUpdatePreview,
+  type FirmwareUpdateApproval,
+  type FirmwareUpdatePreview,
+} from "./firmware-update-preview.js";
 import {
   runFirmwareUpdate,
   type FirmwareUpdateResult,
@@ -44,7 +50,7 @@ export interface FoundationModuleProviders {
 }
 
 /**
- * Provisional M1/M3 host boundary. It proves the same Core can be called by
+ * Provisional M1–M4 host boundary. It proves the same Core can be called by
  * Web, Android or a future host without importing React or localized strings.
  * Contract versioning is intentionally deferred until the API stabilizes.
  */
@@ -142,18 +148,48 @@ export class FoundationExpressLrsModule {
     });
   }
 
+  /** Read-only artifact/provenance and live-device preflight. */
+  public previewUpdate(input: {
+    readonly operationId: string;
+    readonly descriptor: DeviceDescriptor;
+    readonly artifact: FirmwareArtifactDescriptor;
+    readonly provenance: ArtifactProvenance;
+    readonly signal?: CancellationSignal;
+  }): Promise<FirmwareUpdatePreview> {
+    const operationId = input.operationId;
+    const descriptor = input.descriptor;
+    const artifact = input.artifact;
+    const provenance = input.provenance;
+    const signal = input.signal;
+    return prepareFirmwareUpdatePreview({
+      operationId,
+      descriptor,
+      artifact,
+      provenance,
+      provider: this.#providers.firmwareUpdate,
+      sessions: this.#sessions,
+      catalog: this.#catalog,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  }
+
   public update(input: {
     readonly operationId: string;
     readonly descriptor: DeviceDescriptor;
     readonly artifact: FirmwareArtifactDescriptor;
-    readonly userConfirmed: boolean;
+    readonly provenance?: ArtifactProvenance;
+    /** Legacy M1 Synthetic path. New callers should provide approval. */
+    readonly userConfirmed?: boolean;
+    readonly approval?: FirmwareUpdateApproval;
     readonly signal?: CancellationSignal;
     readonly onProgress?: OperationObserver<FirmwareUpdateResult>;
   }): Promise<OperationRecord<FirmwareUpdateResult>> {
     const operationId = input.operationId;
     const descriptor = input.descriptor;
     const artifact = input.artifact;
+    const provenance = input.provenance;
     const userConfirmed = input.userConfirmed;
+    const approval = input.approval;
     const signal = input.signal;
     const onProgress = input.onProgress;
     this.#claimOperationId(operationId);
@@ -161,10 +197,12 @@ export class FoundationExpressLrsModule {
       operationId,
       descriptor,
       artifact,
-      userConfirmed,
       provider: this.#providers.firmwareUpdate,
       sessions: this.#sessions,
       catalog: this.#catalog,
+      ...(provenance === undefined ? {} : { provenance }),
+      ...(userConfirmed === undefined ? {} : { userConfirmed }),
+      ...(approval === undefined ? {} : { approval }),
       ...(this.#clock === undefined ? {} : { clock: this.#clock }),
       ...(onProgress === undefined ? {} : { observer: onProgress }),
       ...(signal === undefined ? {} : { signal }),
