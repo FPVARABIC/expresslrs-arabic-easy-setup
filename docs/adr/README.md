@@ -1,6 +1,7 @@
 # Architecture Decision Records
 
-ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعاد تحرير تاريخ القرار؛ التغيير ينشئ ADR جديدًا superseding السابق.
+ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعاد تحرير
+تاريخ القرار؛ التغيير ينشئ ADR جديدًا superseding السابق.
 
 السجل الحالي:
 
@@ -14,5 +15,8 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0008: Cairo typography — accepted.
 - ADR-0009: Milestone 1 threat model and trust boundaries — accepted for M1.
 - ADR-0010: read-only Local HTTP discovery — accepted for the M2A technical spike.
+- ADR-0011: preview-bound Synthetic Binding approval — accepted for the M3 software-only slice.
 
-Android platform strategy remains intentionally undecided until the real-device spike.
+Android platform strategy and every real Binding/write authority remain
+intentionally undecided until their separate physical-validation gates are
+opened.
