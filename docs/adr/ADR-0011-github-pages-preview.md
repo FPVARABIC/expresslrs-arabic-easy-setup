@@ -41,10 +41,13 @@ The deployment must:
 - label the UI `PREVIEW · HARDWARE NONE`, keep all real writes absent, and avoid
   Offline/PWA, real-device support, or trusted-host claims.
 
-The temporary feature-branch trigger may publish the exact reviewed M2A
-candidate before merge. It is not a separate PR environment: it replaces the
-single Pages preview. After integration, the feature trigger must be removed so
-only `main` can publish.
+The repository's protected `github-pages` environment permits deployment only
+from `main`. Before merge, a minimal workflow committed on `main` may check out
+one full, reviewed candidate SHA, rerun the complete quality gate, and publish
+that exact artifact. The feature workflow itself remains restricted to `main`,
+so feature pushes cannot bypass the environment rule or create repeated failed
+deployments. This is not a separate PR environment: it replaces the single
+Pages preview.
 
 ## Real-device boundary
 

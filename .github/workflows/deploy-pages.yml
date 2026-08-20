@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/read-only-device-foundation
   workflow_dispatch:
 
 permissions:
@@ -20,9 +19,7 @@ concurrency:
 jobs:
   build:
     name: Quality-gate and package preview
-    if: >-
-      github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/feat/read-only-device-foundation'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
