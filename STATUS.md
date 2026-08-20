@@ -5,7 +5,7 @@
 | Date | 2026-08-20 |
 | Phase | Milestone 1 — Foundation |
 | Local branch | `research/upstream-baseline` |
-| Remote repository | `https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup` linked as `origin`; remote is empty |
+| Remote repository | `https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup`; public repository with Draft PR #1 |
 | Stable upstream | ExpressLRS 4.1.0 / `a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6` |
 | Development reference | `73ce820ba51437f73f31686233b607c58e188e7b` |
 | Hardware validation | None |
@@ -35,6 +35,7 @@
 ## In progress
 
 - Generate and review `pnpm-lock.yaml`, then run the official `pnpm check` toolchain. The first CI run can preserve a bootstrap lockfile artifact; all later runs become frozen automatically once it is committed.
+- Fix the first executable CI finding: skip dependency caching until `pnpm-lock.yaml` exists, then rerun Draft PR #1.
 - Execute the real Vitest/React DOM suite and Vite production bundle after dependency installation.
 - Complete Mock workflow coverage required by the final Milestone 1 exit gate; this checkpoint is not an M1 completion claim.
 

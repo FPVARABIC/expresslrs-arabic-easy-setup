@@ -23,18 +23,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: 11.19.0
-          run_install: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-
       - name: Detect dependency lockfile
         id: lockfile
         shell: bash
@@ -44,6 +32,25 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        if: steps.lockfile.outputs.present == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Set up Node.js without dependency cache
+        if: steps.lockfile.outputs.present != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Install dependencies from lockfile
         if: steps.lockfile.outputs.present == 'true'
