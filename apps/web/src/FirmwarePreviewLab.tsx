@@ -23,7 +23,9 @@ export function FirmwarePreviewLab() {
     useState<FirmwarePreviewLabScenarioId>("compatible");
   const [preparation, setPreparation] =
     useState<FirmwarePreviewLabPreparation | null>(null);
-  const [outcome, setOutcome] = useState<FirmwarePreviewLabOutcome | null>(null);
+  const [outcome, setOutcome] = useState<FirmwarePreviewLabOutcome | null>(
+    null,
+  );
   const [preparing, setPreparing] = useState(true);
   const [running, setRunning] = useState(false);
   const [labError, setLabError] = useState<OperationErrorCode | null>(null);
@@ -161,7 +163,10 @@ export function FirmwarePreviewLab() {
           </aside>
         </section>
 
-        <section className="task-panel" aria-labelledby="firmware-preview-heading">
+        <section
+          className="task-panel"
+          aria-labelledby="firmware-preview-heading"
+        >
           <div className="section-heading">
             <div>
               <span className="section-kicker">{t("mode.easy")}</span>
@@ -224,7 +229,9 @@ export function FirmwarePreviewLab() {
                 <div>
                   <dt>{t("device.firmware")}</dt>
                   <dd>
-                    <code>{artifact?.firmwareVersion ?? t("device.unknown")}</code>
+                    <code>
+                      {artifact?.firmwareVersion ?? t("device.unknown")}
+                    </code>
                   </dd>
                 </div>
                 <div>
@@ -319,7 +326,8 @@ export function FirmwarePreviewLab() {
                         {verificationPlan.requirements.map((requirement) => (
                           <li key={requirement.id}>
                             <code>
-                              {requirement.fact} · {String(requirement.expectedValue)}
+                              {requirement.fact} ·{" "}
+                              {String(requirement.expectedValue)}
                             </code>
                           </li>
                         ))}

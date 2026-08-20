@@ -23,9 +23,7 @@ describe("M4 Firmware preview Web lab", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6",
-      ),
+      screen.getByText("a9d4a9cb5b5687c4c9d7e9e7fbdf44ad93651da6"),
     ).toBeInTheDocument();
     expect(screen.getByText(/firmware-verification:v1/)).toBeInTheDocument();
     expect(screen.getByText("SIMULATION_ONLY")).toBeInTheDocument();

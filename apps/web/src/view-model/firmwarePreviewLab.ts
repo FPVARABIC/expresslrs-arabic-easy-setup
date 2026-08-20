@@ -88,7 +88,9 @@ function scenarioDefinition(id: FirmwarePreviewLabScenarioId) {
   return definition;
 }
 
-function createHarness(definition: (typeof firmwarePreviewLabScenarios)[number]) {
+function createHarness(
+  definition: (typeof firmwarePreviewLabScenarios)[number],
+) {
   const fixture = fixtureById("known-tx-2g4");
   let sessionSequence = 0;
 

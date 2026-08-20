@@ -54,8 +54,7 @@ describe("Firmware preview Web lab view-model", () => {
       firmwareVersion: "4.2.0",
       previewId: preparation.preview.previewId,
       verificationPlanId: preparation.preview.verificationPlan?.id,
-      provenanceArtifactSha256:
-        preparation.preview.provenance?.artifactSha256,
+      provenanceArtifactSha256: preparation.preview.provenance?.artifactSha256,
     });
     expect(outcome.auditEventCount).toBeGreaterThan(0);
   });
@@ -77,9 +76,7 @@ describe("Firmware preview Web lab view-model", () => {
   });
 
   it("keeps confirmation unavailable when provenance does not bind the artifact", async () => {
-    const preparation = await prepareFirmwarePreviewLab(
-      "provenance-mismatch",
-    );
+    const preparation = await prepareFirmwarePreviewLab("provenance-mismatch");
 
     expect(preparation.preview.status).toBe("BLOCKED");
     expect(preparation.preview.blockers.map((item) => item.code)).toContain(
