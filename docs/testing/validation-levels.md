@@ -21,3 +21,16 @@ gate. Neither label is an achieved level and neither may be presented as
 For the M2A Local HTTP candidate, source review and automated build/tests can
 support `CODE_REVIEWED` and `BUILD_TESTED`. A successful `/config` read alone
 does not validate the reported Target, device family, browser, or Hardware.
+
+## Artifact evidence is also separated
+
+| Artifact label | Exact meaning |
+| --- | --- |
+| `COHERENCE_ONLY` | Descriptor and provenance have a safe shape and agree internally |
+| Digest `SYNTHETIC_ONLY` | Complete deterministic fixture bytes matched the Mock boundary; not cryptographic evidence |
+| Digest `CRYPTOGRAPHIC` | A reviewed platform digest adapter calculated SHA-256 over the copied bytes |
+| `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |
+
+A cryptographic digest proves integrity against the expected digest, not the
+authenticity of that expectation. None of these labels implies
+`HARDWARE_TESTED`, and no current label admits a real writer.

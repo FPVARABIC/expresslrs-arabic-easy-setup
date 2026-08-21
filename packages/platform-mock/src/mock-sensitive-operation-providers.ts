@@ -16,6 +16,7 @@ import type {
   FirmwareUpdateProvider,
   FirmwareVerificationResult,
   FirmwareWriteReceipt,
+  VerifiedFirmwareUpdateArtifact,
 } from "@elrs-easy/workflows";
 
 import type { SyntheticDeviceFixture } from "./fixtures.js";
@@ -215,6 +216,7 @@ export class ScriptedBindingProvider implements BindingProvider {
 
 export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
   public readonly id: string;
+  public readonly assurance = "SYNTHETIC_ONLY" as const;
   public readonly updateMethod: FirmwareUpdateMethod;
   public readonly updateCapabilityId: string;
   readonly #initial: SyntheticDeviceFixture;
@@ -261,7 +263,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
   }
 
   public async validateArtifact(
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<boolean> {
     assertNotAborted(signal);
@@ -313,7 +315,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
 
   public async prepareUpdate(
     session: DeviceSession,
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<void> {
     assertNotAborted(signal);
@@ -324,7 +326,7 @@ export class ScriptedFirmwareUpdateProvider implements FirmwareUpdateProvider {
 
   public async writeFirmware(
     session: DeviceSession,
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<FirmwareWriteReceipt> {
     assertNotAborted(signal);

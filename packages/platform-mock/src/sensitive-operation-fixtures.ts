@@ -1,4 +1,8 @@
 import type { FirmwareUpdateArtifact } from "@elrs-easy/compatibility";
+import type {
+  CancellationSignal,
+  FirmwareArtifactDigestProvider,
+} from "@elrs-easy/domain";
 
 import { fixtureById, type SyntheticDeviceFixture } from "./fixtures.js";
 
@@ -15,9 +19,46 @@ function reconnectFixture(
 }
 
 const defaultSyntheticArtifactSha256 =
-  "2d71b8db0ff7388c78ebfa3e6f4d74f4d67887e9a5d75665c509ead24f9c88ee";
+  "bb50289f8b754449c732d87f74370bea84c1a4e496f39389f428065b20057c9d";
+const syntheticFirmwareArtifactSizeBytes = 4096;
 
-/** Creates coherent metadata only; no Firmware bytes or signed manifest exist. */
+export function createSyntheticFirmwareArtifactBytes(): Uint8Array {
+  const bytes = new Uint8Array(syntheticFirmwareArtifactSizeBytes);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = (index * 31 + 17) % 251;
+  }
+  return bytes;
+}
+
+/**
+ * Fixture-only digest boundary. It recognizes the complete deterministic byte
+ * sequence and remains labeled Synthetic; Browser Web Crypto is tested in its
+ * own adapter.
+ */
+export const syntheticFirmwareArtifactDigestProvider: FirmwareArtifactDigestProvider =
+  Object.freeze({
+    assurance: "SYNTHETIC_ONLY",
+    async digestSha256(
+      bytes: Uint8Array,
+      signal?: CancellationSignal,
+    ): Promise<string> {
+      if (signal?.aborted === true) {
+        const error = new Error("The Synthetic digest was cancelled");
+        error.name = "AbortError";
+        throw error;
+      }
+      const expected = createSyntheticFirmwareArtifactBytes();
+      if (
+        bytes.byteLength !== expected.byteLength ||
+        bytes.some((value, index) => value !== expected[index])
+      ) {
+        return "0".repeat(64);
+      }
+      return defaultSyntheticArtifactSha256;
+    },
+  });
+
+/** Creates coherent Synthetic metadata for the deterministic fixture bytes. */
 export function createSyntheticFirmwareArtifact(input: {
   readonly targetId: string;
   readonly firmwareVersion?: string;
@@ -41,7 +82,7 @@ export function createSyntheticFirmwareArtifact(input: {
       buildConfigurationDigest: `sha256:${"1".repeat(64)}`,
       toolchainIdentity: "synthetic/no-build",
       builtAt: "2026-08-20T08:00:00.000Z",
-      artifactSizeBytes: 4096,
+      artifactSizeBytes: syntheticFirmwareArtifactSizeBytes,
       artifactSha256: sha256,
     }),
   });
@@ -54,7 +95,6 @@ export const compatibleFirmwareArtifact = createSyntheticFirmwareArtifact({
 export const majorVersionMismatchArtifact = createSyntheticFirmwareArtifact({
   targetId: "fixture.tx.alpha-2g4",
   firmwareVersion: "5.0.0",
-  sha256: "78f1cd5204bfa17cd4bcab089755335057f1258fced4f6fb79e791e4f53a9c40",
 });
 
 const initial = fixtureById("known-tx-2g4");

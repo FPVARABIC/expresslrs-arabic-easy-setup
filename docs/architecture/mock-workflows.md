@@ -56,6 +56,8 @@ Before the synthetic write, the workflow requires:
 
 - an immutable schema-v1 provenance envelope whose Target and SHA-256 agree
   with the artifact descriptor;
+- a copied, bounded byte payload whose exact size and SHA-256 agree with that
+  provenance;
 - artifact integrity from the provider;
 - confirmed identity;
 - exact artifact/Target match;
@@ -70,10 +72,12 @@ reconnect, session-local identity, Target, and Firmware version. Missing,
 duplicate, or mismatched observations cannot pass. `WRITE_COMPLETED` is an
 intermediate fact, never a success state.
 
-The provenance fixture contains metadata only. Core checks its safe shape and
-internal coherence before a provider call and snapshots nested fields before
-observers run. There are no Firmware bytes or signature, so this is not artifact
-authenticity, reproducible-build evidence, or permission for a real provider.
+The deterministic fixture now contains bytes as well as provenance. Core
+snapshots both before observers, checks exact size, and passes SHA-256 through a
+fixture-only digest boundary explicitly labeled `SYNTHETIC_ONLY`. There is no
+verified signature or trust root, so this is not artifact authenticity,
+reproducible-build evidence, or permission for a real provider. Provider
+selection itself admits only `SYNTHETIC_ONLY`.
 
 Synthetic Targets now contain an ordered method list rather than a platform
 provider name. The test host registers Wi-Fi and UART providers together. Core
@@ -107,7 +111,8 @@ The Synthetic layer covers:
 - Binding without a link and with Model Mismatch;
 - deterministic clock and complete provider-call histories;
 - automatic Wi-Fi preference, UART fallback, absent-method, ambiguous-provider,
-  accessor-backed metadata, duplicate-provider, and registry-mutation cases;
+  accessor-backed metadata, duplicate-provider, registry-mutation, byte-size,
+  byte-digest, and caller-byte-mutation cases;
 - canonical provenance shape, descriptor/provenance disagreement, hostile
   accessors, unknown-field non-enumeration, nested observer mutation, and
   declarative-plan missing/mismatch/duplicate cases;

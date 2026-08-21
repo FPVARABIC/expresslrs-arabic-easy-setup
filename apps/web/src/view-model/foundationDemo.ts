@@ -5,10 +5,12 @@ import type {
 } from "@elrs-easy/domain";
 import {
   createSyntheticFirmwareArtifact,
+  createSyntheticFirmwareArtifactBytes,
   fixtureById,
   MockDiscoveryProvider,
   ScriptedBindingProvider,
   ScriptedFirmwareUpdateProvider,
+  syntheticFirmwareArtifactDigestProvider,
   syntheticTargetCatalog,
 } from "@elrs-easy/platform-mock";
 import { FoundationExpressLrsModule } from "@elrs-easy/workflows";
@@ -113,6 +115,7 @@ function createModule(scenarioId: MockScenarioId) {
     artifact: createSyntheticFirmwareArtifact({
       targetId: target?.targetId ?? "unresolved",
     }),
+    artifactBytes: createSyntheticFirmwareArtifactBytes(),
     module: new FoundationExpressLrsModule({
       providers: {
         discovery: new MockDiscoveryProvider(
@@ -137,6 +140,7 @@ function createModule(scenarioId: MockScenarioId) {
         ids: { next: () => `web-mock-session-${++sessionSequence}` },
       }),
       catalog: syntheticTargetCatalog,
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       clock: { now: () => "2026-08-20T08:00:00.000Z" },
     }),
   };
@@ -168,6 +172,7 @@ export async function runFoundationDemo(
           operationId,
           descriptor: harness.descriptor,
           artifact: harness.artifact,
+          artifactBytes: harness.artifactBytes,
           userConfirmed,
         });
 

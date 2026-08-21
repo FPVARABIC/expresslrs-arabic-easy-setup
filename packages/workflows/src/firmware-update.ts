@@ -8,17 +8,26 @@ import {
   type DeviceSessionManager,
 } from "@elrs-easy/device";
 import type {
-  CancellationSignal,
   ArtifactProvenance,
   ArtifactProvenanceValidationLevel,
+  ArtifactManifestTrustStatus,
+  CancellationSignal,
   DeviceDescriptor,
   DeviceSession,
+  FirmwareArtifactByteVerification,
+  FirmwareArtifactDigestProvider,
   FirmwareUpdateMethod,
+  FirmwareUpdateProviderAssurance,
   OperationRecord,
   VerificationPlan,
 } from "@elrs-easy/domain";
+import { currentArtifactManifestTrustStatus } from "@elrs-easy/domain";
 
 import { snapshotFirmwareUpdateArtifact } from "./firmware-artifact.js";
+import {
+  snapshotFirmwareArtifactBytes,
+  verifyFirmwareArtifactBytes,
+} from "./firmware-artifact-bytes.js";
 import { selectFirmwareUpdateProvider } from "./firmware-update-provider-selection.js";
 
 import {
@@ -31,7 +40,10 @@ import {
   releaseIfHeld,
   safeOperationError,
 } from "./sensitive-operation-helpers.js";
-import type { FirmwareUpdateProvider } from "./sensitive-operation-contracts.js";
+import type {
+  FirmwareUpdateProvider,
+  VerifiedFirmwareUpdateArtifact,
+} from "./sensitive-operation-contracts.js";
 import {
   VerifiedOperationMachine,
   type OperationObserver,
@@ -45,6 +57,7 @@ import {
 
 export interface FirmwareUpdateResult {
   readonly providerId: string;
+  readonly providerAssurance: FirmwareUpdateProviderAssurance;
   readonly updateMethod: FirmwareUpdateMethod;
   readonly deviceId: string;
   readonly targetId: string;
@@ -52,6 +65,8 @@ export interface FirmwareUpdateResult {
   readonly artifactSha256: string;
   readonly artifactProvenance: ArtifactProvenance;
   readonly artifactProvenanceValidation: ArtifactProvenanceValidationLevel;
+  readonly artifactByteVerification: FirmwareArtifactByteVerification;
+  readonly artifactManifestTrust: ArtifactManifestTrustStatus;
   readonly verificationPlan: VerificationPlan;
   readonly verification: "EXPECTED_FIRMWARE_OBSERVED";
 }
@@ -64,6 +79,8 @@ export async function runFirmwareUpdate(input: {
   readonly operationId: string;
   readonly descriptor: DeviceDescriptor;
   readonly artifact: FirmwareUpdateArtifact;
+  readonly artifactBytes: Uint8Array;
+  readonly artifactDigestProvider: FirmwareArtifactDigestProvider;
   readonly providers: readonly FirmwareUpdateProvider[];
   readonly sessions: DeviceSessionManager;
   readonly catalog: TargetCatalog;
@@ -79,6 +96,10 @@ export async function runFirmwareUpdate(input: {
   const operationId = input.operationId;
   const descriptor: DeviceDescriptor = Object.freeze({ ...input.descriptor });
   const artifactSnapshot = snapshotFirmwareUpdateArtifact(input.artifact);
+  const artifactByteSnapshot = snapshotFirmwareArtifactBytes(
+    input.artifactBytes,
+  );
+  const artifactDigestProvider = input.artifactDigestProvider;
   const providers = Object.freeze([...input.providers]);
   const sessions = input.sessions;
   const catalog = input.catalog;
@@ -97,6 +118,7 @@ export async function runFirmwareUpdate(input: {
   let writeCompleted = false;
   let provider: FirmwareUpdateProvider;
   let providerId: string;
+  let providerAssurance: FirmwareUpdateProviderAssurance;
   let updateMethod: FirmwareUpdateMethod;
   let updateCapabilityId: string;
 
@@ -113,6 +135,29 @@ export async function runFirmwareUpdate(input: {
       });
     }
     const artifact = artifactSnapshot.artifact;
+    const verifiedBytes = await verifyFirmwareArtifactBytes({
+      snapshot: artifactByteSnapshot,
+      expectedByteLength: artifact.provenance.artifactSizeBytes,
+      expectedSha256: artifact.sha256,
+      digestProvider: artifactDigestProvider,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    assertNotAborted(signal);
+    if (verifiedBytes.status === "BLOCKED") {
+      return machine.fail({
+        code: "ARTIFACT_INVALID",
+        reason: verifiedBytes.reason,
+        details: {},
+        retryable: false,
+      });
+    }
+    const createProviderArtifact = (): VerifiedFirmwareUpdateArtifact =>
+      Object.freeze({
+        artifact,
+        bytes: verifiedBytes.copyBytes(),
+        byteVerification: verifiedBytes.verification,
+        manifestTrust: currentArtifactManifestTrustStatus,
+      });
     const verificationPlan = createFirmwareUpdateVerificationPlan({
       expectedDeviceId: descriptor.id,
       expectedTargetId: artifact.targetId,
@@ -141,9 +186,13 @@ export async function runFirmwareUpdate(input: {
     }
     provider = providerSelection.provider;
     providerId = providerSelection.providerId;
+    providerAssurance = providerSelection.providerAssurance;
     updateMethod = providerSelection.updateMethod;
     updateCapabilityId = providerSelection.updateCapabilityId;
-    const artifactValid = await provider.validateArtifact(artifact, signal);
+    const artifactValid = await provider.validateArtifact(
+      createProviderArtifact(),
+      signal,
+    );
     assertNotAborted(signal);
     if (artifactValid !== true) {
       return machine.fail({
@@ -211,12 +260,16 @@ export async function runFirmwareUpdate(input: {
     machine.transition("EXECUTING");
     assertNotAborted(signal);
     sessions.assertHeld(session);
-    await provider.prepareUpdate(session, artifact, signal);
+    await provider.prepareUpdate(session, createProviderArtifact(), signal);
     assertNotAborted(signal);
     sessions.assertHeld(session);
     assertNotAborted(signal);
     writeStarted = true;
-    const receipt = await provider.writeFirmware(session, artifact, signal);
+    const receipt = await provider.writeFirmware(
+      session,
+      createProviderArtifact(),
+      signal,
+    );
     writeCompleted =
       readProviderDataProperty(receipt, "writeCompleted") === true;
     assertNotAborted(signal);
@@ -362,6 +415,7 @@ export async function runFirmwareUpdate(input: {
     return machine.verificationSucceeded(
       Object.freeze({
         providerId,
+        providerAssurance,
         updateMethod,
         deviceId: reconnectedDescriptor.id,
         targetId: expectedTargetId,
@@ -369,6 +423,8 @@ export async function runFirmwareUpdate(input: {
         artifactSha256: artifact.sha256,
         artifactProvenance: artifact.provenance,
         artifactProvenanceValidation: artifactSnapshot.provenanceValidation,
+        artifactByteVerification: verifiedBytes.verification,
+        artifactManifestTrust: currentArtifactManifestTrustStatus,
         verificationPlan,
         verification: "EXPECTED_FIRMWARE_OBSERVED",
       }),

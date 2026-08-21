@@ -3,6 +3,7 @@ import { rebuildProviderId } from "@elrs-easy/device";
 import {
   isFirmwareUpdateMethod,
   type FirmwareUpdateMethod,
+  type FirmwareUpdateProviderAssurance,
 } from "@elrs-easy/domain";
 
 import { readProviderDataProperty } from "./sensitive-operation-helpers.js";
@@ -23,6 +24,7 @@ export type FirmwareUpdateProviderSelection =
       readonly status: "SELECTED";
       readonly provider: FirmwareUpdateProvider;
       readonly providerId: string;
+      readonly providerAssurance: FirmwareUpdateProviderAssurance;
       readonly updateMethod: FirmwareUpdateMethod;
       readonly updateCapabilityId: string;
     }
@@ -34,6 +36,7 @@ export type FirmwareUpdateProviderSelection =
 interface InspectedProvider {
   readonly provider: FirmwareUpdateProvider;
   readonly providerId: string;
+  readonly providerAssurance: FirmwareUpdateProviderAssurance;
   readonly updateMethod: FirmwareUpdateMethod;
   readonly updateCapabilityId: string;
 }
@@ -45,16 +48,21 @@ function inspectProvider(
     const providerId = rebuildProviderId(
       readProviderDataProperty(provider, "id"),
     );
+    const providerAssurance = readProviderDataProperty(provider, "assurance");
     const updateMethod = readProviderDataProperty(provider, "updateMethod");
     const updateCapabilityId = rebuildProviderId(
       readProviderDataProperty(provider, "updateCapabilityId"),
     );
-    if (!isFirmwareUpdateMethod(updateMethod)) {
+    if (
+      providerAssurance !== "SYNTHETIC_ONLY" ||
+      !isFirmwareUpdateMethod(updateMethod)
+    ) {
       return null;
     }
     return Object.freeze({
       provider,
       providerId,
+      providerAssurance,
       updateMethod,
       updateCapabilityId,
     });
@@ -112,6 +120,7 @@ export function selectFirmwareUpdateProvider(input: {
         status: "SELECTED",
         provider: selected.provider,
         providerId: selected.providerId,
+        providerAssurance: selected.providerAssurance,
         updateMethod: selected.updateMethod,
         updateCapabilityId: selected.updateCapabilityId,
       });

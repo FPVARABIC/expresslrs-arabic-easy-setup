@@ -1,11 +1,14 @@
 import type { FirmwareUpdateArtifact } from "@elrs-easy/compatibility";
 import type {
+  ArtifactManifestTrustStatus,
   CancellationSignal,
   Capability,
   DeviceDescriptor,
   DeviceIdentityEvidence,
   DeviceSession,
+  FirmwareArtifactByteVerification,
   FirmwareUpdateMethod,
+  FirmwareUpdateProviderAssurance,
 } from "@elrs-easy/domain";
 
 export interface IdentityReader {
@@ -76,24 +79,37 @@ export type FirmwareVerificationResult =
         "TARGET_MISMATCH" | "VERSION_MISMATCH" | "ARTIFACT_NOT_VERIFIED";
     };
 
+/**
+ * Exact bytes already copied, size-checked, and digested by Core. Each provider
+ * call receives a fresh byte copy; this object does not imply manifest trust.
+ */
+export interface VerifiedFirmwareUpdateArtifact {
+  readonly artifact: FirmwareUpdateArtifact;
+  readonly bytes: Uint8Array;
+  readonly byteVerification: FirmwareArtifactByteVerification;
+  readonly manifestTrust: ArtifactManifestTrustStatus;
+}
+
 export interface FirmwareUpdateProvider extends IdentityReader {
   readonly id: string;
+  /** The current contract intentionally admits Synthetic providers only. */
+  readonly assurance: FirmwareUpdateProviderAssurance;
   /** Canonical mechanism; platform-specific provider identity stays separate. */
   readonly updateMethod: FirmwareUpdateMethod;
   /** Runtime capability that must be observed before this provider may write. */
   readonly updateCapabilityId: string;
   validateArtifact(
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<boolean>;
   prepareUpdate(
     session: DeviceSession,
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<void>;
   writeFirmware(
     session: DeviceSession,
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ): Promise<FirmwareWriteReceipt>;
   reboot(session: DeviceSession, signal?: CancellationSignal): Promise<void>;

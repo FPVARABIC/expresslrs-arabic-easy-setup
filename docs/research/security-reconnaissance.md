@@ -98,4 +98,4 @@ Never record the Binding Phrase in provenance. UID-derived values are identifier
 - Privacy scrubber fixtures.
 - Dependency admission policy.
 - Content Security Policy baseline.
-- Signed-manifest design spike before any real Firmware catalog/update implementation.
+- Signed-manifest design spike before any real Firmware catalog/update implementation. The wire/trust design is now recorded in [ADR-0014](../adr/ADR-0014-signed-manifest-trust-and-byte-verification.md); trust-root admission and real writes remain blocked.

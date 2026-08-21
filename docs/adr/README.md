@@ -17,5 +17,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0011: GitHub Pages public development preview — accepted with explicit hosting and Hardware limits.
 - ADR-0012: automatic multi-method Firmware update selection — accepted for Core and Synthetic providers only.
 - ADR-0013: Synthetic artifact provenance and Core-owned Verification Plan — accepted without signed-manifest or Hardware claims.
+- ADR-0014: Signed-manifest trust design and byte-verification boundary — accepted without a trust root or real writer.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

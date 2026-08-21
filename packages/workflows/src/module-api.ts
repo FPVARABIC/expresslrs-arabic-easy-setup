@@ -11,6 +11,7 @@ import {
   CoreOperationError,
   type CancellationSignal,
   type DeviceDescriptor,
+  type FirmwareArtifactDigestProvider,
   type OperationRecord,
 } from "@elrs-easy/domain";
 
@@ -47,6 +48,7 @@ export class FoundationExpressLrsModule {
   readonly #providers: FoundationModuleProviders;
   readonly #sessions: DeviceSessionManager;
   readonly #catalog: TargetCatalog;
+  readonly #artifactDigestProvider: FirmwareArtifactDigestProvider;
   readonly #clock?: WorkflowClock;
   readonly #discoveryEvidencePolicy?: IdentityEvidenceTrustPolicy;
   readonly #usedOperationIds = new Set<string>();
@@ -55,6 +57,7 @@ export class FoundationExpressLrsModule {
     readonly providers: FoundationModuleProviders;
     readonly sessions: DeviceSessionManager;
     readonly catalog: TargetCatalog;
+    readonly artifactDigestProvider: FirmwareArtifactDigestProvider;
     readonly clock?: WorkflowClock;
     readonly discoveryEvidencePolicy?: IdentityEvidenceTrustPolicy;
   }) {
@@ -65,6 +68,7 @@ export class FoundationExpressLrsModule {
     });
     this.#sessions = input.sessions;
     this.#catalog = input.catalog;
+    this.#artifactDigestProvider = input.artifactDigestProvider;
     this.#clock = input.clock;
     this.#discoveryEvidencePolicy = input.discoveryEvidencePolicy;
   }
@@ -122,6 +126,7 @@ export class FoundationExpressLrsModule {
     readonly operationId: string;
     readonly descriptor: DeviceDescriptor;
     readonly artifact: FirmwareUpdateArtifact;
+    readonly artifactBytes: Uint8Array;
     readonly userConfirmed: boolean;
     readonly signal?: CancellationSignal;
     readonly onProgress?: OperationObserver<FirmwareUpdateResult>;
@@ -129,6 +134,7 @@ export class FoundationExpressLrsModule {
     const operationId = input.operationId;
     const descriptor = input.descriptor;
     const artifact = input.artifact;
+    const artifactBytes = input.artifactBytes;
     const userConfirmed = input.userConfirmed;
     const signal = input.signal;
     const onProgress = input.onProgress;
@@ -137,6 +143,8 @@ export class FoundationExpressLrsModule {
       operationId,
       descriptor,
       artifact,
+      artifactBytes,
+      artifactDigestProvider: this.#artifactDigestProvider,
       userConfirmed,
       providers: this.#providers.firmwareUpdates,
       sessions: this.#sessions,

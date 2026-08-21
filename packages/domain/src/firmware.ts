@@ -1,3 +1,5 @@
+import type { CancellationSignal } from "./cancellation.js";
+
 export const recoveryDispositions = [
   "NONE",
   "SAFE_TO_RETRY",
@@ -57,6 +59,67 @@ export interface ArtifactProvenance {
   readonly artifactSizeBytes: number;
   readonly artifactSha256: string;
 }
+
+/**
+ * Conservative Core-wide ceiling for one in-memory Firmware artifact. Target
+ * and provider policies may impose a smaller limit later.
+ */
+export const maximumFirmwareArtifactSizeBytes = 64 * 1024 * 1024;
+
+export const firmwareArtifactDigestAssurances = [
+  "CRYPTOGRAPHIC",
+  "SYNTHETIC_ONLY",
+] as const;
+
+export type FirmwareArtifactDigestAssurance =
+  (typeof firmwareArtifactDigestAssurances)[number];
+
+/** Platform service used by Core after it has copied the caller's bytes. */
+export interface FirmwareArtifactDigestProvider {
+  readonly assurance: FirmwareArtifactDigestAssurance;
+  digestSha256(bytes: Uint8Array, signal?: CancellationSignal): Promise<string>;
+}
+
+export interface FirmwareArtifactByteVerification {
+  readonly status: "VERIFIED";
+  readonly algorithm: "SHA-256";
+  readonly assurance: FirmwareArtifactDigestAssurance;
+  readonly byteLength: number;
+  readonly sha256: string;
+}
+
+/**
+ * No signing root is admitted yet. This literal is carried in operation
+ * evidence so metadata or byte coherence cannot be mistaken for authenticity.
+ */
+export const currentArtifactManifestTrustStatus =
+  "UNVERIFIED_NO_TRUST_ROOT" as const;
+
+export type ArtifactManifestTrustStatus =
+  typeof currentArtifactManifestTrustStatus;
+
+/** Signed-manifest wire design only; accepting one still requires a trust root. */
+export const signedFirmwareManifestSchemaVersion = "1" as const;
+export const signedFirmwareManifestCanonicalization = "RFC8785" as const;
+export const signedFirmwareManifestSignatureAlgorithm = "Ed25519" as const;
+
+export interface SignedFirmwareManifestSignature {
+  readonly algorithm: typeof signedFirmwareManifestSignatureAlgorithm;
+  readonly keyId: string;
+  readonly signatureBase64Url: string;
+}
+
+export interface SignedFirmwareManifestEnvelope<TPayload> {
+  readonly schemaVersion: typeof signedFirmwareManifestSchemaVersion;
+  readonly canonicalization: typeof signedFirmwareManifestCanonicalization;
+  readonly payload: TPayload;
+  readonly signature: SignedFirmwareManifestSignature;
+}
+
+/** No real writer can satisfy the current provider contract. */
+export const firmwareUpdateProviderAssurances = ["SYNTHETIC_ONLY"] as const;
+export type FirmwareUpdateProviderAssurance =
+  (typeof firmwareUpdateProviderAssurances)[number];
 
 export const verificationFacts = [
   "DEVICE_RECONNECTED",

@@ -22,6 +22,7 @@ function provider(
 ): FirmwareUpdateProvider {
   return Object.freeze({
     id,
+    assurance: "SYNTHETIC_ONLY",
     updateMethod,
     updateCapabilityId: `${id}-update`,
   }) as unknown as FirmwareUpdateProvider;
@@ -40,6 +41,7 @@ describe("automatic Firmware update provider selection", () => {
     expect(selection).toMatchObject({
       status: "SELECTED",
       providerId: "mock-wifi",
+      providerAssurance: "SYNTHETIC_ONLY",
       updateMethod: "WIFI_OTA",
       updateCapabilityId: "mock-wifi-update",
     });
@@ -104,11 +106,26 @@ describe("automatic Firmware update provider selection", () => {
     });
   });
 
+  it("rejects any provider that claims an unadmitted real-write assurance", () => {
+    const unadmitted = {
+      ...provider("future-real-writer", "WIFI_OTA"),
+      assurance: "REAL_WRITE_UNVERIFIED",
+    } as unknown as FirmwareUpdateProvider;
+
+    expect(
+      selectFirmwareUpdateProvider({ target, providers: [unadmitted] }),
+    ).toEqual({
+      status: "BLOCKED",
+      reason: "INVALID_UPDATE_PROVIDER_REGISTRY",
+    });
+  });
+
   it("never executes accessor-backed provider metadata", () => {
     let getterCalls = 0;
     const hostile = Object.create(null) as FirmwareUpdateProvider;
     Object.defineProperties(hostile, {
       id: { value: "hostile-provider", enumerable: true },
+      assurance: { value: "SYNTHETIC_ONLY", enumerable: true },
       updateMethod: {
         enumerable: true,
         get() {

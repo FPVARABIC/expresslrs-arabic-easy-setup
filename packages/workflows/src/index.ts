@@ -1,5 +1,6 @@
 export * from "./easy-binding.js";
 export * from "./firmware-artifact.js";
+export * from "./firmware-artifact-bytes.js";
 export * from "./firmware-update.js";
 export * from "./firmware-update-provider-selection.js";
 export * from "./module-api.js";

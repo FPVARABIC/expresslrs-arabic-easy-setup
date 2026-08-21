@@ -1,7 +1,14 @@
 import type { FirmwareUpdateArtifact } from "@elrs-easy/compatibility";
 import { ExclusiveDeviceSessionManager } from "@elrs-easy/device";
-import type { CancellationSignal, DeviceSession } from "@elrs-easy/domain";
-import { runFirmwareUpdate } from "@elrs-easy/workflows";
+import type {
+  CancellationSignal,
+  DeviceSession,
+  FirmwareArtifactDigestProvider,
+} from "@elrs-easy/domain";
+import {
+  runFirmwareUpdate,
+  type VerifiedFirmwareUpdateArtifact,
+} from "@elrs-easy/workflows";
 import { describe, expect, it } from "vitest";
 
 import { syntheticTargetCatalog } from "./fixtures.js";
@@ -12,8 +19,10 @@ import {
 } from "./mock-sensitive-operation-providers.js";
 import {
   compatibleFirmwareArtifact,
+  createSyntheticFirmwareArtifactBytes,
   majorVersionMismatchArtifact,
   sensitiveOperationFixtures,
+  syntheticFirmwareArtifactDigestProvider,
 } from "./sensitive-operation-fixtures.js";
 
 function sessions() {
@@ -26,13 +35,15 @@ function sessions() {
 
 class ArtifactRecordingFirmwareProvider extends ScriptedFirmwareUpdateProvider {
   public writtenArtifact: FirmwareUpdateArtifact | null = null;
+  public writtenBytes: Uint8Array | null = null;
 
   public override async writeFirmware(
     session: DeviceSession,
-    artifact: FirmwareUpdateArtifact,
+    artifact: VerifiedFirmwareUpdateArtifact,
     signal?: CancellationSignal,
   ) {
-    this.writtenArtifact = Object.freeze({ ...artifact });
+    this.writtenArtifact = Object.freeze({ ...artifact.artifact });
+    this.writtenBytes = artifact.bytes.slice();
     return super.writeFirmware(session, artifact, signal);
   }
 }
@@ -42,6 +53,8 @@ function run(
   input?: {
     readonly operationId?: string;
     readonly artifact?: typeof compatibleFirmwareArtifact;
+    readonly artifactBytes?: Uint8Array;
+    readonly artifactDigestProvider?: FirmwareArtifactDigestProvider;
     readonly userConfirmed?: boolean;
     readonly signal?: CancellationSignal;
     readonly sessionManager?: ReturnType<typeof sessions>;
@@ -51,6 +64,10 @@ function run(
     operationId: input?.operationId ?? "update-1",
     descriptor: sensitiveOperationFixtures.initial.descriptor,
     artifact: input?.artifact ?? compatibleFirmwareArtifact,
+    artifactBytes:
+      input?.artifactBytes ?? createSyntheticFirmwareArtifactBytes(),
+    artifactDigestProvider:
+      input?.artifactDigestProvider ?? syntheticFirmwareArtifactDigestProvider,
     providers: [provider],
     sessions: input?.sessionManager ?? sessions(),
     catalog: syntheticTargetCatalog,
@@ -76,6 +93,17 @@ describe("Firmware Update with a synthetic provider", () => {
     expect(operation.result?.artifactProvenanceValidation).toBe(
       "COHERENCE_ONLY",
     );
+    expect(operation.result?.artifactByteVerification).toEqual({
+      status: "VERIFIED",
+      algorithm: "SHA-256",
+      assurance: "SYNTHETIC_ONLY",
+      byteLength: 4096,
+      sha256: compatibleFirmwareArtifact.sha256,
+    });
+    expect(operation.result?.artifactManifestTrust).toBe(
+      "UNVERIFIED_NO_TRUST_ROOT",
+    );
+    expect(operation.result?.providerAssurance).toBe("SYNTHETIC_ONLY");
     expect(operation.result?.verificationPlan).toMatchObject({
       id: "firmware-update-post-write-v1",
       expectedDeviceId: sensitiveOperationFixtures.initial.descriptor.id,
@@ -120,6 +148,8 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-auto-method-preference",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: compatibleFirmwareArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       providers: [serial, wifi],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
@@ -193,6 +223,8 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-provider-registry-snapshot",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: compatibleFirmwareArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       providers: mutableProviders,
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
@@ -291,6 +323,36 @@ describe("Firmware Update with a synthetic provider", () => {
     });
     expect(provider.calls).toEqual([]);
   });
+
+  it.each([
+    ["FIRMWARE_ARTIFACT_SIZE_MISMATCH", new Uint8Array([1, 2, 3])],
+    [
+      "FIRMWARE_ARTIFACT_DIGEST_MISMATCH",
+      (() => {
+        const bytes = createSyntheticFirmwareArtifactBytes();
+        bytes[0] = (bytes[0] ?? 0) ^ 0xff;
+        return bytes;
+      })(),
+    ],
+  ] as const)(
+    "blocks byte verification reason %s before any provider call",
+    async (reason, artifactBytes) => {
+      const provider = new ScriptedFirmwareUpdateProvider({
+        initial: sensitiveOperationFixtures.initial,
+      });
+      const operation = await run(provider, {
+        operationId: `update-byte-gate-${reason}`,
+        artifactBytes,
+      });
+
+      expect(operation.state).toBe("FAILED");
+      expect(operation.error).toMatchObject({
+        code: "ARTIFACT_INVALID",
+        reason,
+      });
+      expect(provider.calls).toEqual([]);
+    },
+  );
 
   it("does not execute accessor-backed provenance", async () => {
     const provider = new ScriptedFirmwareUpdateProvider({
@@ -472,6 +534,8 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-mutated-descriptor",
       descriptor: mutableDescriptor,
       artifact: compatibleFirmwareArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
@@ -499,6 +563,8 @@ describe("Firmware Update with a synthetic provider", () => {
   it("writes the validated artifact snapshot despite adversarial caller mutation", async () => {
     const originalArtifact = { ...compatibleFirmwareArtifact };
     const mutableArtifact = { ...compatibleFirmwareArtifact };
+    const originalBytes = createSyntheticFirmwareArtifactBytes();
+    const mutableBytes = originalBytes.slice();
     const provider = new ArtifactRecordingFirmwareProvider({
       initial: sensitiveOperationFixtures.initial,
     });
@@ -507,12 +573,17 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-mutated-artifact",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: mutableArtifact,
+      artifactBytes: mutableBytes,
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
       userConfirmed: true,
       clock: { now: () => "2026-08-20T08:00:00.000Z" },
       observer: (snapshot) => {
+        if (snapshot.state === "IDLE") {
+          mutableBytes.fill(255);
+        }
         if (snapshot.state === "WAITING_FOR_CONFIRMATION") {
           mutableArtifact.targetId = "fixture.rx.beta-subghz";
           mutableArtifact.firmwareVersion = "9.9.9";
@@ -527,6 +598,7 @@ describe("Firmware Update with a synthetic provider", () => {
     expect(operation.state).toBe("SUCCESS");
     expect(operation.verificationPassed).toBe(true);
     expect(provider.writtenArtifact).toEqual(originalArtifact);
+    expect(provider.writtenBytes).toEqual(originalBytes);
     expect(operation.result?.targetId).toBe(originalArtifact.targetId);
     expect(operation.result?.firmwareVersion).toBe(
       originalArtifact.firmwareVersion,
@@ -550,6 +622,8 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-mutated-provenance",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: mutableArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,
@@ -581,6 +655,8 @@ describe("Firmware Update with a synthetic provider", () => {
       operationId: "update-cancelled-after-write",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: compatibleFirmwareArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
+      artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
       providers: [provider],
       sessions: sessions(),
       catalog: syntheticTargetCatalog,

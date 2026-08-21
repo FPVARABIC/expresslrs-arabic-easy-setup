@@ -11,7 +11,9 @@ import {
 } from "./mock-sensitive-operation-providers.js";
 import {
   compatibleFirmwareArtifact,
+  createSyntheticFirmwareArtifactBytes,
   sensitiveOperationFixtures,
+  syntheticFirmwareArtifactDigestProvider,
 } from "./sensitive-operation-fixtures.js";
 
 function createModule() {
@@ -40,6 +42,7 @@ function createModule() {
       ids: { next: () => `module-session-${++sessionId}` },
     }),
     catalog: syntheticTargetCatalog,
+    artifactDigestProvider: syntheticFirmwareArtifactDigestProvider,
     discoveryEvidencePolicy: createSyntheticIdentityEvidencePolicy(discovery),
     clock: { now: () => "2026-08-20T08:00:00.000Z" },
   });
@@ -59,6 +62,7 @@ describe("FoundationExpressLrsModule", () => {
       operationId: "module-update",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: compatibleFirmwareArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
       userConfirmed: true,
     });
 
@@ -84,6 +88,7 @@ describe("FoundationExpressLrsModule", () => {
       operationId: "module-progress",
       descriptor: sensitiveOperationFixtures.initial.descriptor,
       artifact: compatibleFirmwareArtifact,
+      artifactBytes: createSyntheticFirmwareArtifactBytes(),
       userConfirmed: true,
       onProgress: (snapshot) => states.push(snapshot.state),
     });

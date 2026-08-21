@@ -90,8 +90,21 @@ execution now requires a `FirmwareUpdateArtifact` with provenance schema v1.
 Core rebuilds fixed own data properties before the first observer, validates
 canonical digest/commit/time/repository/size shapes, and requires the descriptor
 Target and digest to agree with provenance. The result is explicitly labeled
-`COHERENCE_ONLY`; there is no Firmware byte hash, signature verification, or
-trusted manifest.
+`COHERENCE_ONLY`.
+
+Execution also requires an exact non-empty `Uint8Array`. Core copies it before
+the first observer, caps it at 64 MiB, requires its length to equal provenance,
+and verifies its canonical SHA-256 through an injected digest provider before
+calling an update provider. Validation, preparation, and writing each receive a
+fresh copy of those verified bytes. The Browser adapter implements the digest
+with Web Crypto and reads bounded `Blob`/`File` bytes without retaining a file
+name. Synthetic execution uses an explicitly `SYNTHETIC_ONLY` fixture boundary.
+
+Byte integrity is not authenticity. The operation result separately records
+provenance validation, byte-verification assurance, manifest trust, and provider
+assurance. Manifest trust remains `UNVERIFIED_NO_TRUST_ROOT`, and the provider
+registry currently admits only `SYNTHETIC_ONLY`; a real writer cannot satisfy
+the contract.
 
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware
@@ -114,10 +127,10 @@ read identity/capabilities
 `FirmwareUpdateProvider` separates:
 
 ```text
-validate artifact
+validate Core-verified artifact bytes
 → read identity/capabilities
 → prepare
-→ write
+→ write a fresh copy of the verified bytes
 → reboot
 → reconnect
 → verify target and version
@@ -141,7 +154,7 @@ ordinary UI does not choose a method.
 | Synthetic Discovery | Deterministic fixtures | Synthetic only |
 | Browser Local HTTP Discovery | Explicit, bounded `GET /config` candidate | `UNVALIDATED`; no Hardware |
 | Binding | Scripted Synthetic | No RF/link Hardware |
-| Firmware Update | Scripted Synthetic multi-method selection, provenance coherence, and declarative verification | Mock only; no binary, signed manifest, or device I/O |
+| Firmware Update | Scripted Synthetic multi-method selection, provenance coherence, byte flow/hash boundary, and declarative verification | Mock only; no trusted manifest, real writer, or device I/O |
 | Android | None | Deferred to Android real-device spike |
 
 No package contains an actual WebSerial, WebUSB, native USB, Firmware build, or
