@@ -18,5 +18,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0012: automatic multi-method Firmware update selection — accepted for Core and Synthetic providers only.
 - ADR-0013: Synthetic artifact provenance and Core-owned Verification Plan — accepted without signed-manifest or Hardware claims.
 - ADR-0014: Signed-manifest trust design and byte-verification boundary — accepted without a trust root or real writer.
+- ADR-0015: bounded Synthetic manifest parsing and Ed25519 verification — accepted as `VALID_UNTRUSTED` software evidence only.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   readFirmwareArtifactBlob,
   WebCryptoFirmwareArtifactDigestProvider,
+  WebCryptoFirmwareManifestSignatureVerifier,
 } from "./firmware-artifact-crypto.js";
 
 describe("Browser Firmware artifact cryptography", () => {
@@ -51,6 +52,56 @@ describe("Browser Firmware artifact cryptography", () => {
         blob: new Blob([new Uint8Array([1])]),
         signal: { aborted: true },
       }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("verifies Ed25519 known bytes without assigning key trust", async () => {
+    const verifier = new WebCryptoFirmwareManifestSignatureVerifier();
+    const keyPair = (await crypto.subtle.generateKey(
+      { name: "Ed25519" },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const signatureInput = new TextEncoder().encode(
+      "synthetic-manifest-signature-input",
+    );
+    const signature = new Uint8Array(
+      await crypto.subtle.sign(
+        { name: "Ed25519" },
+        keyPair.privateKey,
+        signatureInput,
+      ),
+    );
+    const rawPublicKey = new Uint8Array(
+      await crypto.subtle.exportKey("raw", keyPair.publicKey),
+    );
+
+    await expect(
+      verifier.verifyEd25519(signatureInput, signature, rawPublicKey),
+    ).resolves.toBe(true);
+    signatureInput[0] = (signatureInput[0] ?? 0) ^ 1;
+    await expect(
+      verifier.verifyEd25519(signatureInput, signature, rawPublicKey),
+    ).resolves.toBe(false);
+    expect(verifier.assurance).toBe("CRYPTOGRAPHIC");
+  });
+
+  it("rejects malformed or cancelled Ed25519 operations", async () => {
+    const verifier = new WebCryptoFirmwareManifestSignatureVerifier();
+    await expect(
+      verifier.verifyEd25519(
+        new Uint8Array([1]),
+        new Uint8Array(63),
+        new Uint8Array(32),
+      ),
+    ).rejects.toThrow("ED25519_WIRE_VALUE_INVALID");
+    await expect(
+      verifier.verifyEd25519(
+        new Uint8Array([1]),
+        new Uint8Array(64),
+        new Uint8Array(32),
+        { aborted: true },
+      ),
     ).rejects.toMatchObject({ name: "AbortError" });
   });
 });

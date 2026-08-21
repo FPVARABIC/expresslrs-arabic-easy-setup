@@ -2,6 +2,7 @@ import {
   maximumFirmwareArtifactSizeBytes,
   type CancellationSignal,
   type FirmwareArtifactDigestProvider,
+  type FirmwareManifestSignatureVerifier,
 } from "@elrs-easy/domain";
 
 function assertNotAborted(signal?: CancellationSignal): void {
@@ -40,6 +41,55 @@ export class WebCryptoFirmwareArtifactDigestProvider implements FirmwareArtifact
     const digest = await this.#subtle.digest("SHA-256", copy);
     assertNotAborted(signal);
     return bytesToLowercaseHex(new Uint8Array(digest));
+  }
+}
+
+/**
+ * Browser Ed25519 primitive. Key authorization remains a Core trust-metadata
+ * concern; this adapter only answers whether the signature is mathematical.
+ */
+export class WebCryptoFirmwareManifestSignatureVerifier implements FirmwareManifestSignatureVerifier {
+  public readonly assurance = "CRYPTOGRAPHIC" as const;
+  readonly #subtle: SubtleCrypto;
+
+  public constructor(input: { readonly subtle?: SubtleCrypto } = {}) {
+    const subtle = input.subtle ?? globalThis.crypto?.subtle;
+    if (subtle === undefined) {
+      throw new TypeError("WEB_CRYPTO_SUBTLE_UNAVAILABLE");
+    }
+    this.#subtle = subtle;
+  }
+
+  public async verifyEd25519(
+    signatureInput: Uint8Array,
+    signature: Uint8Array,
+    rawPublicKey: Uint8Array,
+    signal?: CancellationSignal,
+  ): Promise<boolean> {
+    assertNotAborted(signal);
+    if (signature.byteLength !== 64 || rawPublicKey.byteLength !== 32) {
+      throw new TypeError("ED25519_WIRE_VALUE_INVALID");
+    }
+
+    const inputCopy = Uint8Array.from(signatureInput);
+    const signatureCopy = Uint8Array.from(signature);
+    const publicKeyCopy = Uint8Array.from(rawPublicKey);
+    const publicKey = await this.#subtle.importKey(
+      "raw",
+      publicKeyCopy,
+      { name: "Ed25519" },
+      false,
+      ["verify"],
+    );
+    assertNotAborted(signal);
+    const valid = await this.#subtle.verify(
+      { name: "Ed25519" },
+      publicKey,
+      signatureCopy,
+      inputCopy,
+    );
+    assertNotAborted(signal);
+    return valid;
   }
 }
 

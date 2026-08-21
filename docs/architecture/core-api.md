@@ -106,6 +106,13 @@ assurance. Manifest trust remains `UNVERIFIED_NO_TRUST_ROOT`, and the provider
 registry currently admits only `SYNTHETIC_ONLY`; a real writer cannot satisfy
 the contract.
 
+Separately, the Workflow package can parse the fixed version-1 Manifest
+allowlist under strict JSON/resource limits, build domain-separated RFC 8785
+bytes, and exercise Ed25519 through the Browser Web Crypto adapter. That spike
+admits only `synthetic` channel/role, raw uncompressed bytes, and a caller
+supplied Synthetic public key. Even a matching signature is
+`VALID_UNTRUSTED`; it is not wired into Firmware execution or catalog trust.
+
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware
 version matched. Strict evaluation of that immutable plan is an additional
@@ -154,7 +161,7 @@ ordinary UI does not choose a method.
 | Synthetic Discovery | Deterministic fixtures | Synthetic only |
 | Browser Local HTTP Discovery | Explicit, bounded `GET /config` candidate | `UNVALIDATED`; no Hardware |
 | Binding | Scripted Synthetic | No RF/link Hardware |
-| Firmware Update | Scripted Synthetic multi-method selection, provenance coherence, byte flow/hash boundary, and declarative verification | Mock only; no trusted manifest, real writer, or device I/O |
+| Firmware Update | Scripted Synthetic multi-method selection, provenance coherence, byte flow/hash boundary, bounded untrusted Manifest-signature spike, and declarative verification | Mock only; no trusted manifest, real writer, or device I/O |
 | Android | None | Deferred to Android real-device spike |
 
 No package contains an actual WebSerial, WebUSB, native USB, Firmware build, or

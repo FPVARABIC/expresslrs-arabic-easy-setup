@@ -109,11 +109,123 @@ export interface SignedFirmwareManifestSignature {
   readonly signatureBase64Url: string;
 }
 
+/** Immutable named digest used inside the version-1 provenance payload. */
+export interface FirmwareManifestNamedDigest {
+  readonly id: string;
+  readonly sha256: string;
+}
+
+/** Immutable build-platform identity used inside the version-1 payload. */
+export interface FirmwareManifestPlatformVersion {
+  readonly name: string;
+  readonly version: string;
+}
+
+/** Public build option; the current parser admits only Synthetic names. */
+export interface FirmwareManifestBuildOption {
+  readonly name: string;
+  readonly value: string;
+}
+
+/** Immutable identity for a separately downloadable notice bundle. */
+export interface FirmwareManifestNoticeBundle {
+  readonly url: string;
+  readonly sha256: string;
+}
+
+/** Fixed version-1 field set; channel-specific policy is applied separately. */
+export interface FirmwareManifestPayloadV1 {
+  readonly manifestSchema: typeof signedFirmwareManifestSchemaVersion;
+  readonly applicationVersion: string;
+  readonly coreVersion: string;
+  readonly channel: string;
+  readonly upstreamRepository: string;
+  readonly upstreamTag: string;
+  readonly upstreamFullSha: string;
+  readonly upstreamSourceArchiveSha256: string;
+  readonly targetsRepository: string;
+  readonly targetsFullSha: string;
+  readonly targetsSnapshotSha256: string;
+  readonly patchSetId: string;
+  readonly patches: readonly FirmwareManifestNamedDigest[];
+  readonly dirtyTree: boolean;
+  readonly toolchainOrContainerDigest: string;
+  readonly platformioVersion: string;
+  readonly platformVersions: readonly FirmwareManifestPlatformVersion[];
+  readonly dependencyLockDigest: string;
+  readonly targetIdentifier: string;
+  readonly productIdentifier: string;
+  readonly mcu: string;
+  readonly radio: string;
+  readonly band: string;
+  readonly regulatoryDomain: string;
+  readonly nonSecretBuildOptions: readonly FirmwareManifestBuildOption[];
+  readonly artifactName: string;
+  readonly artifactMediaType: string;
+  readonly artifactCompression: string;
+  readonly artifactByteForm: string;
+  readonly artifactSizeBytes: number;
+  readonly artifactSha256: string;
+  readonly buildSourceEpoch: number;
+  readonly testsAndValidationLevel: readonly string[];
+  readonly correspondingSourceUrl: string;
+  readonly noticeBundle: FirmwareManifestNoticeBundle;
+  readonly releaseSequence: number;
+  readonly publishedAt: string;
+  readonly minimumApplicationVersion: string;
+  readonly minimumCoreVersion: string;
+  readonly signingRole: string;
+  readonly requiredRootMetadataVersion: number;
+}
+
+/**
+ * Only this narrower payload can currently leave the bounded Workflow parser.
+ * Stable/Beta roles and compressed forms require later trust and byte gates.
+ */
+export interface SyntheticFirmwareManifestPayloadV1 extends FirmwareManifestPayloadV1 {
+  readonly channel: "synthetic";
+  readonly artifactMediaType: "application/octet-stream";
+  readonly artifactCompression: "none";
+  readonly artifactByteForm: "RAW_TO_WRITE";
+  readonly signingRole: "synthetic";
+}
+
 export interface SignedFirmwareManifestEnvelope<TPayload> {
   readonly schemaVersion: typeof signedFirmwareManifestSchemaVersion;
   readonly canonicalization: typeof signedFirmwareManifestCanonicalization;
   readonly payload: TPayload;
   readonly signature: SignedFirmwareManifestSignature;
+}
+
+export const firmwareManifestSignatureVerifierAssurances = [
+  "CRYPTOGRAPHIC",
+  "SYNTHETIC_ONLY",
+] as const;
+
+export type FirmwareManifestSignatureVerifierAssurance =
+  (typeof firmwareManifestSignatureVerifierAssurances)[number];
+
+/**
+ * Platform cryptography only. A valid mathematical signature says nothing
+ * about trust unless a separately admitted root resolves and authorizes it.
+ */
+export interface FirmwareManifestSignatureVerifier {
+  readonly assurance: FirmwareManifestSignatureVerifierAssurance;
+  verifyEd25519(
+    signatureInput: Uint8Array,
+    signature: Uint8Array,
+    rawPublicKey: Uint8Array,
+    signal?: CancellationSignal,
+  ): Promise<boolean>;
+}
+
+export interface FirmwareManifestSignatureVerification {
+  readonly status: "VALID_UNTRUSTED";
+  readonly algorithm: typeof signedFirmwareManifestSignatureAlgorithm;
+  readonly assurance: FirmwareManifestSignatureVerifierAssurance;
+  readonly keyAssurance: "SYNTHETIC_ONLY";
+  readonly keyId: string;
+  readonly trustStatus: ArtifactManifestTrustStatus;
 }
 
 /** No real writer can satisfy the current provider contract. */
