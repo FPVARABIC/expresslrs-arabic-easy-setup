@@ -15,11 +15,14 @@ import {
   type BoundedJsonValue,
 } from "./bounded-json.js";
 import type {
+  SyntheticDualFormFirmwareManifestRootVerificationResult,
   SyntheticFirmwareManifestRootVerificationResult,
   SyntheticFirmwareRootRotationResult,
 } from "./firmware-root-metadata.js";
 import {
+  syntheticDualFormManifestRootVerificationRecords,
   syntheticManifestRootVerificationRecords,
+  syntheticReleaseTransitionRecords,
   syntheticRootRotationRecords,
 } from "./firmware-trust-internals.js";
 
@@ -417,7 +420,9 @@ function blockedReleaseTransition(
  */
 export function advanceSyntheticFirmwareReleaseState(input: {
   readonly state: ParsedSyntheticFirmwareTrustState;
-  readonly verification: SyntheticFirmwareManifestRootVerificationResult;
+  readonly verification:
+    | SyntheticFirmwareManifestRootVerificationResult
+    | SyntheticDualFormFirmwareManifestRootVerificationResult;
 }): SyntheticFirmwareReleaseStateTransitionResult {
   const stateRecord =
     typeof input.state === "object" && input.state !== null
@@ -426,10 +431,16 @@ export function advanceSyntheticFirmwareReleaseState(input: {
   if (stateRecord === undefined) {
     return blockedReleaseTransition("FIRMWARE_TRUST_STATE_NOT_FROM_PARSER");
   }
-  const verificationRecord =
+  const legacyVerificationRecord =
     typeof input.verification === "object" && input.verification !== null
       ? syntheticManifestRootVerificationRecords.get(input.verification)
       : undefined;
+  const dualFormVerificationRecord =
+    typeof input.verification === "object" && input.verification !== null
+      ? syntheticDualFormManifestRootVerificationRecords.get(input.verification)
+      : undefined;
+  const verificationRecord =
+    legacyVerificationRecord ?? dualFormVerificationRecord;
   if (verificationRecord === undefined) {
     return blockedReleaseTransition(
       "FIRMWARE_MANIFEST_ROOT_VERIFICATION_NOT_PROVEN",
@@ -460,16 +471,29 @@ export function advanceSyntheticFirmwareReleaseState(input: {
     if (verificationRecord.artifactSha256 !== currentFloor.artifactSha256) {
       return blockedReleaseTransition("FIRMWARE_RELEASE_SEQUENCE_CONFLICT");
     }
-    return Object.freeze({
+    const result: SyntheticFirmwareReleaseStateTransitionResult = Object.freeze(
+      {
+        status: "UNCHANGED_UNPERSISTED",
+        change: "NONE",
+        highestRootMetadataVersion: highestRoot,
+        targetIdentifier: verificationRecord.targetIdentifier,
+        highestReleaseSequence: currentFloor.highestReleaseSequence,
+        state: input.state,
+        assurance: "SYNTHETIC_ONLY",
+        trustStatus: currentArtifactManifestTrustStatus,
+      },
+    );
+    syntheticReleaseTransitionRecords.set(result, {
       status: "UNCHANGED_UNPERSISTED",
-      change: "NONE",
-      highestRootMetadataVersion: highestRoot,
+      verification: input.verification,
+      stateBefore: input.state,
+      stateAfter: input.state,
+      rootVersion: verificationRecord.rootVersion,
       targetIdentifier: verificationRecord.targetIdentifier,
-      highestReleaseSequence: currentFloor.highestReleaseSequence,
-      state: input.state,
-      assurance: "SYNTHETIC_ONLY",
-      trustStatus: currentArtifactManifestTrustStatus,
+      releaseSequence: verificationRecord.releaseSequence,
+      artifactSha256: verificationRecord.artifactSha256,
     });
+    return result;
   }
 
   const nextFloor: SyntheticFirmwareReleaseFloorV1 = Object.freeze({
@@ -501,7 +525,7 @@ export function advanceSyntheticFirmwareReleaseState(input: {
     highestRootMetadataVersion: highestRoot,
     releaseFloors: nextFloors,
   });
-  return Object.freeze({
+  const result: SyntheticFirmwareReleaseStateTransitionResult = Object.freeze({
     status: "ADVANCED_UNPERSISTED",
     change: "RELEASE_SEQUENCE",
     highestRootMetadataVersion: highestRoot,
@@ -511,4 +535,15 @@ export function advanceSyntheticFirmwareReleaseState(input: {
     assurance: "SYNTHETIC_ONLY",
     trustStatus: currentArtifactManifestTrustStatus,
   });
+  syntheticReleaseTransitionRecords.set(result, {
+    status: "ADVANCED_UNPERSISTED",
+    verification: input.verification,
+    stateBefore: input.state,
+    stateAfter: nextState,
+    rootVersion: verificationRecord.rootVersion,
+    targetIdentifier: verificationRecord.targetIdentifier,
+    releaseSequence: verificationRecord.releaseSequence,
+    artifactSha256: verificationRecord.artifactSha256,
+  });
+  return result;
 }

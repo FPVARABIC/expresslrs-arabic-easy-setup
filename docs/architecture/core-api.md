@@ -138,8 +138,22 @@ embedded Target must match the descriptor. Success is evidence-only
 `VERIFIED_SYNTHETIC_FIXTURE` with
 `writeDisposition: BLOCKED_SYNTHETIC_FIXTURE`; no payload bytes are returned.
 The Browser Platform supplies a streaming `DecompressionStream("gzip")` adapter
-labeled `SYNTHETIC_ONLY`. No real executable format, signed dual-form Manifest,
-catalog entry, or writer is admitted.
+labeled `SYNTHETIC_ONLY`. No real executable format, catalog entry, or writer is
+admitted.
+
+A separate 16 KiB version-2 Synthetic linkage Manifest now names the gzip and
+decompressed sizes and SHA-256 values under a new RFC 8785/Ed25519 domain. The
+existing fresh Synthetic root role can resolve its exact signer, and the
+unpersisted release floor uses the compressed digest as the identity of the
+download/decompression input. A final evidence join accepts only internally
+branded root-verification, compressed-validator, and rollback-transition
+objects created for the same Target/release/bytes. Its result is explicitly
+`SYNTHETIC_CATALOG_CANDIDATE_EVIDENCE` with
+`catalogDisposition: NOT_ADMITTED_UNTRUSTED_SYNTHETIC` and
+`writeDisposition: BLOCKED_SYNTHETIC_FIXTURE`. It returns no bytes and is not
+connected to the Target Catalog or update facade. An admitted root, atomic
+persistence, acquisition/corresponding-source evidence, real executable parser,
+catalog admission, and every writer remain blocked.
 
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware

@@ -29,12 +29,20 @@ import {
   type BoundedJsonValue,
 } from "./bounded-json.js";
 import {
+  syntheticDualFormFirmwareManifestSignatureBlockReasons,
+  verifySyntheticDualFormFirmwareManifestSignature,
+  type ParsedSignedSyntheticDualFormFirmwareManifest,
+  type SyntheticDualFormFirmwareManifestSignatureBlockReason,
+} from "./firmware-dual-form-manifest.js";
+import {
   syntheticFirmwareManifestSignatureBlockReasons,
   verifySyntheticFirmwareManifestSignature,
   type ParsedSignedFirmwareManifest,
   type SyntheticFirmwareManifestSignatureBlockReason,
 } from "./firmware-manifest.js";
 import {
+  syntheticDualFormManifestParseRecords,
+  syntheticDualFormManifestRootVerificationRecords,
   syntheticManifestRootVerificationRecords,
   syntheticRootRotationRecords,
 } from "./firmware-trust-internals.js";
@@ -159,6 +167,43 @@ export type SyntheticFirmwareManifestRootVerificationResult =
   | Readonly<{
       status: "BLOCKED";
       reason: SyntheticFirmwareManifestRootBlockReason;
+    }>;
+
+export const syntheticDualFormFirmwareManifestRootBlockReasons = [
+  ...syntheticFirmwareRootFreshnessBlockReasons,
+  ...syntheticDualFormFirmwareManifestSignatureBlockReasons,
+  "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_VERSION_MISMATCH",
+  "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_ROLE_THRESHOLD_UNSUPPORTED",
+  "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_KEY_NOT_AUTHORIZED",
+] as const;
+
+export type SyntheticDualFormFirmwareManifestRootBlockReason =
+  (typeof syntheticDualFormFirmwareManifestRootBlockReasons)[number];
+
+export type SyntheticDualFormFirmwareManifestRootVerificationResult =
+  | Readonly<{
+      status: "VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT";
+      manifestSchema: "2";
+      rootVersion: number;
+      role: "synthetic";
+      roleThreshold: 1;
+      keyId: string;
+      checkedAt: string;
+      clockAssurance: FirmwareTrustClockAssurance;
+      verifierAssurance: FirmwareManifestSignatureVerifierAssurance;
+      targetIdentifier: string;
+      artifactName: string;
+      releaseSequence: number;
+      compressedSizeBytes: number;
+      compressedSha256: string;
+      decompressedSizeBytes: number;
+      decompressedSha256: string;
+      rollbackArtifactSha256: string;
+      trustStatus: ArtifactManifestTrustStatus;
+    }>
+  | Readonly<{
+      status: "BLOCKED";
+      reason: SyntheticDualFormFirmwareManifestRootBlockReason;
     }>;
 
 const rootJsonLimits: BoundedJsonLimits = Object.freeze({
@@ -1002,6 +1047,124 @@ export async function verifySyntheticFirmwareManifestAgainstRoot(input: {
     targetIdentifier: facts.targetIdentifier,
     releaseSequence: facts.releaseSequence,
     artifactSha256: facts.artifactSha256,
+  });
+  return result;
+}
+
+function blockedDualFormManifestRoot(
+  reason: SyntheticDualFormFirmwareManifestRootBlockReason,
+): SyntheticDualFormFirmwareManifestRootVerificationResult {
+  return Object.freeze({ status: "BLOCKED", reason });
+}
+
+/**
+ * Resolves and verifies only a parser-created dual-form Synthetic Manifest.
+ * The root is still unadmitted, so the result cannot grant catalog trust.
+ */
+export async function verifySyntheticDualFormFirmwareManifestAgainstRoot(input: {
+  readonly root: ParsedSignedFirmwareRootMetadata;
+  readonly manifest: ParsedSignedSyntheticDualFormFirmwareManifest;
+  readonly clock: FirmwareTrustClock;
+  readonly verifier: FirmwareManifestSignatureVerifier;
+  readonly signal?: CancellationSignal;
+}): Promise<SyntheticDualFormFirmwareManifestRootVerificationResult> {
+  const rootRecord =
+    typeof input.root === "object" && input.root !== null
+      ? parsedRootRecords.get(input.root)
+      : undefined;
+  if (rootRecord === undefined) {
+    return blockedDualFormManifestRoot("FIRMWARE_ROOT_NOT_FROM_PARSER");
+  }
+  const manifestRecord =
+    typeof input.manifest === "object" && input.manifest !== null
+      ? syntheticDualFormManifestParseRecords.get(input.manifest)
+      : undefined;
+  if (manifestRecord === undefined) {
+    return blockedDualFormManifestRoot(
+      "SYNTHETIC_DUAL_FORM_MANIFEST_NOT_FROM_PARSER",
+    );
+  }
+  if (manifestRecord.requiredRootMetadataVersion !== rootRecord.version) {
+    return blockedDualFormManifestRoot(
+      "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_VERSION_MISMATCH",
+    );
+  }
+
+  const role = rootRecord.roles.get("synthetic");
+  if (role === undefined || role.threshold !== 1) {
+    return blockedDualFormManifestRoot(
+      "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_ROLE_THRESHOLD_UNSUPPORTED",
+    );
+  }
+  if (!role.keyIds.includes(manifestRecord.keyId)) {
+    return blockedDualFormManifestRoot(
+      "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_KEY_NOT_AUTHORIZED",
+    );
+  }
+  const rawPublicKey = rootRecord.keys.get(manifestRecord.keyId);
+  if (rawPublicKey === undefined) {
+    return blockedDualFormManifestRoot(
+      "SYNTHETIC_DUAL_FORM_MANIFEST_ROOT_KEY_NOT_AUTHORIZED",
+    );
+  }
+
+  const freshness = await evaluateSyntheticFirmwareRootFreshness({
+    root: input.root,
+    clock: input.clock,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (freshness.status === "BLOCKED") {
+    return blockedDualFormManifestRoot(freshness.reason);
+  }
+  const signature = await verifySyntheticDualFormFirmwareManifestSignature({
+    parsed: input.manifest,
+    key: {
+      assurance: "SYNTHETIC_ONLY",
+      keyId: manifestRecord.keyId,
+      rawPublicKey: rawPublicKey.slice(),
+    },
+    verifier: input.verifier,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (signature.status === "BLOCKED") {
+    return blockedDualFormManifestRoot(
+      signature.reason as SyntheticDualFormFirmwareManifestSignatureBlockReason,
+    );
+  }
+
+  const result: SyntheticDualFormFirmwareManifestRootVerificationResult =
+    Object.freeze({
+      status: "VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT",
+      manifestSchema: "2",
+      rootVersion: rootRecord.version,
+      role: "synthetic",
+      roleThreshold: 1,
+      keyId: manifestRecord.keyId,
+      checkedAt: freshness.checkedAt,
+      clockAssurance: freshness.clockAssurance,
+      verifierAssurance: signature.verification.assurance,
+      targetIdentifier: manifestRecord.targetIdentifier,
+      artifactName: manifestRecord.artifactName,
+      releaseSequence: manifestRecord.releaseSequence,
+      compressedSizeBytes: manifestRecord.compressedSizeBytes,
+      compressedSha256: manifestRecord.compressedSha256,
+      decompressedSizeBytes: manifestRecord.decompressedSizeBytes,
+      decompressedSha256: manifestRecord.decompressedSha256,
+      rollbackArtifactSha256: manifestRecord.compressedSha256,
+      trustStatus: currentArtifactManifestTrustStatus,
+    });
+  syntheticDualFormManifestRootVerificationRecords.set(result, {
+    parsedRoot: input.root,
+    parsedManifest: input.manifest,
+    rootVersion: rootRecord.version,
+    targetIdentifier: manifestRecord.targetIdentifier,
+    releaseSequence: manifestRecord.releaseSequence,
+    artifactSha256: manifestRecord.compressedSha256,
+    artifactName: manifestRecord.artifactName,
+    compressedSizeBytes: manifestRecord.compressedSizeBytes,
+    compressedSha256: manifestRecord.compressedSha256,
+    decompressedSizeBytes: manifestRecord.decompressedSizeBytes,
+    decompressedSha256: manifestRecord.decompressedSha256,
   });
   return result;
 }

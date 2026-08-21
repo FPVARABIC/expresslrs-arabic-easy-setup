@@ -21,6 +21,7 @@ import {
   verifyFirmwareArtifactBytes,
   type FirmwareArtifactByteBlockReason,
 } from "./firmware-artifact-bytes.js";
+import { syntheticCompressedArtifactValidationRecords } from "./firmware-trust-internals.js";
 import {
   assertNotAborted,
   copyExactUint8Array,
@@ -492,7 +493,7 @@ export async function validateSyntheticCompressedFirmwareArtifact(input: {
     );
   }
 
-  return Object.freeze({
+  const result: SyntheticCompressedFirmwareArtifactValidation = Object.freeze({
     status: "VERIFIED_SYNTHETIC_FIXTURE",
     validationLevel: "SYNTHETIC_ONLY",
     trustStatus: currentArtifactManifestTrustStatus,
@@ -502,4 +503,12 @@ export async function validateSyntheticCompressedFirmwareArtifact(input: {
     decompressedVerification: decompressedVerification.verification,
     executableIdentity: executable.identity,
   });
+  syntheticCompressedArtifactValidationRecords.set(result, {
+    targetIdentifier: descriptor.targetIdentifier,
+    compressedSizeBytes: descriptor.compressedSizeBytes,
+    compressedSha256: descriptor.compressedSha256,
+    decompressedSizeBytes: descriptor.decompressedSizeBytes,
+    decompressedSha256: descriptor.decompressedSha256,
+  });
+  return result;
 }

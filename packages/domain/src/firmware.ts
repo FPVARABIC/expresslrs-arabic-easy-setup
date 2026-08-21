@@ -197,6 +197,41 @@ export interface SignedFirmwareManifestEnvelope<TPayload> {
   readonly signature: SignedFirmwareManifestSignature;
 }
 
+/**
+ * A separate lab-only wire namespace for a compressed object and its exact
+ * decompressed form. Version 1 above remains raw-only and is never widened.
+ */
+export const signedSyntheticDualFormFirmwareManifestSchemaVersion =
+  "2" as const;
+export const syntheticDualFormFirmwareManifestType =
+  "synthetic-dual-form-firmware-manifest" as const;
+
+export interface SyntheticDualFormFirmwareManifestPayloadV2 {
+  readonly manifestSchema: typeof signedSyntheticDualFormFirmwareManifestSchemaVersion;
+  readonly manifestType: typeof syntheticDualFormFirmwareManifestType;
+  readonly channel: "synthetic";
+  readonly targetIdentifier: string;
+  readonly artifactName: string;
+  readonly artifactMediaType: "application/gzip";
+  readonly compression: "gzip";
+  readonly decompressedByteForm: "SYNTHETIC_EXECUTABLE_FIXTURE";
+  readonly executableFormat: "ELRS_EASY_SYNTHETIC_EXECUTABLE_V1";
+  readonly compressedSizeBytes: number;
+  readonly compressedSha256: string;
+  readonly decompressedSizeBytes: number;
+  readonly decompressedSha256: string;
+  readonly releaseSequence: number;
+  readonly signingRole: "synthetic";
+  readonly requiredRootMetadataVersion: number;
+}
+
+export interface SignedSyntheticDualFormFirmwareManifestEnvelopeV2 {
+  readonly schemaVersion: typeof signedSyntheticDualFormFirmwareManifestSchemaVersion;
+  readonly canonicalization: typeof signedFirmwareManifestCanonicalization;
+  readonly payload: SyntheticDualFormFirmwareManifestPayloadV2;
+  readonly signature: SignedFirmwareManifestSignature;
+}
+
 export const firmwareManifestSignatureVerifierAssurances = [
   "CRYPTOGRAPHIC",
   "SYNTHETIC_ONLY",

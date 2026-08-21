@@ -35,6 +35,9 @@ does not validate the reported Target, device family, browser, or Hardware.
 | Manifest `VERIFIED_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved the single-signature Manifest role and Ed25519 matched; the root itself was not admitted |
 | State `ADVANCED_UNPERSISTED` | A parser-created in-memory Synthetic rollback snapshot advanced monotonically after internally proven rotation/Manifest evidence; no durable write occurred |
 | Artifact `VERIFIED_SYNTHETIC_FIXTURE` | Bounded gzip fixture input and output matched separately named digests, and an exact Synthetic executable container carried the expected Target; the descriptor was unsigned and no writable bytes were returned |
+| Manifest `VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved an exact version-2 signature that names compressed and decompressed sizes and SHA-256 values; the root itself was not admitted |
+| Candidate `SYNTHETIC_CATALOG_CANDIDATE_EVIDENCE` | Internally branded dual-form Manifest/root, artifact-validation, and unpersisted rollback results all refer to the same Target, release, and bytes |
+| Catalog `NOT_ADMITTED_UNTRUSTED_SYNTHETIC` | Candidate evidence exists for software tests only; no Target Catalog record or release authority was created |
 | Write `BLOCKED_SYNTHETIC_FIXTURE` | The evidence is structurally unable to authorize or feed a current Firmware writer |
 | `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |
 
