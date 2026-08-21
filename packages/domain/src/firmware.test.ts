@@ -2,11 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   currentArtifactManifestTrustStatus,
+  firmwareRootMetadataCanonicalization,
+  firmwareRootMetadataSchemaVersion,
+  firmwareRootMetadataSignatureAlgorithm,
+  firmwareTrustClockAssurances,
   firmwareUpdateProviderAssurances,
   maximumFirmwareArtifactSizeBytes,
   signedFirmwareManifestCanonicalization,
   signedFirmwareManifestSchemaVersion,
   signedFirmwareManifestSignatureAlgorithm,
+  syntheticFirmwareRootMetadataType,
+  syntheticFirmwareRootRoles,
+  syntheticFirmwareTrustStateSchemaVersion,
+  syntheticFirmwareTrustStateType,
   type SignedFirmwareManifestEnvelope,
 } from "./firmware.js";
 
@@ -34,5 +42,29 @@ describe("Firmware trust constants", () => {
       signature: { algorithm: "Ed25519" },
     });
     expect(maximumFirmwareArtifactSizeBytes).toBe(64 * 1024 * 1024);
+  });
+
+  it("keeps root metadata, time, and rollback state Synthetic-only", () => {
+    expect({
+      schemaVersion: firmwareRootMetadataSchemaVersion,
+      canonicalization: firmwareRootMetadataCanonicalization,
+      algorithm: firmwareRootMetadataSignatureAlgorithm,
+      metadataType: syntheticFirmwareRootMetadataType,
+      roles: syntheticFirmwareRootRoles,
+    }).toEqual({
+      schemaVersion: "1",
+      canonicalization: "RFC8785",
+      algorithm: "Ed25519",
+      metadataType: "synthetic-root",
+      roles: ["root", "synthetic"],
+    });
+    expect(firmwareTrustClockAssurances).toEqual(["SYNTHETIC_ONLY"]);
+    expect({
+      schemaVersion: syntheticFirmwareTrustStateSchemaVersion,
+      stateType: syntheticFirmwareTrustStateType,
+    }).toEqual({
+      schemaVersion: "1",
+      stateType: "synthetic-firmware-trust-state",
+    });
   });
 });

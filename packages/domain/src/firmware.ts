@@ -228,6 +228,83 @@ export interface FirmwareManifestSignatureVerification {
   readonly trustStatus: ArtifactManifestTrustStatus;
 }
 
+/**
+ * Version-1 root-metadata wire constants. The only currently admitted wire
+ * namespace is Synthetic; these constants do not create a trust anchor.
+ */
+export const firmwareRootMetadataSchemaVersion = "1" as const;
+export const firmwareRootMetadataCanonicalization = "RFC8785" as const;
+export const firmwareRootMetadataSignatureAlgorithm = "Ed25519" as const;
+export const syntheticFirmwareRootMetadataType = "synthetic-root" as const;
+export const syntheticFirmwareRootRoles = ["root", "synthetic"] as const;
+
+export type SyntheticFirmwareRootRole =
+  (typeof syntheticFirmwareRootRoles)[number];
+
+export interface SyntheticFirmwareRootPublicKeyV1 {
+  readonly keyId: string;
+  readonly keyType: "ed25519";
+  readonly algorithm: typeof firmwareRootMetadataSignatureAlgorithm;
+  readonly publicKeyBase64Url: string;
+}
+
+export interface SyntheticFirmwareRootRoleV1 {
+  readonly name: SyntheticFirmwareRootRole;
+  readonly channel: "synthetic";
+  readonly keyIds: readonly string[];
+  readonly threshold: number;
+}
+
+export interface SyntheticFirmwareRootMetadataPayloadV1 {
+  readonly rootSchema: typeof firmwareRootMetadataSchemaVersion;
+  readonly metadataType: typeof syntheticFirmwareRootMetadataType;
+  readonly version: number;
+  readonly notBefore: string;
+  readonly expiresAt: string;
+  readonly keys: readonly SyntheticFirmwareRootPublicKeyV1[];
+  readonly roles: readonly SyntheticFirmwareRootRoleV1[];
+}
+
+export interface SignedFirmwareRootMetadataEnvelopeV1 {
+  readonly schemaVersion: typeof firmwareRootMetadataSchemaVersion;
+  readonly canonicalization: typeof firmwareRootMetadataCanonicalization;
+  readonly payload: SyntheticFirmwareRootMetadataPayloadV1;
+  readonly signatures: readonly SignedFirmwareManifestSignature[];
+}
+
+/** No production clock assurance is admitted while no trust root exists. */
+export const firmwareTrustClockAssurances = ["SYNTHETIC_ONLY"] as const;
+export type FirmwareTrustClockAssurance =
+  (typeof firmwareTrustClockAssurances)[number];
+
+export interface FirmwareTrustClock {
+  readonly assurance: FirmwareTrustClockAssurance;
+  readUtcNow(signal?: CancellationSignal): Promise<string>;
+}
+
+export const syntheticFirmwareTrustStateSchemaVersion = "1" as const;
+export const syntheticFirmwareTrustStateType =
+  "synthetic-firmware-trust-state" as const;
+
+export interface SyntheticFirmwareReleaseFloorV1 {
+  readonly channel: "synthetic";
+  readonly targetIdentifier: string;
+  readonly highestReleaseSequence: number;
+  readonly artifactSha256: string;
+  readonly acceptedRootMetadataVersion: number;
+}
+
+/**
+ * Serializable monotonic-state proposal. It is public operational data, not a
+ * trusted-root container, and no Browser storage adapter currently exists.
+ */
+export interface SyntheticFirmwareTrustStateV1 {
+  readonly schemaVersion: typeof syntheticFirmwareTrustStateSchemaVersion;
+  readonly stateType: typeof syntheticFirmwareTrustStateType;
+  readonly highestRootMetadataVersion: number;
+  readonly releaseFloors: readonly SyntheticFirmwareReleaseFloorV1[];
+}
+
 /** No real writer can satisfy the current provider contract. */
 export const firmwareUpdateProviderAssurances = ["SYNTHETIC_ONLY"] as const;
 export type FirmwareUpdateProviderAssurance =

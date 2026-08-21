@@ -30,6 +30,10 @@ does not validate the reported Target, device family, browser, or Hardware.
 | Digest `SYNTHETIC_ONLY` | Complete deterministic fixture bytes matched the Mock boundary; not cryptographic evidence |
 | Digest `CRYPTOGRAPHIC` | A reviewed platform digest adapter calculated SHA-256 over the copied bytes |
 | Signature `VALID_UNTRUSTED` | Ed25519 matched bounded canonical Manifest bytes using a caller-supplied Synthetic key; no root authorized that key |
+| Root `ROTATION_VERIFIED_UNTRUSTED` | One parsed Synthetic root advanced exactly `N → N+1`, and the incoming bytes met both caller-supplied old/new root thresholds; the old root was not admitted |
+| Root `FRESH_UNTRUSTED` | A parsed Synthetic root was inside its validity interval at one fixed time from a `SYNTHETIC_ONLY` clock |
+| Manifest `VERIFIED_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved the single-signature Manifest role and Ed25519 matched; the root itself was not admitted |
+| State `ADVANCED_UNPERSISTED` | A parser-created in-memory Synthetic rollback snapshot advanced monotonically after internally proven rotation/Manifest evidence; no durable write occurred |
 | `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |
 
 A cryptographic digest proves integrity against the expected digest, not the

@@ -113,6 +113,22 @@ admits only `synthetic` channel/role, raw uncompressed bytes, and a caller
 supplied Synthetic public key. Even a matching signature is
 `VALID_UNTRUSTED`; it is not wired into Firmware execution or catalog trust.
 
+The next isolated Workflow slice parses bounded `synthetic-root` metadata,
+verifies exact `N → N+1` rotation against both old and incoming root
+thresholds, blocks key-ID rebinding, evaluates expiry through one fixed
+`SYNTHETIC_ONLY` clock value, and models Manifest-key removal as revocation. It
+can resolve and verify a Synthetic Manifest through that role, but the result
+is deliberately `VERIFIED_AGAINST_UNTRUSTED_ROOT` because no initial root is
+admitted.
+
+A separate 32 KiB pure codec models the highest root version and per-Target
+release floors. Its transition functions detect root/release rollback and
+equal-sequence digest conflict, returning only `ADVANCED_UNPERSISTED`. No Core
+package calls IndexedDB, `localStorage`, or another persistence API; the exact
+future IndexedDB bundle is only `PROPOSED` in the storage registry. Root
+ceremony, production clock assurance, atomic persistence, catalog admission,
+and every real writer remain blocked.
+
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware
 version matched. Strict evaluation of that immutable plan is an additional
