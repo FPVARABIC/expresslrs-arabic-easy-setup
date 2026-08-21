@@ -129,6 +129,18 @@ future IndexedDB bundle is only `PROPOSED` in the storage registry. Root
 ceremony, production clock assurance, atomic persistence, catalog admission,
 and every real writer remain blocked.
 
+Another isolated Workflow validates compressed fixtures without changing the
+raw-only Manifest v1 or the update facade. An exact Synthetic descriptor names
+both gzip/download and decompressed byte lengths and SHA-256 values. Core caps
+the input at 16 MiB, accepts at most 64 MiB of output through 64 KiB chunks,
+hashes both forms, and then parses an exact Synthetic executable container whose
+embedded Target must match the descriptor. Success is evidence-only
+`VERIFIED_SYNTHETIC_FIXTURE` with
+`writeDisposition: BLOCKED_SYNTHETIC_FIXTURE`; no payload bytes are returned.
+The Browser Platform supplies a streaming `DecompressionStream("gzip")` adapter
+labeled `SYNTHETIC_ONLY`. No real executable format, signed dual-form Manifest,
+catalog entry, or writer is admitted.
+
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware
 version matched. Strict evaluation of that immutable plan is an additional

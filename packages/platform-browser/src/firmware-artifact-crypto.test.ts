@@ -5,6 +5,12 @@ import {
   WebCryptoFirmwareArtifactDigestProvider,
   WebCryptoFirmwareManifestSignatureVerifier,
 } from "./firmware-artifact-crypto.js";
+import { BrowserGzipFirmwareArtifactDecompressionProvider } from "./firmware-artifact-decompression.js";
+
+const gzipHello = new Uint8Array([
+  0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xcb, 0x48, 0xcd,
+  0xc9, 0xc9, 0x07, 0x00, 0x86, 0xa6, 0x10, 0x36, 0x05, 0x00, 0x00, 0x00,
+]);
 
 describe("Browser Firmware artifact cryptography", () => {
   it("computes the canonical SHA-256 known vector with Web Crypto", async () => {
@@ -103,5 +109,112 @@ describe("Browser Firmware artifact cryptography", () => {
         { aborted: true },
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("Browser Firmware artifact gzip decompression", () => {
+  it("streams a valid single-member gzip fixture in bounded exact chunks", async () => {
+    const provider = new BrowserGzipFirmwareArtifactDecompressionProvider();
+    const input = gzipHello.slice();
+    const output: Uint8Array[] = [];
+    const byteLengthGetter = vi.fn(() => 0);
+    const sliceOverride = vi.fn(() => new Uint8Array());
+    Object.defineProperties(input, {
+      byteLength: { get: byteLengthGetter },
+      slice: { value: sliceOverride },
+    });
+
+    const operation = provider.decompressGzip(input, (chunk) => {
+      expect(Object.getPrototypeOf(chunk)).toBe(Uint8Array.prototype);
+      expect(chunk.byteLength).toBeGreaterThan(0);
+      expect(chunk.byteLength).toBeLessThanOrEqual(64 * 1024);
+      output.push(chunk.slice());
+    });
+    input.fill(0);
+    await operation;
+
+    const bytes = new Uint8Array(
+      output.reduce((length, chunk) => length + chunk.byteLength, 0),
+    );
+    let offset = 0;
+    for (const chunk of output) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    expect(new TextDecoder().decode(bytes)).toBe("hello");
+    expect(provider.assurance).toBe("SYNTHETIC_ONLY");
+    expect(byteLengthGetter).not.toHaveBeenCalled();
+    expect(sliceOverride).not.toHaveBeenCalled();
+  });
+
+  it("splits large platform chunks before crossing the Core sink boundary", async () => {
+    const raw = new Uint8Array(70 * 1024);
+    raw.fill(0x61);
+    const compressedStream = new Blob([raw])
+      .stream()
+      .pipeThrough(new CompressionStream("gzip"));
+    const compressed = new Uint8Array(
+      await new Response(compressedStream).arrayBuffer(),
+    );
+    const provider = new BrowserGzipFirmwareArtifactDecompressionProvider();
+    const chunks: Uint8Array[] = [];
+
+    await provider.decompressGzip(compressed, (chunk) => chunks.push(chunk));
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.byteLength <= 64 * 1024)).toBe(true);
+    expect(chunks.reduce((length, chunk) => length + chunk.byteLength, 0)).toBe(
+      raw.byteLength,
+    );
+  });
+
+  it.each([
+    [
+      "bad-checksum",
+      Uint8Array.from(gzipHello, (value, index) =>
+        index === 19 ? value ^ 1 : value,
+      ),
+    ],
+    ["trailing-data", new Uint8Array([...gzipHello, 0])],
+    ["multiple-members", new Uint8Array([...gzipHello, ...gzipHello])],
+  ] as const)("rejects %s", async (_name, bytes) => {
+    const provider = new BrowserGzipFirmwareArtifactDecompressionProvider();
+    await expect(
+      provider.decompressGzip(bytes, () => undefined),
+    ).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it("uses fixed failures for unavailable streams and preserves cancellation", async () => {
+    const unavailable = new BrowserGzipFirmwareArtifactDecompressionProvider({
+      createStream() {
+        throw new Error("private-platform-detail");
+      },
+    });
+    const provider = new BrowserGzipFirmwareArtifactDecompressionProvider();
+
+    await expect(
+      unavailable.decompressGzip(gzipHello, () => undefined),
+    ).rejects.toThrow("BROWSER_GZIP_DECOMPRESSION_UNAVAILABLE");
+    await expect(
+      provider.decompressGzip(gzipHello, () => undefined, { aborted: true }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects invalid direct inputs before constructing a stream", async () => {
+    const createStream = vi.fn(() => new DecompressionStream("gzip"));
+    const provider = new BrowserGzipFirmwareArtifactDecompressionProvider({
+      createStream,
+    });
+
+    await expect(
+      provider.decompressGzip(new Uint8Array(), () => undefined),
+    ).rejects.toThrow("BROWSER_GZIP_DECOMPRESSION_INPUT_INVALID");
+    await expect(
+      provider.decompressGzip(
+        new Uint16Array([1, 2]) as unknown as Uint8Array,
+        () => undefined,
+      ),
+    ).rejects.toThrow("BROWSER_GZIP_DECOMPRESSION_INPUT_INVALID");
+    expect(createStream).not.toHaveBeenCalled();
   });
 });

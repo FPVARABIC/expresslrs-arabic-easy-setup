@@ -2,15 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   currentArtifactManifestTrustStatus,
+  firmwareArtifactDecompressionAssurances,
   firmwareRootMetadataCanonicalization,
   firmwareRootMetadataSchemaVersion,
   firmwareRootMetadataSignatureAlgorithm,
   firmwareTrustClockAssurances,
   firmwareUpdateProviderAssurances,
+  maximumCompressedFirmwareArtifactSizeBytes,
+  maximumFirmwareArtifactDecompressionChunks,
+  maximumFirmwareArtifactDecompressionChunkSizeBytes,
   maximumFirmwareArtifactSizeBytes,
   signedFirmwareManifestCanonicalization,
   signedFirmwareManifestSchemaVersion,
   signedFirmwareManifestSignatureAlgorithm,
+  syntheticCompressedFirmwareArtifactSchemaVersion,
+  syntheticCompressedFirmwareArtifactType,
+  syntheticFirmwareExecutableByteForm,
+  syntheticFirmwareExecutableFormat,
   syntheticFirmwareRootMetadataType,
   syntheticFirmwareRootRoles,
   syntheticFirmwareTrustStateSchemaVersion,
@@ -65,6 +73,24 @@ describe("Firmware trust constants", () => {
     }).toEqual({
       schemaVersion: "1",
       stateType: "synthetic-firmware-trust-state",
+    });
+  });
+
+  it("pins bounded compressed fixtures without admitting writable bytes", () => {
+    expect(firmwareArtifactDecompressionAssurances).toEqual(["SYNTHETIC_ONLY"]);
+    expect(maximumCompressedFirmwareArtifactSizeBytes).toBe(16 * 1024 * 1024);
+    expect(maximumFirmwareArtifactDecompressionChunkSizeBytes).toBe(64 * 1024);
+    expect(maximumFirmwareArtifactDecompressionChunks).toBe(4096);
+    expect({
+      schemaVersion: syntheticCompressedFirmwareArtifactSchemaVersion,
+      artifactType: syntheticCompressedFirmwareArtifactType,
+      byteForm: syntheticFirmwareExecutableByteForm,
+      executableFormat: syntheticFirmwareExecutableFormat,
+    }).toEqual({
+      schemaVersion: "1",
+      artifactType: "synthetic-compressed-firmware-artifact",
+      byteForm: "SYNTHETIC_EXECUTABLE_FIXTURE",
+      executableFormat: "ELRS_EASY_SYNTHETIC_EXECUTABLE_V1",
     });
   });
 });

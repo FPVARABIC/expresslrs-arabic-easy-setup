@@ -1,6 +1,7 @@
 export * from "./easy-binding.js";
 export * from "./firmware-artifact.js";
 export * from "./firmware-artifact-bytes.js";
+export * from "./firmware-compressed-artifact.js";
 export * from "./firmware-manifest.js";
 export * from "./firmware-root-metadata.js";
 export * from "./firmware-trust-state.js";

@@ -137,6 +137,33 @@ describe("Firmware artifact byte boundary", () => {
     expect(getterCalls).toBe(0);
   });
 
+  it("does not execute an accessor-backed digest method", async () => {
+    let getterCalls = 0;
+    const provider = Object.defineProperty(
+      { assurance: "CRYPTOGRAPHIC" },
+      "digestSha256",
+      {
+        get() {
+          getterCalls += 1;
+          return async () => expectedSha256;
+        },
+      },
+    ) as FirmwareArtifactDigestProvider;
+
+    await expect(
+      verifyFirmwareArtifactBytes({
+        snapshot: snapshotFirmwareArtifactBytes(new Uint8Array([1])),
+        expectedByteLength: 1,
+        expectedSha256,
+        digestProvider: provider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      reason: "FIRMWARE_ARTIFACT_DIGEST_PROVIDER_INVALID",
+    });
+    expect(getterCalls).toBe(0);
+  });
+
   it("sanitizes digest failures but preserves cancellation", async () => {
     const failed: FirmwareArtifactDigestProvider = {
       assurance: "CRYPTOGRAPHIC",

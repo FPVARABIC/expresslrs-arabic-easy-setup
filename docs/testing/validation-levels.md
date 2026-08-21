@@ -34,6 +34,8 @@ does not validate the reported Target, device family, browser, or Hardware.
 | Root `FRESH_UNTRUSTED` | A parsed Synthetic root was inside its validity interval at one fixed time from a `SYNTHETIC_ONLY` clock |
 | Manifest `VERIFIED_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved the single-signature Manifest role and Ed25519 matched; the root itself was not admitted |
 | State `ADVANCED_UNPERSISTED` | A parser-created in-memory Synthetic rollback snapshot advanced monotonically after internally proven rotation/Manifest evidence; no durable write occurred |
+| Artifact `VERIFIED_SYNTHETIC_FIXTURE` | Bounded gzip fixture input and output matched separately named digests, and an exact Synthetic executable container carried the expected Target; the descriptor was unsigned and no writable bytes were returned |
+| Write `BLOCKED_SYNTHETIC_FIXTURE` | The evidence is structurally unable to authorize or feed a current Firmware writer |
 | `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |
 
 A cryptographic digest proves integrity against the expected digest, not the

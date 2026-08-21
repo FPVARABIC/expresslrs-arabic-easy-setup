@@ -20,5 +20,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0014: Signed-manifest trust design and byte-verification boundary — accepted without a trust root or real writer.
 - ADR-0015: bounded Synthetic manifest parsing and Ed25519 verification — accepted as `VALID_UNTRUSTED` software evidence only.
 - ADR-0016: bounded Synthetic root metadata, dual-threshold rotation, expiry, revocation, and unpersisted rollback-state transitions — accepted without an admitted root or storage adapter.
+- ADR-0017: bounded Synthetic gzip, dual-form digest verification, and executable/Target identity — accepted as non-writable fixture evidence only.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

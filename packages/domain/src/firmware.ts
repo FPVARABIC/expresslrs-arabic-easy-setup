@@ -305,6 +305,72 @@ export interface SyntheticFirmwareTrustStateV1 {
   readonly releaseFloors: readonly SyntheticFirmwareReleaseFloorV1[];
 }
 
+/**
+ * Synthetic compressed-artifact lab constants. The smaller input ceiling and
+ * bounded chunk contract keep decompression separate from the 64 MiB raw
+ * Firmware ceiling while the format is not connected to an admitted Manifest.
+ */
+export const maximumCompressedFirmwareArtifactSizeBytes = 16 * 1024 * 1024;
+export const maximumFirmwareArtifactDecompressionChunkSizeBytes = 64 * 1024;
+export const maximumFirmwareArtifactDecompressionChunks = 4096;
+
+export const firmwareArtifactDecompressionAssurances = [
+  "SYNTHETIC_ONLY",
+] as const;
+export type FirmwareArtifactDecompressionAssurance =
+  (typeof firmwareArtifactDecompressionAssurances)[number];
+
+export type FirmwareArtifactDecompressionChunkSink = (
+  chunk: Uint8Array,
+) => void;
+
+/**
+ * Streaming platform primitive only. Core owns all size, chunk, digest, and
+ * identity decisions and currently admits this boundary for Synthetic
+ * fixtures only.
+ */
+export interface FirmwareArtifactDecompressionProvider {
+  readonly assurance: FirmwareArtifactDecompressionAssurance;
+  decompressGzip(
+    compressedBytes: Uint8Array,
+    emitChunk: FirmwareArtifactDecompressionChunkSink,
+    signal?: CancellationSignal,
+  ): Promise<void>;
+}
+
+export const syntheticCompressedFirmwareArtifactSchemaVersion = "1" as const;
+export const syntheticCompressedFirmwareArtifactType =
+  "synthetic-compressed-firmware-artifact" as const;
+export const syntheticFirmwareExecutableFormat =
+  "ELRS_EASY_SYNTHETIC_EXECUTABLE_V1" as const;
+export const syntheticFirmwareExecutableByteForm =
+  "SYNTHETIC_EXECUTABLE_FIXTURE" as const;
+
+/**
+ * Lab-only descriptor naming both downloaded and decompressed byte forms.
+ * Signed Manifest v1 deliberately remains raw/uncompressed.
+ */
+export interface SyntheticCompressedFirmwareArtifactDescriptorV1 {
+  readonly schemaVersion: typeof syntheticCompressedFirmwareArtifactSchemaVersion;
+  readonly artifactType: typeof syntheticCompressedFirmwareArtifactType;
+  readonly compression: "gzip";
+  readonly decompressedByteForm: typeof syntheticFirmwareExecutableByteForm;
+  readonly executableFormat: typeof syntheticFirmwareExecutableFormat;
+  readonly targetIdentifier: string;
+  readonly compressedSizeBytes: number;
+  readonly compressedSha256: string;
+  readonly decompressedSizeBytes: number;
+  readonly decompressedSha256: string;
+}
+
+export interface SyntheticFirmwareExecutableIdentityV1 {
+  readonly format: typeof syntheticFirmwareExecutableFormat;
+  readonly schemaVersion: "1";
+  readonly targetIdentifier: string;
+  readonly containerSizeBytes: number;
+  readonly executablePayloadSizeBytes: number;
+}
+
 /** No real writer can satisfy the current provider contract. */
 export const firmwareUpdateProviderAssurances = ["SYNTHETIC_ONLY"] as const;
 export type FirmwareUpdateProviderAssurance =

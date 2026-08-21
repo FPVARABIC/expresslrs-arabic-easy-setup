@@ -60,6 +60,13 @@ An opaque session-local device ID is `OPERATIONAL` only if it cannot be reversed
 or correlated across sessions. Artifact SHA-256 is operational provenance; it
 must never be used as a substitute for validating the artifact source.
 
+The Synthetic compressed-artifact lab keeps copied gzip and decompressed bytes
+in bounded memory only for one validation call. It never logs, persists,
+exports, or returns the executable payload. Decompression providers may emit
+only fixed-size exact byte chunks; provider errors and unknown metadata are
+replaced by Core-owned categories. These controls do not make an unsigned
+descriptor authentic or authorize a write.
+
 ## Audit event contract
 
 Every future sensitive workflow event must have structured fields equivalent to:

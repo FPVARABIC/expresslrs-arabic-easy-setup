@@ -43,6 +43,59 @@ export function readOwnDataProperty(value: unknown, key: PropertyKey): unknown {
   }
 }
 
+/**
+ * Resolves an own or prototype data method without invoking an accessor. The
+ * walk stops before Object.prototype so prototype pollution cannot supply a
+ * sensitive provider method.
+ */
+export function readDataMethod(
+  value: unknown,
+  key: PropertyKey,
+): ((...arguments_: unknown[]) => unknown) | null {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    return null;
+  }
+  try {
+    let current: object | null = value;
+    for (
+      let depth = 0;
+      current !== null && current !== Object.prototype && depth < 8;
+      depth += 1
+    ) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (descriptor !== undefined) {
+        return "value" in descriptor && typeof descriptor.value === "function"
+          ? (descriptor.value as (...arguments_: unknown[]) => unknown)
+          : null;
+      }
+      current = Object.getPrototypeOf(current) as object | null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+const exactUint8ArrayPrototype = Uint8Array.prototype;
+
+/** Copies only an exact Uint8Array, rejecting subclasses and other views. */
+export function copyExactUint8Array(value: unknown): Uint8Array | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  try {
+    if (Object.getPrototypeOf(value) !== exactUint8ArrayPrototype) {
+      return null;
+    }
+    return Uint8Array.prototype.slice.call(value) as Uint8Array;
+  } catch {
+    return null;
+  }
+}
+
 /** Kept as a provider-specific name at existing call sites. */
 export const readProviderDataProperty = readOwnDataProperty;
 

@@ -33,6 +33,12 @@ Important limitation: upstream supports force/confirm paths. Easy Mode must fail
 
 In the inspected handler, an upload beginning with gzip magic (`0x1F`) marks the target as seen at this layer rather than scanning the decompressed target marker. Our Artifact Validator must therefore identify and validate the uncompressed payload independently before upload. Device-side target checking is defense-in-depth, not the primary compatibility decision.
 
+[ADR-0017](../adr/ADR-0017-bounded-synthetic-gzip-and-executable-identity.md)
+now proves that ordering against a deliberately non-writable Synthetic format:
+verify the compressed digest, stream into strict output bounds, verify the
+decompressed digest, parse executable identity, then require the embedded Target
+to match. It does not yet parse an ExpressLRS image or authorize `/update`.
+
 ### Configurator/native paths
 
 `src/python/binary_flash.py` dispatches by device type, MCU, and selected upload method. It uses Wi-Fi upload, direct ESP UART, Betaflight passthrough, EdgeTX passthrough, or output-directory paths. `BFinitPassthrough.py` can compare a receiver-reported target but also contains force/interactive override paths.

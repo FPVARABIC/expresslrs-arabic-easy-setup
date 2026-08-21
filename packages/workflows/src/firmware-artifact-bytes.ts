@@ -9,7 +9,9 @@ import {
 
 import {
   assertNotAborted,
+  copyExactUint8Array,
   isAbortError,
+  readDataMethod,
   readOwnDataProperty,
 } from "./sensitive-operation-helpers.js";
 
@@ -51,22 +53,6 @@ export type VerifiedFirmwareArtifactBytes =
     };
 
 const canonicalSha256Pattern = /^[0-9a-f]{64}$/u;
-const exactUint8ArrayPrototype = Uint8Array.prototype;
-
-function copyExactUint8Array(value: unknown): Uint8Array | null {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-  try {
-    if (Object.getPrototypeOf(value) !== exactUint8ArrayPrototype) {
-      return null;
-    }
-    return Uint8Array.prototype.slice.call(value) as Uint8Array;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Copies caller-controlled bytes before the operation machine publishes IDLE.
  * Later mutation of the original view therefore cannot change what is hashed
@@ -127,7 +113,8 @@ export async function verifyFirmwareArtifactBytes(input: {
   }
 
   const assurance = readOwnDataProperty(input.digestProvider, "assurance");
-  if (!isDigestAssurance(assurance)) {
+  const digestMethod = readDataMethod(input.digestProvider, "digestSha256");
+  if (!isDigestAssurance(assurance) || digestMethod === null) {
     return Object.freeze({
       status: "BLOCKED",
       reason: "FIRMWARE_ARTIFACT_DIGEST_PROVIDER_INVALID",
@@ -137,10 +124,10 @@ export async function verifyFirmwareArtifactBytes(input: {
   let sha256: unknown;
   try {
     assertNotAborted(input.signal);
-    sha256 = await input.digestProvider.digestSha256(
+    sha256 = await Reflect.apply(digestMethod, input.digestProvider, [
       input.snapshot.copyBytes(),
       input.signal,
-    );
+    ]);
     assertNotAborted(input.signal);
   } catch (error: unknown) {
     if (isAbortError(error)) {
