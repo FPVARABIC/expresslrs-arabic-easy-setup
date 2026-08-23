@@ -37,6 +37,10 @@ does not validate the reported Target, device family, browser, or Hardware.
 | Artifact `VERIFIED_SYNTHETIC_FIXTURE` | Bounded gzip fixture input and output matched separately named digests, and an exact Synthetic executable container carried the expected Target; the descriptor was unsigned and no writable bytes were returned |
 | Manifest `VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved an exact version-2 signature that names compressed and decompressed sizes and SHA-256 values; the root itself was not admitted |
 | Candidate `SYNTHETIC_CATALOG_CANDIDATE_EVIDENCE` | Internally branded dual-form Manifest/root, artifact-validation, and unpersisted rollback results all refer to the same Target, release, and bytes |
+| Distribution `VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT` | The same fresh unadmitted Synthetic root resolved a separate exact statement naming the v2 artifact, source archive, and notice bundle URLs, sizes, and SHA-256 values |
+| Acquisition `VERIFIED_SYNTHETIC_ACQUISITION` | A Synthetic provider emitted the complete signed object through bounded chunks; Core required an unchanged exact-URL receipt, matched SHA-256, discarded its byte copies, and returned no writable bytes |
+| Source/notice `EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED` | The exact signed bundle bytes were present; archive contents, build correspondence, notice syntax, and legal completeness were not established |
+| Distribution candidate `SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE` | Internally branded catalog, distribution-root, Firmware acquisition, source acquisition, and notice acquisition evidence all identify one parsed root, Target, release, and artifact |
 | Catalog `NOT_ADMITTED_UNTRUSTED_SYNTHETIC` | Candidate evidence exists for software tests only; no Target Catalog record or release authority was created |
 | Write `BLOCKED_SYNTHETIC_FIXTURE` | The evidence is structurally unable to authorize or feed a current Firmware writer |
 | `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |

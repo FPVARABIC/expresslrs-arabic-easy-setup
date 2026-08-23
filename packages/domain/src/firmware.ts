@@ -232,6 +232,102 @@ export interface SignedSyntheticDualFormFirmwareManifestEnvelopeV2 {
   readonly signature: SignedFirmwareManifestSignature;
 }
 
+/**
+ * Lab-only distribution statement. It links the exact v2-named compressed
+ * object to separately downloadable corresponding-source and notice bundles.
+ * This is intentionally a separate signature namespace so Manifest v2 keeps
+ * its fixed byte-identity meaning.
+ */
+export const signedSyntheticFirmwareDistributionManifestSchemaVersion =
+  "1" as const;
+export const syntheticFirmwareDistributionManifestType =
+  "synthetic-firmware-distribution-manifest" as const;
+
+export const syntheticFirmwareDistributionObjectRoles = [
+  "firmware-artifact",
+  "corresponding-source",
+  "notices",
+] as const;
+export type SyntheticFirmwareDistributionObjectRole =
+  (typeof syntheticFirmwareDistributionObjectRoles)[number];
+
+export interface SyntheticFirmwareDistributionObjectV1 {
+  readonly objectRole: SyntheticFirmwareDistributionObjectRole;
+  readonly name: string;
+  readonly url: string;
+  readonly mediaType: "application/gzip" | "application/json";
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticFirmwareDistributionManifestPayloadV1 {
+  readonly distributionSchema: typeof signedSyntheticFirmwareDistributionManifestSchemaVersion;
+  readonly manifestType: typeof syntheticFirmwareDistributionManifestType;
+  readonly channel: "synthetic";
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifact: SyntheticFirmwareDistributionObjectV1 & {
+    readonly objectRole: "firmware-artifact";
+    readonly mediaType: "application/gzip";
+  };
+  readonly correspondingSource: SyntheticFirmwareDistributionObjectV1 & {
+    readonly objectRole: "corresponding-source";
+    readonly mediaType: "application/gzip";
+  };
+  readonly notices: SyntheticFirmwareDistributionObjectV1 & {
+    readonly objectRole: "notices";
+    readonly mediaType: "application/json";
+  };
+  readonly signingRole: "synthetic";
+  readonly requiredRootMetadataVersion: number;
+}
+
+export interface SignedSyntheticFirmwareDistributionManifestEnvelopeV1 {
+  readonly schemaVersion: typeof signedSyntheticFirmwareDistributionManifestSchemaVersion;
+  readonly canonicalization: typeof signedFirmwareManifestCanonicalization;
+  readonly payload: SyntheticFirmwareDistributionManifestPayloadV1;
+  readonly signature: SignedFirmwareManifestSignature;
+}
+
+/** In-memory Synthetic acquisition limits; no production origin is admitted. */
+export const maximumSyntheticFirmwareAcquisitionChunkSizeBytes = 64 * 1024;
+export const maximumSyntheticFirmwareAcquisitionChunks = 4096;
+export const maximumSyntheticCorrespondingSourceBundleSizeBytes =
+  64 * 1024 * 1024;
+export const maximumSyntheticNoticeBundleSizeBytes = 4 * 1024 * 1024;
+
+export interface SyntheticFirmwareObjectAcquisitionRequest {
+  readonly schemaVersion: "1";
+  readonly objectRole: SyntheticFirmwareDistributionObjectRole;
+  readonly name: string;
+  readonly url: string;
+  readonly mediaType: "application/gzip" | "application/json";
+  readonly expectedSizeBytes: number;
+}
+
+export interface SyntheticFirmwareObjectAcquisitionReceipt {
+  readonly sourceUrl: string;
+  readonly finalUrl: string;
+  readonly statusCode: 200;
+  readonly mediaType: "application/gzip" | "application/json";
+  readonly receivedSizeBytes: number;
+}
+
+export type SyntheticFirmwareAcquisitionChunkSink = (chunk: Uint8Array) => void;
+
+/**
+ * Streaming acquisition primitive. Only a Synthetic provider can currently
+ * satisfy this contract; Core independently checks every emitted byte.
+ */
+export interface SyntheticFirmwareObjectAcquisitionProvider {
+  readonly assurance: "SYNTHETIC_ONLY";
+  acquireExactObject(
+    request: SyntheticFirmwareObjectAcquisitionRequest,
+    emitChunk: SyntheticFirmwareAcquisitionChunkSink,
+    signal?: CancellationSignal,
+  ): Promise<SyntheticFirmwareObjectAcquisitionReceipt>;
+}
+
 export const firmwareManifestSignatureVerifierAssurances = [
   "CRYPTOGRAPHIC",
   "SYNTHETIC_ONLY",

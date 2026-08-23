@@ -36,6 +36,38 @@ export interface SyntheticDualFormManifestRootVerificationRecord extends Synthet
   readonly decompressedSha256: string;
 }
 
+export interface SyntheticDistributionObjectRecord {
+  readonly objectRole: "firmware-artifact" | "corresponding-source" | "notices";
+  readonly name: string;
+  readonly url: string;
+  readonly mediaType: "application/gzip" | "application/json";
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticDistributionManifestParseRecord {
+  readonly keyId: string;
+  readonly signature: Uint8Array;
+  readonly signatureInput: Uint8Array;
+  readonly requiredRootMetadataVersion: number;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifact: SyntheticDistributionObjectRecord;
+  readonly correspondingSource: SyntheticDistributionObjectRecord;
+  readonly notices: SyntheticDistributionObjectRecord;
+}
+
+export interface SyntheticDistributionManifestRootVerificationRecord {
+  readonly parsedRoot: object;
+  readonly parsedManifest: object;
+  readonly rootVersion: number;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifact: SyntheticDistributionObjectRecord;
+  readonly correspondingSource: SyntheticDistributionObjectRecord;
+  readonly notices: SyntheticDistributionObjectRecord;
+}
+
 export interface SyntheticCompressedArtifactValidationRecord {
   readonly targetIdentifier: string;
   readonly compressedSizeBytes: number;
@@ -53,6 +85,23 @@ export interface SyntheticReleaseTransitionRecord {
   readonly targetIdentifier: string;
   readonly releaseSequence: number;
   readonly artifactSha256: string;
+}
+
+export interface SyntheticFirmwareCatalogCandidateRecord {
+  readonly manifestRootVerification: object;
+  readonly parsedRoot: object;
+  readonly rootVersion: number;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifactName: string;
+  readonly compressedSizeBytes: number;
+  readonly compressedSha256: string;
+}
+
+export interface SyntheticFirmwareAcquisitionRecord extends SyntheticDistributionObjectRecord {
+  readonly distributionRootVerification: object;
+  readonly acquisitionAssurance: "SYNTHETIC_ONLY";
+  readonly digestAssurance: "CRYPTOGRAPHIC" | "SYNTHETIC_ONLY";
 }
 
 /** Internal provenance brands; this module is intentionally not re-exported. */
@@ -76,6 +125,16 @@ export const syntheticDualFormManifestRootVerificationRecords = new WeakMap<
   SyntheticDualFormManifestRootVerificationRecord
 >();
 
+export const syntheticDistributionManifestParseRecords = new WeakMap<
+  object,
+  SyntheticDistributionManifestParseRecord
+>();
+
+export const syntheticDistributionManifestRootVerificationRecords = new WeakMap<
+  object,
+  SyntheticDistributionManifestRootVerificationRecord
+>();
+
 export const syntheticCompressedArtifactValidationRecords = new WeakMap<
   object,
   SyntheticCompressedArtifactValidationRecord
@@ -84,4 +143,14 @@ export const syntheticCompressedArtifactValidationRecords = new WeakMap<
 export const syntheticReleaseTransitionRecords = new WeakMap<
   object,
   SyntheticReleaseTransitionRecord
+>();
+
+export const syntheticFirmwareCatalogCandidateRecords = new WeakMap<
+  object,
+  SyntheticFirmwareCatalogCandidateRecord
+>();
+
+export const syntheticFirmwareAcquisitionRecords = new WeakMap<
+  object,
+  SyntheticFirmwareAcquisitionRecord
 >();

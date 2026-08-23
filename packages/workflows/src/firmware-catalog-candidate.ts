@@ -5,6 +5,7 @@ import type { SyntheticDualFormFirmwareManifestRootVerificationResult } from "./
 import {
   syntheticCompressedArtifactValidationRecords,
   syntheticDualFormManifestRootVerificationRecords,
+  syntheticFirmwareCatalogCandidateRecords,
   syntheticReleaseTransitionRecords,
 } from "./firmware-trust-internals.js";
 import type { SyntheticFirmwareReleaseStateTransitionResult } from "./firmware-trust-state.js";
@@ -113,23 +114,36 @@ export function createSyntheticFirmwareCatalogCandidateEvidence(input: {
     return blocked("SYNTHETIC_DUAL_FORM_MANIFEST_ARTIFACT_MISMATCH");
   }
 
-  return Object.freeze({
-    status: "SYNTHETIC_CATALOG_CANDIDATE_EVIDENCE",
-    validationLevel: "SYNTHETIC_ONLY",
-    manifestSchema: "2",
-    manifestRootStatus: "VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT",
-    artifactValidationStatus: "VERIFIED_SYNTHETIC_FIXTURE",
-    rollbackStatus: rollbackRecord.status,
-    trustStatus: currentArtifactManifestTrustStatus,
-    catalogDisposition: "NOT_ADMITTED_UNTRUSTED_SYNTHETIC",
-    writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
-    targetIdentifier: rootRecord.targetIdentifier,
-    artifactName: rootRecord.artifactName,
+  const result: SyntheticFirmwareCatalogCandidateEvidenceResult = Object.freeze(
+    {
+      status: "SYNTHETIC_CATALOG_CANDIDATE_EVIDENCE",
+      validationLevel: "SYNTHETIC_ONLY",
+      manifestSchema: "2",
+      manifestRootStatus: "VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT",
+      artifactValidationStatus: "VERIFIED_SYNTHETIC_FIXTURE",
+      rollbackStatus: rollbackRecord.status,
+      trustStatus: currentArtifactManifestTrustStatus,
+      catalogDisposition: "NOT_ADMITTED_UNTRUSTED_SYNTHETIC",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+      targetIdentifier: rootRecord.targetIdentifier,
+      artifactName: rootRecord.artifactName,
+      rootVersion: rootRecord.rootVersion,
+      releaseSequence: rootRecord.releaseSequence,
+      compressedSizeBytes: rootRecord.compressedSizeBytes,
+      compressedSha256: rootRecord.compressedSha256,
+      decompressedSizeBytes: rootRecord.decompressedSizeBytes,
+      decompressedSha256: rootRecord.decompressedSha256,
+    },
+  );
+  syntheticFirmwareCatalogCandidateRecords.set(result, {
+    manifestRootVerification,
+    parsedRoot: rootRecord.parsedRoot,
     rootVersion: rootRecord.rootVersion,
+    targetIdentifier: rootRecord.targetIdentifier,
     releaseSequence: rootRecord.releaseSequence,
+    artifactName: rootRecord.artifactName,
     compressedSizeBytes: rootRecord.compressedSizeBytes,
     compressedSha256: rootRecord.compressedSha256,
-    decompressedSizeBytes: rootRecord.decompressedSizeBytes,
-    decompressedSha256: rootRecord.decompressedSha256,
   });
+  return result;
 }

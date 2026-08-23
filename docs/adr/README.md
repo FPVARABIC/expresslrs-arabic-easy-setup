@@ -22,5 +22,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0016: bounded Synthetic root metadata, dual-threshold rotation, expiry, revocation, and unpersisted rollback-state transitions — accepted without an admitted root or storage adapter.
 - ADR-0017: bounded Synthetic gzip, dual-form digest verification, and executable/Target identity — accepted as non-writable fixture evidence only.
 - ADR-0018: separately versioned Synthetic dual-form Manifest plus internally branded root/rollback/artifact linkage — accepted as non-admitted, non-writable catalog-candidate evidence only.
+- ADR-0019: separately signed Synthetic distribution statement, bounded exact-object acquisition, and source/notice linkage — accepted as byte-discarding, non-admitted, non-writable evidence only.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

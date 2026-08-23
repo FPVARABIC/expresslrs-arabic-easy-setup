@@ -152,8 +152,22 @@ objects created for the same Target/release/bytes. Its result is explicitly
 `catalogDisposition: NOT_ADMITTED_UNTRUSTED_SYNTHETIC` and
 `writeDisposition: BLOCKED_SYNTHETIC_FIXTURE`. It returns no bytes and is not
 connected to the Target Catalog or update facade. An admitted root, atomic
-persistence, acquisition/corresponding-source evidence, real executable parser,
-catalog admission, and every writer remain blocked.
+persistence, real executable parser, catalog admission, and every writer remain
+blocked.
+
+A separate 16 KiB signed Synthetic distribution statement now binds that exact
+v2 artifact name/size/digest to canonical source and notice bundle
+name/URL/size/digest identities. Its reserved `.invalid` same-origin policy is
+deliberately non-production. Core accepts only an internally root-verified
+statement, then copies at most 4,096 exact 64 KiB chunks, requires an unchanged
+URL/status/media/size receipt, hashes the complete object, clears transient
+copies, and returns `VERIFIED_SYNTHETIC_ACQUISITION` without bytes. The Firmware,
+source, and notice acquisitions must join the existing branded catalog
+candidate through the same parsed root, Target, release, and compressed object.
+Success remains `SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE`,
+`NOT_ADMITTED_UNTRUSTED_SYNTHETIC`, and `BLOCKED_SYNTHETIC_FIXTURE`. Source and
+notice contents remain explicitly uninspected, and no Browser/network provider
+or production origin is admitted.
 
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware

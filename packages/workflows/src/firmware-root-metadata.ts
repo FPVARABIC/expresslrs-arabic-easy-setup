@@ -16,6 +16,7 @@ import {
   type SignedFirmwareManifestSignature,
   type SignedFirmwareRootMetadataEnvelopeV1,
   type SyntheticFirmwareRootMetadataPayloadV1,
+  type SyntheticFirmwareDistributionObjectV1,
   type SyntheticFirmwareRootPublicKeyV1,
   type SyntheticFirmwareRootRole,
   type SyntheticFirmwareRootRoleV1,
@@ -35,6 +36,12 @@ import {
   type SyntheticDualFormFirmwareManifestSignatureBlockReason,
 } from "./firmware-dual-form-manifest.js";
 import {
+  syntheticFirmwareDistributionManifestSignatureBlockReasons,
+  verifySyntheticFirmwareDistributionManifestSignature,
+  type ParsedSignedSyntheticFirmwareDistributionManifest,
+  type SyntheticFirmwareDistributionManifestSignatureBlockReason,
+} from "./firmware-distribution-manifest.js";
+import {
   syntheticFirmwareManifestSignatureBlockReasons,
   verifySyntheticFirmwareManifestSignature,
   type ParsedSignedFirmwareManifest,
@@ -43,6 +50,8 @@ import {
 import {
   syntheticDualFormManifestParseRecords,
   syntheticDualFormManifestRootVerificationRecords,
+  syntheticDistributionManifestParseRecords,
+  syntheticDistributionManifestRootVerificationRecords,
   syntheticManifestRootVerificationRecords,
   syntheticRootRotationRecords,
 } from "./firmware-trust-internals.js";
@@ -204,6 +213,40 @@ export type SyntheticDualFormFirmwareManifestRootVerificationResult =
   | Readonly<{
       status: "BLOCKED";
       reason: SyntheticDualFormFirmwareManifestRootBlockReason;
+    }>;
+
+export const syntheticFirmwareDistributionManifestRootBlockReasons = [
+  ...syntheticFirmwareRootFreshnessBlockReasons,
+  ...syntheticFirmwareDistributionManifestSignatureBlockReasons,
+  "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_VERSION_MISMATCH",
+  "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_ROLE_THRESHOLD_UNSUPPORTED",
+  "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_KEY_NOT_AUTHORIZED",
+] as const;
+
+export type SyntheticFirmwareDistributionManifestRootBlockReason =
+  (typeof syntheticFirmwareDistributionManifestRootBlockReasons)[number];
+
+export type SyntheticFirmwareDistributionManifestRootVerificationResult =
+  | Readonly<{
+      status: "VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT";
+      distributionSchema: "1";
+      rootVersion: number;
+      role: "synthetic";
+      roleThreshold: 1;
+      keyId: string;
+      checkedAt: string;
+      clockAssurance: FirmwareTrustClockAssurance;
+      verifierAssurance: FirmwareManifestSignatureVerifierAssurance;
+      targetIdentifier: string;
+      releaseSequence: number;
+      artifact: SyntheticFirmwareDistributionObjectV1;
+      correspondingSource: SyntheticFirmwareDistributionObjectV1;
+      notices: SyntheticFirmwareDistributionObjectV1;
+      trustStatus: ArtifactManifestTrustStatus;
+    }>
+  | Readonly<{
+      status: "BLOCKED";
+      reason: SyntheticFirmwareDistributionManifestRootBlockReason;
     }>;
 
 const rootJsonLimits: BoundedJsonLimits = Object.freeze({
@@ -1165,6 +1208,118 @@ export async function verifySyntheticDualFormFirmwareManifestAgainstRoot(input: 
     compressedSha256: manifestRecord.compressedSha256,
     decompressedSizeBytes: manifestRecord.decompressedSizeBytes,
     decompressedSha256: manifestRecord.decompressedSha256,
+  });
+  return result;
+}
+
+function blockedDistributionManifestRoot(
+  reason: SyntheticFirmwareDistributionManifestRootBlockReason,
+): SyntheticFirmwareDistributionManifestRootVerificationResult {
+  return Object.freeze({ status: "BLOCKED", reason });
+}
+
+/**
+ * Resolves the exact distribution signer through the existing unadmitted
+ * Synthetic role. This proves signature mechanics, never release trust.
+ */
+export async function verifySyntheticFirmwareDistributionManifestAgainstRoot(input: {
+  readonly root: ParsedSignedFirmwareRootMetadata;
+  readonly manifest: ParsedSignedSyntheticFirmwareDistributionManifest;
+  readonly clock: FirmwareTrustClock;
+  readonly verifier: FirmwareManifestSignatureVerifier;
+  readonly signal?: CancellationSignal;
+}): Promise<SyntheticFirmwareDistributionManifestRootVerificationResult> {
+  const rootRecord =
+    typeof input.root === "object" && input.root !== null
+      ? parsedRootRecords.get(input.root)
+      : undefined;
+  if (rootRecord === undefined) {
+    return blockedDistributionManifestRoot("FIRMWARE_ROOT_NOT_FROM_PARSER");
+  }
+  const manifestRecord =
+    typeof input.manifest === "object" && input.manifest !== null
+      ? syntheticDistributionManifestParseRecords.get(input.manifest)
+      : undefined;
+  if (manifestRecord === undefined) {
+    return blockedDistributionManifestRoot(
+      "SYNTHETIC_DISTRIBUTION_MANIFEST_NOT_FROM_PARSER",
+    );
+  }
+  if (manifestRecord.requiredRootMetadataVersion !== rootRecord.version) {
+    return blockedDistributionManifestRoot(
+      "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_VERSION_MISMATCH",
+    );
+  }
+
+  const role = rootRecord.roles.get("synthetic");
+  if (role === undefined || role.threshold !== 1) {
+    return blockedDistributionManifestRoot(
+      "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_ROLE_THRESHOLD_UNSUPPORTED",
+    );
+  }
+  if (!role.keyIds.includes(manifestRecord.keyId)) {
+    return blockedDistributionManifestRoot(
+      "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_KEY_NOT_AUTHORIZED",
+    );
+  }
+  const rawPublicKey = rootRecord.keys.get(manifestRecord.keyId);
+  if (rawPublicKey === undefined) {
+    return blockedDistributionManifestRoot(
+      "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_KEY_NOT_AUTHORIZED",
+    );
+  }
+
+  const freshness = await evaluateSyntheticFirmwareRootFreshness({
+    root: input.root,
+    clock: input.clock,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (freshness.status === "BLOCKED") {
+    return blockedDistributionManifestRoot(freshness.reason);
+  }
+  const signature = await verifySyntheticFirmwareDistributionManifestSignature({
+    parsed: input.manifest,
+    key: {
+      assurance: "SYNTHETIC_ONLY",
+      keyId: manifestRecord.keyId,
+      rawPublicKey: rawPublicKey.slice(),
+    },
+    verifier: input.verifier,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (signature.status === "BLOCKED") {
+    return blockedDistributionManifestRoot(
+      signature.reason as SyntheticFirmwareDistributionManifestSignatureBlockReason,
+    );
+  }
+
+  const result: SyntheticFirmwareDistributionManifestRootVerificationResult =
+    Object.freeze({
+      status: "VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT",
+      distributionSchema: "1",
+      rootVersion: rootRecord.version,
+      role: "synthetic",
+      roleThreshold: 1,
+      keyId: manifestRecord.keyId,
+      checkedAt: freshness.checkedAt,
+      clockAssurance: freshness.clockAssurance,
+      verifierAssurance: signature.verification.assurance,
+      targetIdentifier: manifestRecord.targetIdentifier,
+      releaseSequence: manifestRecord.releaseSequence,
+      artifact: manifestRecord.artifact,
+      correspondingSource: manifestRecord.correspondingSource,
+      notices: manifestRecord.notices,
+      trustStatus: currentArtifactManifestTrustStatus,
+    });
+  syntheticDistributionManifestRootVerificationRecords.set(result, {
+    parsedRoot: input.root,
+    parsedManifest: input.manifest,
+    rootVersion: rootRecord.version,
+    targetIdentifier: manifestRecord.targetIdentifier,
+    releaseSequence: manifestRecord.releaseSequence,
+    artifact: manifestRecord.artifact,
+    correspondingSource: manifestRecord.correspondingSource,
+    notices: manifestRecord.notices,
   });
   return result;
 }
