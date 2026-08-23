@@ -2,6 +2,7 @@ export * from "./easy-binding.js";
 export * from "./firmware-artifact.js";
 export * from "./firmware-artifact-bytes.js";
 export * from "./firmware-acquisition.js";
+export * from "./firmware-build-evidence.js";
 export * from "./firmware-catalog-candidate.js";
 export * from "./firmware-compressed-artifact.js";
 export * from "./firmware-dual-form-manifest.js";

@@ -399,6 +399,97 @@ export interface SyntheticFirmwareObjectAcquisitionProvider {
   ): Promise<SyntheticFirmwareObjectAcquisitionReceipt>;
 }
 
+/**
+ * A bounded, lab-only recipe carried by the exact `build-configuration`
+ * source-inventory entry. The recipe links the other five declared inputs;
+ * its own size and digest are linked separately by Core.
+ */
+export const syntheticFirmwareBuildRecipeSchemaVersion = "1" as const;
+export const syntheticFirmwareBuildRecipeType =
+  "synthetic-firmware-build-recipe" as const;
+export const maximumSyntheticFirmwareBuildRecipeBytes = 64 * 1024;
+export const maximumSyntheticFirmwareBuildOutputChunkSizeBytes = 64 * 1024;
+export const maximumSyntheticFirmwareBuildOutputChunks = 4096;
+
+export const syntheticFirmwareBuildRecipeInputIds = [
+  "upstream-source",
+  "targets-snapshot",
+  "patch-set",
+  "toolchain",
+  "dependency-lock",
+] as const satisfies readonly SyntheticDeclaredBuildInputId[];
+export type SyntheticFirmwareBuildRecipeInputId =
+  (typeof syntheticFirmwareBuildRecipeInputIds)[number];
+
+export interface SyntheticFirmwareBuildRecipeInputV1 {
+  readonly buildInputId: SyntheticFirmwareBuildRecipeInputId;
+  readonly sourcePath: string;
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticFirmwareBuildRecipeOutputV1 {
+  readonly name: string;
+  readonly mediaType: "application/gzip";
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticFirmwareBuildRecipeV1 {
+  readonly buildRecipeSchema: typeof syntheticFirmwareBuildRecipeSchemaVersion;
+  readonly recipeType: typeof syntheticFirmwareBuildRecipeType;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly inputs: readonly SyntheticFirmwareBuildRecipeInputV1[];
+  readonly output: SyntheticFirmwareBuildRecipeOutputV1;
+}
+
+export interface SyntheticFirmwareFixtureBuildRequest {
+  readonly schemaVersion: "1";
+  readonly operation: "SYNTHETIC_FIXTURE_OUTPUT_COMPARISON";
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly recipe: Readonly<{
+    sourcePath: string;
+    sizeBytes: number;
+    sha256: string;
+  }>;
+  readonly inputs: readonly SyntheticFirmwareBuildRecipeInputV1[];
+  readonly expectedOutput: SyntheticFirmwareBuildRecipeOutputV1;
+}
+
+export const syntheticFirmwareFixtureBuildReceiptType =
+  "synthetic-firmware-fixture-build-receipt" as const;
+
+export interface SyntheticFirmwareFixtureBuildReceipt {
+  readonly receiptSchema: "1";
+  readonly receiptType: typeof syntheticFirmwareFixtureBuildReceiptType;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly recipeSha256: string;
+  readonly declaredInputCount: 6;
+  readonly outputName: string;
+  readonly outputMediaType: "application/gzip";
+  readonly outputSizeBytes: number;
+  readonly outputSha256: string;
+}
+
+export type SyntheticFirmwareBuildOutputChunkSink = (chunk: Uint8Array) => void;
+
+/**
+ * Fixture-output boundary only. It cannot invoke or represent a real
+ * toolchain, admit Firmware, or authorize any writer. Core independently
+ * hashes every emitted byte and compares it with signed Synthetic evidence.
+ */
+export interface SyntheticFirmwareFixtureBuildOutputProvider {
+  readonly assurance: "SYNTHETIC_ONLY";
+  produceFixtureBuildOutput(
+    request: SyntheticFirmwareFixtureBuildRequest,
+    emitChunk: SyntheticFirmwareBuildOutputChunkSink,
+    signal?: CancellationSignal,
+  ): Promise<SyntheticFirmwareFixtureBuildReceipt>;
+}
+
 export const firmwareManifestSignatureVerifierAssurances = [
   "CRYPTOGRAPHIC",
   "SYNTHETIC_ONLY",

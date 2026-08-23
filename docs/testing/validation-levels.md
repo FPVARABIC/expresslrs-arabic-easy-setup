@@ -45,6 +45,8 @@ does not validate the reported Target, device family, browser, or Hardware.
 | Build inputs `EXACT_DECLARED_INPUTS_LINKED_TO_ARCHIVE_ENTRIES` | The six required Synthetic input IDs each point to one exact hashed archive entry; truth, sufficiency, execution, and reproducibility remain unproven |
 | Notices `VERIFIED_SYNTHETIC_NOTICE_SCHEMA` | Exact signed canonical notice JSON names the same Target/release/artifact/source and links all and only declared license entries by path and SHA-256; legal completeness is unproven |
 | Source review `SYNTHETIC_FIRMWARE_SOURCE_REVIEW_EVIDENCE` | Internally branded distribution candidate, source inspection, and notice inspection identify one distribution/root and exact three object digests; no bytes, Catalog admission, or writer path is produced |
+| Build recipe `VERIFIED_SYNTHETIC_FIRMWARE_BUILD_RECIPE` | The exact inventoried `build-configuration` bytes form one canonical recipe linking the other five inputs and signed output identity; declaration truth and build execution remain unproven |
+| Build comparison `SYNTHETIC_FIRMWARE_BUILD_OUTPUT_COMPARISON_EVIDENCE` | A separate Synthetic provider emitted one bounded output and exact receipt; Core independently matched its SHA-256 to the signed fixture artifact, but no real toolchain or second independent builder ran |
 | Catalog `NOT_ADMITTED_UNTRUSTED_SYNTHETIC` | Candidate evidence exists for software tests only; no Target Catalog record or release authority was created |
 | Write `BLOCKED_SYNTHETIC_FIXTURE` | The evidence is structurally unable to authorize or feed a current Firmware writer |
 | `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |

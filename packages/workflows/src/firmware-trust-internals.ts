@@ -163,6 +163,44 @@ export interface SyntheticFirmwareSourceReviewRecord {
   readonly noticesSha256: string;
 }
 
+export interface SyntheticFirmwareBuildRecipeInputRecord {
+  readonly buildInputId:
+    | "upstream-source"
+    | "targets-snapshot"
+    | "patch-set"
+    | "toolchain"
+    | "dependency-lock";
+  readonly sourcePath: string;
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticFirmwareBuildRecipeInspectionRecord {
+  readonly sourceReviewEvidence: object;
+  readonly targetIdentifier: string;
+  readonly rootVersion: number;
+  readonly releaseSequence: number;
+  readonly recipePath: string;
+  readonly recipeSizeBytes: number;
+  readonly recipeSha256: string;
+  readonly inputs: readonly SyntheticFirmwareBuildRecipeInputRecord[];
+  readonly output: Readonly<{
+    readonly name: string;
+    readonly mediaType: "application/gzip";
+    readonly sizeBytes: number;
+    readonly sha256: string;
+  }>;
+}
+
+export interface SyntheticFirmwareBuildOutputComparisonRecord {
+  readonly sourceReviewEvidence: object;
+  readonly recipeInspection: object;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly recipeSha256: string;
+  readonly artifactSha256: string;
+}
+
 /** Internal provenance brands; this module is intentionally not re-exported. */
 export const syntheticRootRotationRecords = new WeakMap<
   object,
@@ -232,4 +270,14 @@ export const syntheticNoticeInspectionRecords = new WeakMap<
 export const syntheticFirmwareSourceReviewRecords = new WeakMap<
   object,
   SyntheticFirmwareSourceReviewRecord
+>();
+
+export const syntheticFirmwareBuildRecipeInspectionRecords = new WeakMap<
+  object,
+  SyntheticFirmwareBuildRecipeInspectionRecord
+>();
+
+export const syntheticFirmwareBuildOutputComparisonRecords = new WeakMap<
+  object,
+  SyntheticFirmwareBuildOutputComparisonRecord
 >();

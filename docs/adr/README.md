@@ -24,5 +24,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0018: separately versioned Synthetic dual-form Manifest plus internally branded root/rollback/artifact linkage — accepted as non-admitted, non-writable catalog-candidate evidence only.
 - ADR-0019: separately signed Synthetic distribution statement, bounded exact-object acquisition, and source/notice linkage — accepted as byte-discarding, non-admitted, non-writable evidence only.
 - ADR-0020: restricted Synthetic USTAR/gzip source inventory, exact declared build-input links, canonical notice schema, and branded source-review join — accepted as inspected, non-reproducible, non-admitted, non-writable evidence only.
+- ADR-0021: exact canonical Synthetic build recipe plus a bounded separate fixture-provider receipt and Core output hash comparison — accepted as single-provider, non-reproducible, non-admitted, non-writable evidence only.
 
 Android platform strategy remains intentionally undecided until the real-device spike.

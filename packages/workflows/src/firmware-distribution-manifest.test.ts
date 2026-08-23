@@ -12,6 +12,9 @@ import {
   type SyntheticFirmwareDistributionManifestPayloadV1,
   type SyntheticFirmwareDistributionObjectRole,
   type SyntheticFirmwareAcquisitionChunkSink,
+  type SyntheticFirmwareBuildOutputChunkSink,
+  type SyntheticFirmwareFixtureBuildOutputProvider,
+  type SyntheticFirmwareFixtureBuildRequest,
   type SyntheticFirmwareObjectAcquisitionRequest,
   type SyntheticFirmwareObjectAcquisitionProvider,
   type SyntheticFirmwareRootMetadataPayloadV1,
@@ -27,6 +30,10 @@ import {
   acquireSyntheticFirmwareDistributionObject,
   type SyntheticFirmwareAcquisitionResult,
 } from "./firmware-acquisition.js";
+import {
+  compareSyntheticFirmwareFixtureBuildOutput,
+  inspectSyntheticFirmwareBuildRecipe,
+} from "./firmware-build-evidence.js";
 import { createSyntheticFirmwareCatalogCandidateEvidence } from "./firmware-catalog-candidate.js";
 import {
   validateSyntheticCompressedFirmwareArtifact,
@@ -55,6 +62,7 @@ import {
   createSyntheticFirmwareSourceReviewEvidence,
   inspectSyntheticCorrespondingSourceArchive,
   inspectSyntheticFirmwareNotices,
+  type SyntheticFirmwareSourceReviewEvidenceResult,
   type SyntheticSourceInventoryInspectionResult,
 } from "./firmware-source-evidence.js";
 import {
@@ -78,6 +86,7 @@ interface DistributionFixture {
   readonly sourceArchiveBytes: Uint8Array;
   readonly sourceBytes: Uint8Array;
   readonly noticesBytes: Uint8Array;
+  readonly buildRecipeBytes: Uint8Array;
   readonly artifactDescriptor: SyntheticCompressedFirmwareArtifactDescriptorV1;
   readonly distributionPayload: SyntheticFirmwareDistributionManifestPayloadV1;
 }
@@ -443,22 +452,20 @@ function syntheticExecutable(): Uint8Array {
   return bytes;
 }
 
-async function createFixture(): Promise<DistributionFixture> {
+async function createFixture(
+  input: {
+    readonly transformBuildRecipe?: (bytes: Uint8Array) => Uint8Array;
+  } = {},
+): Promise<DistributionFixture> {
   const decompressedBytes = syntheticExecutable();
   const artifactBytes = gzip(decompressedBytes);
   const artifactSha256 = await sha256(artifactBytes);
-  const sourceFiles = [
+  const sourceFilesWithoutConfiguration = [
     {
       path: "LICENSES/project.txt",
       role: "LICENSE",
       buildInputId: null,
       bytes: textEncoder.encode("Synthetic fixture notice only."),
-    },
-    {
-      path: "build/configuration.json",
-      role: "BUILD_INPUT",
-      buildInputId: "build-configuration",
-      bytes: textEncoder.encode('{"synthetic":true}'),
     },
     {
       path: "build/dependency-lock.json",
@@ -495,6 +502,56 @@ async function createFixture(): Promise<DistributionFixture> {
       role: "SOURCE",
       buildInputId: null,
       bytes: textEncoder.encode("void synthetic_fixture() {}\n"),
+    },
+  ];
+  const recordsWithoutConfiguration = await Promise.all(
+    sourceFilesWithoutConfiguration.map(async (entry) => ({
+      sourcePath: entry.path,
+      buildInputId: entry.buildInputId,
+      sizeBytes: entry.bytes.byteLength,
+      sha256: await sha256(entry.bytes),
+    })),
+  );
+  const recipeInputIds = [
+    "upstream-source",
+    "targets-snapshot",
+    "patch-set",
+    "toolchain",
+    "dependency-lock",
+  ] as const;
+  let buildRecipeBytes = canonicalJsonBytes({
+    buildRecipeSchema: "1",
+    recipeType: "synthetic-firmware-build-recipe",
+    targetIdentifier: "synthetic.tx.2g4",
+    releaseSequence: 7,
+    inputs: recipeInputIds.map((buildInputId) => {
+      const record = recordsWithoutConfiguration.find(
+        (candidate) => candidate.buildInputId === buildInputId,
+      )!;
+      return {
+        buildInputId,
+        sourcePath: record.sourcePath,
+        sizeBytes: record.sizeBytes,
+        sha256: record.sha256,
+      };
+    }),
+    output: {
+      name: "synthetic-firmware.bin.gz",
+      mediaType: "application/gzip",
+      sizeBytes: artifactBytes.byteLength,
+      sha256: artifactSha256,
+    },
+  } as BoundedJsonValue);
+  if (input.transformBuildRecipe !== undefined) {
+    buildRecipeBytes = input.transformBuildRecipe(buildRecipeBytes.slice());
+  }
+  const sourceFiles = [
+    ...sourceFilesWithoutConfiguration,
+    {
+      path: "build/configuration.json",
+      role: "BUILD_INPUT",
+      buildInputId: "build-configuration",
+      bytes: buildRecipeBytes,
     },
   ].sort((left, right) => (left.path < right.path ? -1 : 1));
   const inventoryEntries = await Promise.all(
@@ -546,6 +603,7 @@ async function createFixture(): Promise<DistributionFixture> {
     sourceArchiveBytes,
     sourceBytes,
     noticesBytes,
+    buildRecipeBytes,
     artifactDescriptor: {
       schemaVersion: "1",
       artifactType: "synthetic-compressed-firmware-artifact",
@@ -634,6 +692,50 @@ function acquisitionProvider(
       return receipt as unknown as Awaited<
         ReturnType<
           SyntheticFirmwareObjectAcquisitionProvider["acquireExactObject"]
+        >
+      >;
+    },
+  });
+}
+
+function fixtureBuildOutputProvider(
+  fixture: DistributionFixture,
+  input: {
+    readonly outputBytes?: Uint8Array;
+    readonly mutateReceipt?: (
+      receipt: Record<string, unknown>,
+      request: SyntheticFirmwareFixtureBuildRequest,
+    ) => void;
+  } = {},
+): SyntheticFirmwareFixtureBuildOutputProvider {
+  return Object.freeze({
+    assurance: "SYNTHETIC_ONLY",
+    async produceFixtureBuildOutput(
+      request: SyntheticFirmwareFixtureBuildRequest,
+      emitChunk: SyntheticFirmwareBuildOutputChunkSink,
+    ) {
+      const bytes = (input.outputBytes ?? fixture.artifactBytes).slice();
+      const split = Math.max(1, Math.floor(bytes.byteLength / 2));
+      const first = bytes.slice(0, split);
+      emitChunk(first);
+      first.fill(0);
+      emitChunk(bytes.slice(split));
+      const receipt: Record<string, unknown> = {
+        receiptSchema: "1",
+        receiptType: "synthetic-firmware-fixture-build-receipt",
+        targetIdentifier: request.targetIdentifier,
+        releaseSequence: request.releaseSequence,
+        recipeSha256: request.recipe.sha256,
+        declaredInputCount: 6,
+        outputName: request.expectedOutput.name,
+        outputMediaType: request.expectedOutput.mediaType,
+        outputSizeBytes: bytes.byteLength,
+        outputSha256: request.expectedOutput.sha256,
+      };
+      input.mutateReceipt?.(receipt, request);
+      return receipt as unknown as Awaited<
+        ReturnType<
+          SyntheticFirmwareFixtureBuildOutputProvider["produceFixtureBuildOutput"]
         >
       >;
     },
@@ -809,6 +911,56 @@ async function createCatalogCandidate(input: {
     manifestRootVerification: verification,
     artifactValidation: await validateArtifact(input.fixture),
     rollbackEvidence,
+  });
+}
+
+async function createSourceReviewFixture(input: {
+  readonly fixture: DistributionFixture;
+  readonly key: TestKey;
+  readonly root: ParsedSignedFirmwareRootMetadata;
+}): Promise<
+  Readonly<{
+    verification: SyntheticFirmwareDistributionManifestRootVerificationResult;
+    sourceReviewEvidence: SyntheticFirmwareSourceReviewEvidenceResult;
+  }>
+> {
+  const catalogCandidate = await createCatalogCandidate(input);
+  const verification = await verifyDistributionAgainstRoot({
+    root: input.root,
+    manifest: await signDistributionManifest(
+      input.fixture.distributionPayload,
+      input.key,
+    ),
+  });
+  const acquisitions = await acquireAll({
+    fixture: input.fixture,
+    verification,
+  });
+  const distributionCandidate =
+    createSyntheticFirmwareDistributionCandidateEvidence({
+      catalogCandidate,
+      distributionRootVerification: verification,
+      firmwareAcquisition: acquisitions[0]!,
+      correspondingSourceAcquisition: acquisitions[1]!,
+      noticesAcquisition: acquisitions[2]!,
+    });
+  const sourceInspection = await inspectSource({
+    fixture: input.fixture,
+    verification,
+  });
+  const noticesInspection = await inspectSyntheticFirmwareNotices({
+    distributionRootVerification: verification,
+    sourceInspection,
+    noticesBytes: input.fixture.noticesBytes,
+    digestProvider,
+  });
+  return Object.freeze({
+    verification,
+    sourceReviewEvidence: createSyntheticFirmwareSourceReviewEvidence({
+      distributionCandidate,
+      sourceInspection,
+      noticesInspection,
+    }),
   });
 }
 
@@ -1897,6 +2049,341 @@ describe("Synthetic distribution Manifest and bounded acquisition", () => {
       status: "BLOCKED",
       reason: "SYNTHETIC_SOURCE_INVENTORY_INSPECTION_NOT_PROVEN",
     });
+  });
+
+  it("links the canonical Synthetic recipe and compares an independent fixture output", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:build-comparison");
+    const root = requireRoot(rootPayload([key]));
+    const sourceReview = await createSourceReviewFixture({
+      fixture,
+      key,
+      root,
+    });
+    const recipeSha256 = await sha256(fixture.buildRecipeBytes);
+
+    const recipeInspection = await inspectSyntheticFirmwareBuildRecipe({
+      sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+      buildRecipeBytes: fixture.buildRecipeBytes,
+      digestProvider,
+    });
+    expect(recipeInspection).toEqual({
+      status: "VERIFIED_SYNTHETIC_FIRMWARE_BUILD_RECIPE",
+      validationLevel: "SYNTHETIC_ONLY",
+      trustStatus: "UNVERIFIED_NO_TRUST_ROOT",
+      recipeCanonicalization: "RFC8785",
+      recipePath: "build/configuration.json",
+      recipeSizeBytes: fixture.buildRecipeBytes.byteLength,
+      recipeSha256,
+      recipeLinkedInputCount: 5,
+      declaredBuildInputCount: 6,
+      buildInputDisposition: "FIVE_INPUTS_LINKED_AND_CONFIGURATION_SELF_HASHED",
+      outputDisposition: "EXACT_SIGNED_SYNTHETIC_ARTIFACT_IDENTITY_LINKED",
+      reproducibilityDisposition: "NOT_PROVEN",
+      byteDisposition: "HASHED_INSPECTED_AND_DISCARDED",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+      targetIdentifier: "synthetic.tx.2g4",
+      rootVersion: 1,
+      releaseSequence: 7,
+      artifactName: "synthetic-firmware.bin.gz",
+      artifactSizeBytes: fixture.artifactBytes.byteLength,
+      artifactSha256: fixture.distributionPayload.artifact.sha256,
+    });
+    expect(Reflect.ownKeys(recipeInspection)).not.toContain("inputs");
+    expect(Reflect.ownKeys(recipeInspection)).not.toContain("bytes");
+
+    let observedRequest: SyntheticFirmwareFixtureBuildRequest | undefined;
+    const result = await compareSyntheticFirmwareFixtureBuildOutput({
+      sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+      recipeInspection,
+      provider: fixtureBuildOutputProvider(fixture, {
+        mutateReceipt(_receipt, request) {
+          observedRequest = request;
+        },
+      }),
+      digestProvider,
+    });
+    expect(observedRequest).toBeDefined();
+    expect(Object.isFrozen(observedRequest)).toBe(true);
+    expect(Object.isFrozen(observedRequest?.recipe)).toBe(true);
+    expect(Object.isFrozen(observedRequest?.inputs)).toBe(true);
+    expect(Object.isFrozen(observedRequest?.expectedOutput)).toBe(true);
+    expect(observedRequest?.inputs.map((entry) => entry.buildInputId)).toEqual([
+      "upstream-source",
+      "targets-snapshot",
+      "patch-set",
+      "toolchain",
+      "dependency-lock",
+    ]);
+    expect(result).toEqual({
+      status: "SYNTHETIC_FIRMWARE_BUILD_OUTPUT_COMPARISON_EVIDENCE",
+      validationLevel: "SYNTHETIC_ONLY",
+      trustStatus: "UNVERIFIED_NO_TRUST_ROOT",
+      recipeStatus: "VERIFIED_SYNTHETIC_FIRMWARE_BUILD_RECIPE",
+      providerAssurance: "SYNTHETIC_ONLY",
+      digestAssurance: "CRYPTOGRAPHIC",
+      catalogDisposition: "NOT_ADMITTED_UNTRUSTED_SYNTHETIC",
+      toolchainDisposition: "NOT_INVOKED_PROVIDER_RECEIPT_ONLY",
+      receiptDisposition: "EXACT_SYNTHETIC_RECEIPT_MATCHED",
+      outputComparisonDisposition:
+        "CORE_SHA256_MATCHED_SIGNED_SYNTHETIC_ARTIFACT",
+      independenceDisposition: "SEPARATE_SYNTHETIC_PROVIDER_BOUNDARY_ONLY",
+      reproducibilityDisposition: "NOT_PROVEN_SINGLE_SYNTHETIC_PROVIDER",
+      byteDisposition: "HASHED_COMPARED_AND_DISCARDED",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+      targetIdentifier: "synthetic.tx.2g4",
+      rootVersion: 1,
+      releaseSequence: 7,
+      recipeSha256,
+      artifactName: "synthetic-firmware.bin.gz",
+      artifactSizeBytes: fixture.artifactBytes.byteLength,
+      artifactSha256: fixture.distributionPayload.artifact.sha256,
+    });
+    expect(JSON.stringify(result)).not.toContain("synthetic-toolchain@0");
+    expect(Reflect.ownKeys(result)).not.toContain("bytes");
+  });
+
+  it("rejects unlinked, non-canonical, and contradictory Synthetic recipes", async () => {
+    const baseFixture = await createFixture();
+    const baseKey = await createTestKey("synthetic:build-recipe-base");
+    const baseRoot = requireRoot(rootPayload([baseKey]));
+    const baseReview = await createSourceReviewFixture({
+      fixture: baseFixture,
+      key: baseKey,
+      root: baseRoot,
+    });
+    await expect(
+      inspectSyntheticFirmwareBuildRecipe({
+        sourceReviewEvidence: {
+          ...baseReview.sourceReviewEvidence,
+        },
+        buildRecipeBytes: baseFixture.buildRecipeBytes,
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "SOURCE_REVIEW_EVIDENCE",
+      reason: "SYNTHETIC_SOURCE_REVIEW_EVIDENCE_NOT_PROVEN",
+    });
+
+    const alteredBytes = baseFixture.buildRecipeBytes.slice();
+    alteredBytes[alteredBytes.byteLength - 2] =
+      (alteredBytes[alteredBytes.byteLength - 2] ?? 0) ^ 1;
+    await expect(
+      inspectSyntheticFirmwareBuildRecipe({
+        sourceReviewEvidence: baseReview.sourceReviewEvidence,
+        buildRecipeBytes: alteredBytes,
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "RECIPE_INPUT",
+      reason: "SYNTHETIC_BUILD_RECIPE_DIGEST_MISMATCH",
+    });
+
+    const variants: readonly {
+      readonly keyId: string;
+      readonly transform: (bytes: Uint8Array) => Uint8Array;
+      readonly stage: string;
+      readonly reason: string;
+    }[] = [
+      {
+        keyId: "synthetic:build-recipe-noncanonical",
+        transform: (bytes) => {
+          const output = new Uint8Array(bytes.byteLength + 1);
+          output[0] = 0x20;
+          output.set(bytes, 1);
+          return output;
+        },
+        stage: "RECIPE_SCHEMA",
+        reason: "SYNTHETIC_BUILD_RECIPE_NOT_CANONICAL",
+      },
+      {
+        keyId: "synthetic:build-recipe-release",
+        transform: (bytes) => {
+          const source = new TextDecoder().decode(bytes);
+          return textEncoder.encode(
+            source.replace('"releaseSequence":7', '"releaseSequence":8'),
+          );
+        },
+        stage: "SOURCE_LINKAGE",
+        reason: "SYNTHETIC_BUILD_RECIPE_RELEASE_MISMATCH",
+      },
+      {
+        keyId: "synthetic:build-recipe-output",
+        transform: (bytes) => {
+          const output = bytes.slice();
+          const marker = textEncoder.encode(
+            '"output":{"mediaType":"application/gzip"',
+          );
+          const markerOffset = findBytes(output, marker);
+          expect(markerOffset).toBeGreaterThanOrEqual(0);
+          const shaKey = textEncoder.encode('"sha256":"');
+          const shaOffset = findBytes(output.subarray(markerOffset), shaKey);
+          expect(shaOffset).toBeGreaterThanOrEqual(0);
+          const valueOffset = markerOffset + shaOffset + shaKey.byteLength;
+          output[valueOffset] = output[valueOffset] === 0x30 ? 0x31 : 0x30;
+          return output;
+        },
+        stage: "OUTPUT_LINKAGE",
+        reason: "SYNTHETIC_BUILD_RECIPE_OUTPUT_MISMATCH",
+      },
+    ];
+    for (const variant of variants) {
+      const fixture = await createFixture({
+        transformBuildRecipe: variant.transform,
+      });
+      const key = await createTestKey(variant.keyId);
+      const root = requireRoot(rootPayload([key]));
+      const review = await createSourceReviewFixture({ fixture, key, root });
+      await expect(
+        inspectSyntheticFirmwareBuildRecipe({
+          sourceReviewEvidence: review.sourceReviewEvidence,
+          buildRecipeBytes: fixture.buildRecipeBytes,
+          digestProvider,
+        }),
+      ).resolves.toEqual({
+        status: "BLOCKED",
+        stage: variant.stage,
+        reason: variant.reason,
+      });
+    }
+  });
+
+  it("bounds Synthetic build output and rejects false receipts or output bytes", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:build-output-adversarial");
+    const root = requireRoot(rootPayload([key]));
+    const sourceReview = await createSourceReviewFixture({
+      fixture,
+      key,
+      root,
+    });
+    const recipeInspection = await inspectSyntheticFirmwareBuildRecipe({
+      sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+      buildRecipeBytes: fixture.buildRecipeBytes,
+      digestProvider,
+    });
+
+    await expect(
+      compareSyntheticFirmwareFixtureBuildOutput({
+        sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+        recipeInspection,
+        provider: fixtureBuildOutputProvider(fixture, {
+          mutateReceipt(receipt) {
+            receipt.recipeSha256 = "0".repeat(64);
+          },
+        }),
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "RECEIPT",
+      reason: "SYNTHETIC_BUILD_RECEIPT_MISMATCH",
+    });
+
+    const wrongBytes = fixture.artifactBytes.slice();
+    wrongBytes[wrongBytes.byteLength - 1] =
+      (wrongBytes[wrongBytes.byteLength - 1] ?? 0) ^ 1;
+    await expect(
+      compareSyntheticFirmwareFixtureBuildOutput({
+        sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+        recipeInspection,
+        provider: fixtureBuildOutputProvider(fixture, {
+          outputBytes: wrongBytes,
+        }),
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "OUTPUT_DIGEST",
+      reason: "SYNTHETIC_BUILD_OUTPUT_DIGEST_MISMATCH",
+    });
+
+    await expect(
+      compareSyntheticFirmwareFixtureBuildOutput({
+        sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+        recipeInspection,
+        provider: {
+          assurance: "SYNTHETIC_ONLY",
+          async produceFixtureBuildOutput(_request, emitChunk) {
+            emitChunk(new Uint8Array());
+            throw new Error("unreachable");
+          },
+        },
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "OUTPUT_STREAM",
+      reason: "SYNTHETIC_BUILD_OUTPUT_CHUNK_INVALID",
+    });
+
+    await expect(
+      compareSyntheticFirmwareFixtureBuildOutput({
+        sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+        recipeInspection,
+        provider: fixtureBuildOutputProvider(fixture),
+        digestProvider,
+        signal: { aborted: true },
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("requires branded matching recipe evidence and never executes accessors", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:build-branding");
+    const root = requireRoot(rootPayload([key]));
+    const sourceReview = await createSourceReviewFixture({
+      fixture,
+      key,
+      root,
+    });
+    const recipeInspection = await inspectSyntheticFirmwareBuildRecipe({
+      sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+      buildRecipeBytes: fixture.buildRecipeBytes,
+      digestProvider,
+    });
+    await expect(
+      compareSyntheticFirmwareFixtureBuildOutput({
+        sourceReviewEvidence: sourceReview.sourceReviewEvidence,
+        recipeInspection: { ...recipeInspection },
+        provider: fixtureBuildOutputProvider(fixture),
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "EVIDENCE",
+      reason: "SYNTHETIC_BUILD_RECIPE_INSPECTION_NOT_PROVEN",
+    });
+
+    let getterExecuted = false;
+    const recipeInput = Object.create(null) as Record<string, unknown>;
+    for (const field of [
+      "sourceReviewEvidence",
+      "buildRecipeBytes",
+      "digestProvider",
+    ]) {
+      Object.defineProperty(recipeInput, field, {
+        enumerable: true,
+        get() {
+          getterExecuted = true;
+          return {};
+        },
+      });
+    }
+    await expect(
+      inspectSyntheticFirmwareBuildRecipe(
+        recipeInput as Parameters<
+          typeof inspectSyntheticFirmwareBuildRecipe
+        >[0],
+      ),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "SOURCE_REVIEW_EVIDENCE",
+      reason: "SYNTHETIC_SOURCE_REVIEW_EVIDENCE_NOT_PROVEN",
+    });
+    expect(getterExecuted).toBe(false);
   });
 
   it("never invokes accessors while inspecting or joining source evidence", async () => {

@@ -188,6 +188,21 @@ does not create a Catalog entry or writer path. General archives, legal
 completeness, independent rebuilds, and production decompression remain later
 gates.
 
+ADR-0021 reads the exact bytes of the already-inventoried
+`build-configuration` entry and requires one bounded RFC 8785 recipe. The recipe
+links the other five build inputs by exact ID/path/size/SHA-256 and names the
+same signed Synthetic artifact output. Its own inventory path/size/SHA-256 is
+the sixth input link, avoiding a recursive self-digest.
+
+A distinct `SYNTHETIC_ONLY` fixture-output provider receives an immutable
+identity-only request and emits bounded chunks plus an exact receipt. Core
+independently hashes the complete output and compares it with the signed
+distribution artifact. The result is
+`SYNTHETIC_FIRMWARE_BUILD_OUTPUT_COMPARISON_EVIDENCE`, returns no recipe or
+output bytes, invokes no real toolchain, remains
+`NOT_PROVEN_SINGLE_SYNTHETIC_PROVIDER`, and cannot admit a Catalog entry or feed
+a writer.
+
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware
 version matched. Strict evaluation of that immutable plan is an additional
