@@ -169,6 +169,25 @@ Success remains `SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE`,
 notice contents remain explicitly uninspected, and no Browser/network provider
 or production origin is admitted.
 
+ADR-0020 adds a second evidence-only review over those exact signed source and
+notice identities. Core copies and hashes the signed source gzip, bounds
+Synthetic decompression, checks its CRC32/ISIZE trailer, and accepts only a
+restricted regular-file USTAR profile with canonical paths, headers, padding,
+checksums, and exactly two end blocks. The first file is a 64 KiB RFC 8785
+inventory. Every remaining archive file must occur once in sorted order with
+the declared size, SHA-256, and `SOURCE`, `BUILD_INPUT`, or `LICENSE` role. Six
+fixed build-input IDs must each link to one hashed entry.
+
+The exact signed notice object is separately parsed as bounded canonical JSON.
+It must name the same Target, release, artifact digest, and source digest, and
+link all and only `LICENSE` entries by path and SHA-256. A final internally
+branded join returns `SYNTHETIC_FIRMWARE_SOURCE_REVIEW_EVIDENCE`, still
+`NOT_ADMITTED_UNTRUSTED_SYNTHETIC`, `NOT_PROVEN` for reproducibility, and
+`BLOCKED_SYNTHETIC_FIXTURE`. It returns no source, notice, or Firmware bytes and
+does not create a Catalog entry or writer path. General archives, legal
+completeness, independent rebuilds, and production decompression remain later
+gates.
+
 Core creates `firmware-update-post-write-v1` with four required facts: device
 reconnected, session-local device identity matched, Target matched, and Firmware
 version matched. Strict evaluation of that immutable plan is an additional

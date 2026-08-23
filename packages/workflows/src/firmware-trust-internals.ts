@@ -104,6 +104,65 @@ export interface SyntheticFirmwareAcquisitionRecord extends SyntheticDistributio
   readonly digestAssurance: "CRYPTOGRAPHIC" | "SYNTHETIC_ONLY";
 }
 
+export interface SyntheticFirmwareDistributionCandidateRecord {
+  readonly distributionRootVerification: object;
+  readonly targetIdentifier: string;
+  readonly rootVersion: number;
+  readonly releaseSequence: number;
+  readonly artifactSha256: string;
+  readonly correspondingSourceSha256: string;
+  readonly noticesSha256: string;
+}
+
+export interface SyntheticSourceInventoryEntryRecord {
+  readonly path: string;
+  readonly role: "SOURCE" | "BUILD_INPUT" | "LICENSE";
+  readonly buildInputId:
+    | "upstream-source"
+    | "targets-snapshot"
+    | "patch-set"
+    | "toolchain"
+    | "dependency-lock"
+    | "build-configuration"
+    | null;
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticSourceInventoryInspectionRecord {
+  readonly distributionRootVerification: object;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifactSha256: string;
+  readonly correspondingSourceSha256: string;
+  readonly entries: readonly SyntheticSourceInventoryEntryRecord[];
+  readonly sourceEntryCount: number;
+  readonly buildInputCount: number;
+  readonly licenseEntryCount: number;
+}
+
+export interface SyntheticNoticeInspectionRecord {
+  readonly distributionRootVerification: object;
+  readonly sourceInspection: object;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifactSha256: string;
+  readonly correspondingSourceSha256: string;
+  readonly noticesSha256: string;
+  readonly noticeEntryCount: number;
+}
+
+export interface SyntheticFirmwareSourceReviewRecord {
+  readonly distributionCandidate: object;
+  readonly sourceInspection: object;
+  readonly noticesInspection: object;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifactSha256: string;
+  readonly correspondingSourceSha256: string;
+  readonly noticesSha256: string;
+}
+
 /** Internal provenance brands; this module is intentionally not re-exported. */
 export const syntheticRootRotationRecords = new WeakMap<
   object,
@@ -153,4 +212,24 @@ export const syntheticFirmwareCatalogCandidateRecords = new WeakMap<
 export const syntheticFirmwareAcquisitionRecords = new WeakMap<
   object,
   SyntheticFirmwareAcquisitionRecord
+>();
+
+export const syntheticFirmwareDistributionCandidateRecords = new WeakMap<
+  object,
+  SyntheticFirmwareDistributionCandidateRecord
+>();
+
+export const syntheticSourceInventoryInspectionRecords = new WeakMap<
+  object,
+  SyntheticSourceInventoryInspectionRecord
+>();
+
+export const syntheticNoticeInspectionRecords = new WeakMap<
+  object,
+  SyntheticNoticeInspectionRecord
+>();
+
+export const syntheticFirmwareSourceReviewRecords = new WeakMap<
+  object,
+  SyntheticFirmwareSourceReviewRecord
 >();

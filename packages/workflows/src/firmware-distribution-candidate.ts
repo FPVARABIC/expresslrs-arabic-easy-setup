@@ -7,6 +7,7 @@ import {
   syntheticDistributionManifestRootVerificationRecords,
   syntheticFirmwareAcquisitionRecords,
   syntheticFirmwareCatalogCandidateRecords,
+  syntheticFirmwareDistributionCandidateRecords,
   type SyntheticDistributionObjectRecord,
   type SyntheticFirmwareAcquisitionRecord,
 } from "./firmware-trust-internals.js";
@@ -178,29 +179,42 @@ export function createSyntheticFirmwareDistributionCandidateEvidence(input: {
     return blocked("SYNTHETIC_DISTRIBUTION_ACQUISITION_MISMATCH");
   }
 
-  return Object.freeze({
-    status: "SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE",
-    validationLevel: "SYNTHETIC_ONLY",
-    distributionManifestStatus: "VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT",
-    acquisitionStatus: "VERIFIED_SYNTHETIC_ACQUISITION",
-    correspondingSourceDisposition: "EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED",
-    noticesDisposition: "EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED",
-    trustStatus: currentArtifactManifestTrustStatus,
-    catalogDisposition: "NOT_ADMITTED_UNTRUSTED_SYNTHETIC",
-    byteDisposition: "HASHED_AND_DISCARDED",
-    writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+  const result: SyntheticFirmwareDistributionCandidateEvidenceResult =
+    Object.freeze({
+      status: "SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE",
+      validationLevel: "SYNTHETIC_ONLY",
+      distributionManifestStatus:
+        "VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT",
+      acquisitionStatus: "VERIFIED_SYNTHETIC_ACQUISITION",
+      correspondingSourceDisposition:
+        "EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED",
+      noticesDisposition: "EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED",
+      trustStatus: currentArtifactManifestTrustStatus,
+      catalogDisposition: "NOT_ADMITTED_UNTRUSTED_SYNTHETIC",
+      byteDisposition: "HASHED_AND_DISCARDED",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+      targetIdentifier: distributionRecord.targetIdentifier,
+      rootVersion: distributionRecord.rootVersion,
+      releaseSequence: distributionRecord.releaseSequence,
+      artifactName: distributionRecord.artifact.name,
+      artifactSizeBytes: distributionRecord.artifact.sizeBytes,
+      artifactSha256: distributionRecord.artifact.sha256,
+      correspondingSourceName: distributionRecord.correspondingSource.name,
+      correspondingSourceSizeBytes:
+        distributionRecord.correspondingSource.sizeBytes,
+      correspondingSourceSha256: distributionRecord.correspondingSource.sha256,
+      noticesName: distributionRecord.notices.name,
+      noticesSizeBytes: distributionRecord.notices.sizeBytes,
+      noticesSha256: distributionRecord.notices.sha256,
+    });
+  syntheticFirmwareDistributionCandidateRecords.set(result, {
+    distributionRootVerification: distributionRootVerification as object,
     targetIdentifier: distributionRecord.targetIdentifier,
     rootVersion: distributionRecord.rootVersion,
     releaseSequence: distributionRecord.releaseSequence,
-    artifactName: distributionRecord.artifact.name,
-    artifactSizeBytes: distributionRecord.artifact.sizeBytes,
     artifactSha256: distributionRecord.artifact.sha256,
-    correspondingSourceName: distributionRecord.correspondingSource.name,
-    correspondingSourceSizeBytes:
-      distributionRecord.correspondingSource.sizeBytes,
     correspondingSourceSha256: distributionRecord.correspondingSource.sha256,
-    noticesName: distributionRecord.notices.name,
-    noticesSizeBytes: distributionRecord.notices.sizeBytes,
     noticesSha256: distributionRecord.notices.sha256,
   });
+  return result;
 }

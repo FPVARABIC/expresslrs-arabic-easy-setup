@@ -20,6 +20,10 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalizeBoundedJson,
+  type BoundedJsonValue,
+} from "./bounded-json.js";
+import {
   acquireSyntheticFirmwareDistributionObject,
   type SyntheticFirmwareAcquisitionResult,
 } from "./firmware-acquisition.js";
@@ -48,6 +52,12 @@ import {
   type SyntheticFirmwareDistributionManifestRootVerificationResult,
 } from "./firmware-root-metadata.js";
 import {
+  createSyntheticFirmwareSourceReviewEvidence,
+  inspectSyntheticCorrespondingSourceArchive,
+  inspectSyntheticFirmwareNotices,
+  type SyntheticSourceInventoryInspectionResult,
+} from "./firmware-source-evidence.js";
+import {
   advanceSyntheticFirmwareReleaseState,
   parseSyntheticFirmwareTrustState,
 } from "./firmware-trust-state.js";
@@ -65,6 +75,7 @@ interface TestKey {
 interface DistributionFixture {
   readonly decompressedBytes: Uint8Array;
   readonly artifactBytes: Uint8Array;
+  readonly sourceArchiveBytes: Uint8Array;
   readonly sourceBytes: Uint8Array;
   readonly noticesBytes: Uint8Array;
   readonly artifactDescriptor: SyntheticCompressedFirmwareArtifactDescriptorV1;
@@ -347,6 +358,78 @@ function gzip(bytes: Uint8Array): Uint8Array {
   return output;
 }
 
+function writeAscii(bytes: Uint8Array, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    bytes[offset + index] = value.charCodeAt(index);
+  }
+}
+
+function canonicalTar(
+  entries: readonly {
+    readonly path: string;
+    readonly bytes: Uint8Array;
+  }[],
+): Uint8Array {
+  const archiveSize =
+    entries.reduce(
+      (total, entry) =>
+        total + 512 + Math.ceil(entry.bytes.byteLength / 512) * 512,
+      0,
+    ) +
+    2 * 512;
+  const archive = new Uint8Array(archiveSize);
+  let offset = 0;
+  for (const entry of entries) {
+    const header = archive.subarray(offset, offset + 512);
+    writeAscii(header, 0, entry.path);
+    writeAscii(header, 100, "0000644");
+    writeAscii(header, 108, "0000000");
+    writeAscii(header, 116, "0000000");
+    writeAscii(
+      header,
+      124,
+      entry.bytes.byteLength.toString(8).padStart(11, "0"),
+    );
+    writeAscii(header, 136, "00000000000");
+    header.fill(0x20, 148, 156);
+    header[156] = 0x30;
+    writeAscii(header, 257, "ustar");
+    header[263] = 0x30;
+    header[264] = 0x30;
+    let checksum = 0;
+    for (const byte of header) {
+      checksum += byte;
+    }
+    writeAscii(header, 148, checksum.toString(8).padStart(6, "0"));
+    header[154] = 0;
+    header[155] = 0x20;
+    offset += 512;
+    archive.set(entry.bytes, offset);
+    offset += Math.ceil(entry.bytes.byteLength / 512) * 512;
+  }
+  return archive;
+}
+
+function canonicalJsonBytes(value: BoundedJsonValue): Uint8Array {
+  return textEncoder.encode(canonicalizeBoundedJson(value));
+}
+
+function findBytes(haystack: Uint8Array, needle: Uint8Array): number {
+  outer: for (
+    let offset = 0;
+    offset <= haystack.byteLength - needle.byteLength;
+    offset += 1
+  ) {
+    for (let index = 0; index < needle.byteLength; index += 1) {
+      if (haystack[offset + index] !== needle[index]) {
+        continue outer;
+      }
+    }
+    return offset;
+  }
+  return -1;
+}
+
 function syntheticExecutable(): Uint8Array {
   const target = textEncoder.encode("synthetic.tx.2g4");
   const payload = new Uint8Array([0x10, 0x20, 0x30, 0x40]);
@@ -363,16 +446,104 @@ function syntheticExecutable(): Uint8Array {
 async function createFixture(): Promise<DistributionFixture> {
   const decompressedBytes = syntheticExecutable();
   const artifactBytes = gzip(decompressedBytes);
-  const sourceBytes = gzip(
-    textEncoder.encode("synthetic corresponding source"),
-  );
-  const noticesBytes = textEncoder.encode('{"licenses":[]}');
   const artifactSha256 = await sha256(artifactBytes);
+  const sourceFiles = [
+    {
+      path: "LICENSES/project.txt",
+      role: "LICENSE",
+      buildInputId: null,
+      bytes: textEncoder.encode("Synthetic fixture notice only."),
+    },
+    {
+      path: "build/configuration.json",
+      role: "BUILD_INPUT",
+      buildInputId: "build-configuration",
+      bytes: textEncoder.encode('{"synthetic":true}'),
+    },
+    {
+      path: "build/dependency-lock.json",
+      role: "BUILD_INPUT",
+      buildInputId: "dependency-lock",
+      bytes: textEncoder.encode('{"dependencies":[]}'),
+    },
+    {
+      path: "build/patch-set.json",
+      role: "BUILD_INPUT",
+      buildInputId: "patch-set",
+      bytes: textEncoder.encode('{"patches":[]}'),
+    },
+    {
+      path: "build/targets-snapshot.json",
+      role: "BUILD_INPUT",
+      buildInputId: "targets-snapshot",
+      bytes: textEncoder.encode('{"target":"synthetic.tx.2g4"}'),
+    },
+    {
+      path: "build/toolchain.txt",
+      role: "BUILD_INPUT",
+      buildInputId: "toolchain",
+      bytes: textEncoder.encode("synthetic-toolchain@0"),
+    },
+    {
+      path: "build/upstream-source.txt",
+      role: "BUILD_INPUT",
+      buildInputId: "upstream-source",
+      bytes: textEncoder.encode("synthetic-upstream@0000000"),
+    },
+    {
+      path: "src/main.cpp",
+      role: "SOURCE",
+      buildInputId: null,
+      bytes: textEncoder.encode("void synthetic_fixture() {}\n"),
+    },
+  ].sort((left, right) => (left.path < right.path ? -1 : 1));
+  const inventoryEntries = await Promise.all(
+    sourceFiles.map(async (entry) => ({
+      path: entry.path,
+      role: entry.role,
+      buildInputId: entry.buildInputId,
+      sizeBytes: entry.bytes.byteLength,
+      sha256: await sha256(entry.bytes),
+    })),
+  );
+  const inventoryBytes = canonicalJsonBytes({
+    sourceInventorySchema: "1",
+    inventoryType: "synthetic-corresponding-source-inventory",
+    targetIdentifier: "synthetic.tx.2g4",
+    releaseSequence: 7,
+    artifactSha256,
+    entries: inventoryEntries,
+  } as BoundedJsonValue);
+  const sourceArchiveBytes = canonicalTar([
+    { path: "ELRS-EASY-SOURCE-INVENTORY.json", bytes: inventoryBytes },
+    ...sourceFiles,
+  ]);
+  const sourceBytes = gzip(sourceArchiveBytes);
   const sourceSha256 = await sha256(sourceBytes);
+  const licenseEntry = inventoryEntries.find(
+    (entry) => entry.role === "LICENSE",
+  )!;
+  const noticesBytes = canonicalJsonBytes({
+    noticeSchema: "1",
+    noticeType: "synthetic-firmware-notices",
+    targetIdentifier: "synthetic.tx.2g4",
+    releaseSequence: 7,
+    artifactSha256,
+    correspondingSourceSha256: sourceSha256,
+    entries: [
+      {
+        componentId: "synthetic-project",
+        licenseExpression: "LicenseRef-Synthetic-Only",
+        noticeSha256: licenseEntry.sha256,
+        sourcePath: licenseEntry.path,
+      },
+    ],
+  } as BoundedJsonValue);
   const noticesSha256 = await sha256(noticesBytes);
   return {
     decompressedBytes,
     artifactBytes,
+    sourceArchiveBytes,
     sourceBytes,
     noticesBytes,
     artifactDescriptor: {
@@ -566,6 +737,38 @@ async function validateArtifact(
     compressedBytes: fixture.artifactBytes,
     digestProvider,
     decompressionProvider,
+  });
+}
+
+function sourceDecompressionProvider(
+  archiveBytes: Uint8Array,
+): FirmwareArtifactDecompressionProvider {
+  return Object.freeze({
+    assurance: "SYNTHETIC_ONLY",
+    async decompressGzip(
+      _bytes: Uint8Array,
+      emitChunk: (chunk: Uint8Array) => void,
+    ) {
+      const split = Math.max(1, Math.floor(archiveBytes.byteLength / 2));
+      emitChunk(archiveBytes.slice(0, split));
+      emitChunk(archiveBytes.slice(split));
+    },
+  });
+}
+
+async function inspectSource(input: {
+  readonly fixture: DistributionFixture;
+  readonly verification: SyntheticFirmwareDistributionManifestRootVerificationResult;
+  readonly archiveBytes?: Uint8Array;
+  readonly compressedBytes?: Uint8Array;
+}): Promise<SyntheticSourceInventoryInspectionResult> {
+  return inspectSyntheticCorrespondingSourceArchive({
+    distributionRootVerification: input.verification,
+    compressedSourceBytes: input.compressedBytes ?? input.fixture.sourceBytes,
+    digestProvider,
+    decompressionProvider: sourceDecompressionProvider(
+      input.archiveBytes ?? input.fixture.sourceArchiveBytes,
+    ),
   });
 }
 
@@ -1202,6 +1405,555 @@ describe("Synthetic distribution Manifest and bounded acquisition", () => {
       status: "BLOCKED",
       reason: "SYNTHETIC_DISTRIBUTION_ARTIFACT_MISMATCH",
     });
+  });
+
+  it("rejects forged roots, altered source bytes, and invalid digest providers", async () => {
+    const fixture = await createFixture();
+    await expect(
+      inspectSyntheticCorrespondingSourceArchive({
+        distributionRootVerification: {
+          status: "VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT",
+        } as SyntheticFirmwareDistributionManifestRootVerificationResult,
+        compressedSourceBytes: fixture.sourceBytes,
+        digestProvider,
+        decompressionProvider: sourceDecompressionProvider(
+          fixture.sourceArchiveBytes,
+        ),
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "DISTRIBUTION_EVIDENCE",
+      reason: "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_VERIFICATION_NOT_PROVEN",
+    });
+
+    const key = await createTestKey("synthetic:source-input");
+    const root = requireRoot(rootPayload([key]));
+    const verification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(
+        fixture.distributionPayload,
+        key,
+      ),
+    });
+    const alteredBytes = fixture.sourceBytes.slice();
+    alteredBytes[alteredBytes.byteLength - 1] =
+      (alteredBytes[alteredBytes.byteLength - 1] ?? 0) ^ 1;
+    await expect(
+      inspectSource({
+        fixture,
+        verification,
+        compressedBytes: alteredBytes,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "COMPRESSED_INPUT",
+      reason: "SYNTHETIC_SOURCE_ARCHIVE_DIGEST_MISMATCH",
+    });
+    await expect(
+      inspectSyntheticCorrespondingSourceArchive({
+        distributionRootVerification: verification,
+        compressedSourceBytes: fixture.sourceBytes,
+        digestProvider: {
+          assurance: "CRYPTOGRAPHIC",
+        } as FirmwareArtifactDigestProvider,
+        decompressionProvider: sourceDecompressionProvider(
+          fixture.sourceArchiveBytes,
+        ),
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "COMPRESSED_INPUT",
+      reason: "SYNTHETIC_EVIDENCE_DIGEST_PROVIDER_INVALID",
+    });
+  });
+
+  it("bounds source decompression chunks and propagates cancellation", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:source-decompression");
+    const root = requireRoot(rootPayload([key]));
+    const verification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(
+        fixture.distributionPayload,
+        key,
+      ),
+    });
+
+    const runs: readonly {
+      readonly emit: (sink: (chunk: Uint8Array) => void) => void;
+      readonly reason: string;
+    }[] = [
+      {
+        emit: (sink) => sink(new Uint8Array()),
+        reason: "SYNTHETIC_SOURCE_DECOMPRESSION_CHUNK_INVALID",
+      },
+      {
+        emit: (sink) => sink(new Uint8Array(64 * 1024 + 1)),
+        reason: "SYNTHETIC_SOURCE_DECOMPRESSION_CHUNK_SIZE_LIMIT_EXCEEDED",
+      },
+    ];
+    for (const run of runs) {
+      await expect(
+        inspectSyntheticCorrespondingSourceArchive({
+          distributionRootVerification: verification,
+          compressedSourceBytes: fixture.sourceBytes,
+          digestProvider,
+          decompressionProvider: {
+            assurance: "SYNTHETIC_ONLY",
+            async decompressGzip(_bytes, emitChunk) {
+              run.emit(emitChunk);
+            },
+          },
+        }),
+      ).resolves.toMatchObject({
+        status: "BLOCKED",
+        stage: "DECOMPRESSION",
+        reason: run.reason,
+      });
+    }
+
+    await expect(
+      inspectSyntheticCorrespondingSourceArchive({
+        distributionRootVerification: verification,
+        compressedSourceBytes: fixture.sourceBytes,
+        digestProvider,
+        decompressionProvider: sourceDecompressionProvider(
+          fixture.sourceArchiveBytes,
+        ),
+        signal: { aborted: true },
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("inspects exact source inventory and notices before a blocked source-review join", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:source-review");
+    const root = requireRoot(rootPayload([key]));
+    const catalogCandidate = await createCatalogCandidate({
+      fixture,
+      key,
+      root,
+    });
+    const distributionRootVerification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(
+        fixture.distributionPayload,
+        key,
+      ),
+    });
+    const [firmwareAcquisition, sourceAcquisition, noticesAcquisition] =
+      await acquireAll({ fixture, verification: distributionRootVerification });
+    const distributionCandidate =
+      createSyntheticFirmwareDistributionCandidateEvidence({
+        catalogCandidate,
+        distributionRootVerification,
+        firmwareAcquisition: firmwareAcquisition!,
+        correspondingSourceAcquisition: sourceAcquisition!,
+        noticesAcquisition: noticesAcquisition!,
+      });
+
+    const sourceInspection = await inspectSource({
+      fixture,
+      verification: distributionRootVerification,
+    });
+    expect(sourceInspection).toMatchObject({
+      status: "VERIFIED_SYNTHETIC_SOURCE_INVENTORY",
+      validationLevel: "SYNTHETIC_ONLY",
+      sourceArchiveFormat: "RESTRICTED_USTAR_GZIP_V1",
+      inventoryCanonicalization: "RFC8785",
+      decompressionLinkage: "GZIP_CRC32_AND_ISIZE_MATCHED_SYNTHETIC_ONLY",
+      sourceEntryCount: 1,
+      buildInputCount: 6,
+      licenseEntryCount: 1,
+      buildInputDisposition: "EXACT_DECLARED_INPUTS_LINKED_TO_ARCHIVE_ENTRIES",
+      sourceCompleteness: "NOT_PROVEN",
+      byteDisposition: "HASHED_INSPECTED_AND_DISCARDED",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+    });
+    expect(Reflect.ownKeys(sourceInspection)).not.toContain("entries");
+    expect(Reflect.ownKeys(sourceInspection)).not.toContain("bytes");
+
+    const noticesInspection = await inspectSyntheticFirmwareNotices({
+      distributionRootVerification,
+      sourceInspection,
+      noticesBytes: fixture.noticesBytes,
+      digestProvider,
+    });
+    expect(noticesInspection).toMatchObject({
+      status: "VERIFIED_SYNTHETIC_NOTICE_SCHEMA",
+      noticeCanonicalization: "RFC8785",
+      noticeEntryCount: 1,
+      sourceLinkDisposition: "EXACT_LICENSE_ENTRIES_LINKED_BY_PATH_AND_SHA256",
+      legalCompleteness: "NOT_PROVEN",
+      byteDisposition: "HASHED_INSPECTED_AND_DISCARDED",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+    });
+
+    const result = createSyntheticFirmwareSourceReviewEvidence({
+      distributionCandidate,
+      sourceInspection,
+      noticesInspection,
+    });
+    expect(result).toEqual({
+      status: "SYNTHETIC_FIRMWARE_SOURCE_REVIEW_EVIDENCE",
+      validationLevel: "SYNTHETIC_ONLY",
+      distributionStatus: "SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE",
+      sourceStatus: "VERIFIED_SYNTHETIC_SOURCE_INVENTORY",
+      noticesStatus: "VERIFIED_SYNTHETIC_NOTICE_SCHEMA",
+      trustStatus: "UNVERIFIED_NO_TRUST_ROOT",
+      catalogDisposition: "NOT_ADMITTED_UNTRUSTED_SYNTHETIC",
+      buildInputDisposition: "EXACT_DECLARED_INPUTS_LINKED_TO_ARCHIVE_ENTRIES",
+      correspondingSourceDisposition:
+        "BOUNDED_INVENTORY_INSPECTED_COMPLETENESS_UNPROVEN",
+      noticesDisposition:
+        "SCHEMA_AND_SOURCE_LINKS_INSPECTED_LEGAL_COMPLETENESS_UNPROVEN",
+      reproducibilityDisposition: "NOT_PROVEN",
+      byteDisposition: "HASHED_INSPECTED_AND_DISCARDED",
+      writeDisposition: "BLOCKED_SYNTHETIC_FIXTURE",
+      targetIdentifier: "synthetic.tx.2g4",
+      rootVersion: 1,
+      releaseSequence: 7,
+      artifactSha256: fixture.distributionPayload.artifact.sha256,
+      correspondingSourceSha256:
+        fixture.distributionPayload.correspondingSource.sha256,
+      noticesSha256: fixture.distributionPayload.notices.sha256,
+      sourceEntryCount: 1,
+      buildInputCount: 6,
+      noticeEntryCount: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain("void synthetic_fixture");
+    expect(Reflect.ownKeys(result)).not.toContain("bytes");
+  });
+
+  it("rejects false decompression, malformed tar, and incomplete build-input declarations", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:source-adversarial");
+    const root = requireRoot(rootPayload([key]));
+    const verification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(
+        fixture.distributionPayload,
+        key,
+      ),
+    });
+
+    const wrongOutput = fixture.sourceArchiveBytes.slice();
+    wrongOutput[600] = (wrongOutput[600] ?? 0) ^ 1;
+    await expect(
+      inspectSource({
+        fixture,
+        verification,
+        archiveBytes: wrongOutput,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "DECOMPRESSION",
+      reason: "SYNTHETIC_SOURCE_GZIP_TRAILER_MISMATCH",
+    });
+
+    const malformedTar = fixture.sourceArchiveBytes.slice();
+    malformedTar[148] = malformedTar[148] === 0x30 ? 0x31 : 0x30;
+    const malformedGzip = gzip(malformedTar);
+    const malformedPayload: SyntheticFirmwareDistributionManifestPayloadV1 = {
+      ...fixture.distributionPayload,
+      correspondingSource: {
+        ...fixture.distributionPayload.correspondingSource,
+        sizeBytes: malformedGzip.byteLength,
+        sha256: await sha256(malformedGzip),
+      },
+    };
+    const malformedVerification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(malformedPayload, key),
+    });
+    await expect(
+      inspectSource({
+        fixture,
+        verification: malformedVerification,
+        archiveBytes: malformedTar,
+        compressedBytes: malformedGzip,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "ARCHIVE",
+      reason: "SYNTHETIC_SOURCE_TAR_INVALID",
+    });
+
+    const incompleteInventoryTar = fixture.sourceArchiveBytes.slice();
+    const buildInputToken = textEncoder.encode('"toolchain"');
+    const buildInputOffset = findBytes(incompleteInventoryTar, buildInputToken);
+    expect(buildInputOffset).toBeGreaterThanOrEqual(0);
+    incompleteInventoryTar[buildInputOffset + buildInputToken.byteLength - 2] =
+      0x4e;
+    const incompleteInventoryGzip = gzip(incompleteInventoryTar);
+    const incompletePayload: SyntheticFirmwareDistributionManifestPayloadV1 = {
+      ...fixture.distributionPayload,
+      correspondingSource: {
+        ...fixture.distributionPayload.correspondingSource,
+        sizeBytes: incompleteInventoryGzip.byteLength,
+        sha256: await sha256(incompleteInventoryGzip),
+      },
+    };
+    const incompleteVerification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(incompletePayload, key),
+    });
+    await expect(
+      inspectSource({
+        fixture,
+        verification: incompleteVerification,
+        archiveBytes: incompleteInventoryTar,
+        compressedBytes: incompleteInventoryGzip,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "INVENTORY",
+      reason: "SYNTHETIC_SOURCE_INVENTORY_SCHEMA_INVALID",
+    });
+  });
+
+  it("requires canonical notices and exact source-license linkage", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:notice-adversarial");
+    const root = requireRoot(rootPayload([key]));
+
+    const nonCanonicalNotices = textEncoder.encode(
+      ` ${new TextDecoder().decode(fixture.noticesBytes)}`,
+    );
+    const nonCanonicalPayload: SyntheticFirmwareDistributionManifestPayloadV1 =
+      {
+        ...fixture.distributionPayload,
+        notices: {
+          ...fixture.distributionPayload.notices,
+          sizeBytes: nonCanonicalNotices.byteLength,
+          sha256: await sha256(nonCanonicalNotices),
+        },
+      };
+    const nonCanonicalVerification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(nonCanonicalPayload, key),
+    });
+    const sourceInspection = await inspectSource({
+      fixture,
+      verification: nonCanonicalVerification,
+    });
+    await expect(
+      inspectSyntheticFirmwareNotices({
+        distributionRootVerification: nonCanonicalVerification,
+        sourceInspection,
+        noticesBytes: nonCanonicalNotices,
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "NOTICE_SCHEMA",
+      reason: "SYNTHETIC_NOTICE_NOT_CANONICAL",
+    });
+
+    const mismatchedNotices = fixture.noticesBytes.slice();
+    const noticeDigestKey = textEncoder.encode('"noticeSha256":"');
+    const noticeDigestKeyOffset = findBytes(mismatchedNotices, noticeDigestKey);
+    expect(noticeDigestKeyOffset).toBeGreaterThanOrEqual(0);
+    const noticeDigestOffset =
+      noticeDigestKeyOffset + noticeDigestKey.byteLength;
+    mismatchedNotices.fill(0x30, noticeDigestOffset, noticeDigestOffset + 64);
+    const mismatchedPayload: SyntheticFirmwareDistributionManifestPayloadV1 = {
+      ...fixture.distributionPayload,
+      notices: {
+        ...fixture.distributionPayload.notices,
+        sizeBytes: mismatchedNotices.byteLength,
+        sha256: await sha256(mismatchedNotices),
+      },
+    };
+    const mismatchedVerification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(mismatchedPayload, key),
+    });
+    const matchingSourceInspection = await inspectSource({
+      fixture,
+      verification: mismatchedVerification,
+    });
+    await expect(
+      inspectSyntheticFirmwareNotices({
+        distributionRootVerification: mismatchedVerification,
+        sourceInspection: matchingSourceInspection,
+        noticesBytes: mismatchedNotices,
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "SOURCE_LINKAGE",
+      reason: "SYNTHETIC_NOTICE_SOURCE_LINK_MISMATCH",
+    });
+  });
+
+  it("rejects altered notice bytes before schema inspection", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:notice-input");
+    const root = requireRoot(rootPayload([key]));
+    const verification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(
+        fixture.distributionPayload,
+        key,
+      ),
+    });
+    const sourceInspection = await inspectSource({ fixture, verification });
+    await expect(
+      inspectSyntheticFirmwareNotices({
+        distributionRootVerification: verification,
+        sourceInspection,
+        noticesBytes: fixture.noticesBytes.slice(0, -1),
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "NOTICE_INPUT",
+      reason: "SYNTHETIC_NOTICE_SIZE_MISMATCH",
+    });
+    const alteredNotices = fixture.noticesBytes.slice();
+    alteredNotices[10] = (alteredNotices[10] ?? 0) ^ 1;
+    await expect(
+      inspectSyntheticFirmwareNotices({
+        distributionRootVerification: verification,
+        sourceInspection,
+        noticesBytes: alteredNotices,
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "NOTICE_INPUT",
+      reason: "SYNTHETIC_NOTICE_DIGEST_MISMATCH",
+    });
+  });
+
+  it("rejects cloned source evidence and cloned final-join inputs", async () => {
+    const fixture = await createFixture();
+    const key = await createTestKey("synthetic:source-branding");
+    const root = requireRoot(rootPayload([key]));
+    const catalogCandidate = await createCatalogCandidate({
+      fixture,
+      key,
+      root,
+    });
+    const distributionRootVerification = await verifyDistributionAgainstRoot({
+      root,
+      manifest: await signDistributionManifest(
+        fixture.distributionPayload,
+        key,
+      ),
+    });
+    const acquisitions = await acquireAll({
+      fixture,
+      verification: distributionRootVerification,
+    });
+    const distributionCandidate =
+      createSyntheticFirmwareDistributionCandidateEvidence({
+        catalogCandidate,
+        distributionRootVerification,
+        firmwareAcquisition: acquisitions[0]!,
+        correspondingSourceAcquisition: acquisitions[1]!,
+        noticesAcquisition: acquisitions[2]!,
+      });
+    const sourceInspection = await inspectSource({
+      fixture,
+      verification: distributionRootVerification,
+    });
+    await expect(
+      inspectSyntheticFirmwareNotices({
+        distributionRootVerification,
+        sourceInspection: { ...sourceInspection },
+        noticesBytes: fixture.noticesBytes,
+        digestProvider,
+      }),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "SOURCE_EVIDENCE",
+      reason: "SYNTHETIC_SOURCE_INVENTORY_INSPECTION_NOT_PROVEN",
+    });
+    const noticesInspection = await inspectSyntheticFirmwareNotices({
+      distributionRootVerification,
+      sourceInspection,
+      noticesBytes: fixture.noticesBytes,
+      digestProvider,
+    });
+    expect(
+      createSyntheticFirmwareSourceReviewEvidence({
+        distributionCandidate: { ...distributionCandidate },
+        sourceInspection,
+        noticesInspection,
+      }),
+    ).toEqual({
+      status: "BLOCKED",
+      reason: "SYNTHETIC_DISTRIBUTION_CANDIDATE_NOT_PROVEN",
+    });
+    expect(
+      createSyntheticFirmwareSourceReviewEvidence({
+        distributionCandidate,
+        sourceInspection: { ...sourceInspection },
+        noticesInspection,
+      }),
+    ).toEqual({
+      status: "BLOCKED",
+      reason: "SYNTHETIC_SOURCE_INVENTORY_INSPECTION_NOT_PROVEN",
+    });
+  });
+
+  it("never invokes accessors while inspecting or joining source evidence", async () => {
+    let getterExecuted = false;
+    const sourceInput = Object.create(null) as Record<string, unknown>;
+    for (const key of [
+      "distributionRootVerification",
+      "compressedSourceBytes",
+      "digestProvider",
+      "decompressionProvider",
+    ]) {
+      Object.defineProperty(sourceInput, key, {
+        enumerable: true,
+        get() {
+          getterExecuted = true;
+          return {};
+        },
+      });
+    }
+    await expect(
+      inspectSyntheticCorrespondingSourceArchive(
+        sourceInput as Parameters<
+          typeof inspectSyntheticCorrespondingSourceArchive
+        >[0],
+      ),
+    ).resolves.toEqual({
+      status: "BLOCKED",
+      stage: "DISTRIBUTION_EVIDENCE",
+      reason: "SYNTHETIC_DISTRIBUTION_MANIFEST_ROOT_VERIFICATION_NOT_PROVEN",
+    });
+    expect(getterExecuted).toBe(false);
+
+    const joinInput = Object.create(null) as Record<string, unknown>;
+    for (const key of [
+      "distributionCandidate",
+      "sourceInspection",
+      "noticesInspection",
+    ]) {
+      Object.defineProperty(joinInput, key, {
+        enumerable: true,
+        get() {
+          getterExecuted = true;
+          return {};
+        },
+      });
+    }
+    expect(
+      createSyntheticFirmwareSourceReviewEvidence(
+        joinInput as Parameters<
+          typeof createSyntheticFirmwareSourceReviewEvidence
+        >[0],
+      ),
+    ).toEqual({
+      status: "BLOCKED",
+      reason: "SYNTHETIC_DISTRIBUTION_CANDIDATE_NOT_PROVEN",
+    });
+    expect(getterExecuted).toBe(false);
   });
 
   it("never invokes accessors while proving final evidence", async () => {

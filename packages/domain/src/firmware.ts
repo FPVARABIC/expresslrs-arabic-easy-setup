@@ -296,6 +296,77 @@ export const maximumSyntheticCorrespondingSourceBundleSizeBytes =
   64 * 1024 * 1024;
 export const maximumSyntheticNoticeBundleSizeBytes = 4 * 1024 * 1024;
 
+/**
+ * Lab-only source-review limits. The archive is still an untrusted Synthetic
+ * fixture and these constants do not admit a production source origin.
+ */
+export const maximumSyntheticSourceArchiveDecompressedSizeBytes =
+  64 * 1024 * 1024;
+export const maximumSyntheticSourceArchiveEntries = 128;
+export const maximumSyntheticSourceInventoryBytes = 64 * 1024;
+export const maximumSyntheticNoticeEntries = 128;
+
+export const syntheticCorrespondingSourceInventorySchemaVersion = "1" as const;
+export const syntheticCorrespondingSourceInventoryType =
+  "synthetic-corresponding-source-inventory" as const;
+export const syntheticFirmwareNoticeSchemaVersion = "1" as const;
+export const syntheticFirmwareNoticeType =
+  "synthetic-firmware-notices" as const;
+
+export const syntheticSourceInventoryEntryRoles = [
+  "SOURCE",
+  "BUILD_INPUT",
+  "LICENSE",
+] as const;
+export type SyntheticSourceInventoryEntryRole =
+  (typeof syntheticSourceInventoryEntryRoles)[number];
+
+/** Exact declaration set required before a Synthetic build-input link exists. */
+export const syntheticDeclaredBuildInputIds = [
+  "upstream-source",
+  "targets-snapshot",
+  "patch-set",
+  "toolchain",
+  "dependency-lock",
+  "build-configuration",
+] as const;
+export type SyntheticDeclaredBuildInputId =
+  (typeof syntheticDeclaredBuildInputIds)[number];
+
+export interface SyntheticSourceInventoryEntryV1 {
+  readonly path: string;
+  readonly role: SyntheticSourceInventoryEntryRole;
+  readonly buildInputId: SyntheticDeclaredBuildInputId | null;
+  readonly sizeBytes: number;
+  readonly sha256: string;
+}
+
+export interface SyntheticCorrespondingSourceInventoryV1 {
+  readonly sourceInventorySchema: typeof syntheticCorrespondingSourceInventorySchemaVersion;
+  readonly inventoryType: typeof syntheticCorrespondingSourceInventoryType;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifactSha256: string;
+  readonly entries: readonly SyntheticSourceInventoryEntryV1[];
+}
+
+export interface SyntheticFirmwareNoticeEntryV1 {
+  readonly componentId: string;
+  readonly licenseExpression: string;
+  readonly noticeSha256: string;
+  readonly sourcePath: string;
+}
+
+export interface SyntheticFirmwareNoticesV1 {
+  readonly noticeSchema: typeof syntheticFirmwareNoticeSchemaVersion;
+  readonly noticeType: typeof syntheticFirmwareNoticeType;
+  readonly targetIdentifier: string;
+  readonly releaseSequence: number;
+  readonly artifactSha256: string;
+  readonly correspondingSourceSha256: string;
+  readonly entries: readonly SyntheticFirmwareNoticeEntryV1[];
+}
+
 export interface SyntheticFirmwareObjectAcquisitionRequest {
   readonly schemaVersion: "1";
   readonly objectRole: SyntheticFirmwareDistributionObjectRole;

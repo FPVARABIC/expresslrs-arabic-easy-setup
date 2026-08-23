@@ -9,6 +9,7 @@ export * from "./firmware-distribution-candidate.js";
 export * from "./firmware-distribution-manifest.js";
 export * from "./firmware-manifest.js";
 export * from "./firmware-root-metadata.js";
+export * from "./firmware-source-evidence.js";
 export * from "./firmware-trust-state.js";
 export * from "./firmware-update.js";
 export * from "./firmware-update-provider-selection.js";

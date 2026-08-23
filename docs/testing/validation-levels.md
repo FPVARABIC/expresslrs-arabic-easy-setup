@@ -41,6 +41,10 @@ does not validate the reported Target, device family, browser, or Hardware.
 | Acquisition `VERIFIED_SYNTHETIC_ACQUISITION` | A Synthetic provider emitted the complete signed object through bounded chunks; Core required an unchanged exact-URL receipt, matched SHA-256, discarded its byte copies, and returned no writable bytes |
 | Source/notice `EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED` | The exact signed bundle bytes were present; archive contents, build correspondence, notice syntax, and legal completeness were not established |
 | Distribution candidate `SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE` | Internally branded catalog, distribution-root, Firmware acquisition, source acquisition, and notice acquisition evidence all identify one parsed root, Target, release, and artifact |
+| Source inventory `VERIFIED_SYNTHETIC_SOURCE_INVENTORY` | The exact signed gzip passed Synthetic CRC32/ISIZE output linkage; its restricted USTAR entries exactly matched one canonical inventory, and all listed file sizes/SHA-256 values matched |
+| Build inputs `EXACT_DECLARED_INPUTS_LINKED_TO_ARCHIVE_ENTRIES` | The six required Synthetic input IDs each point to one exact hashed archive entry; truth, sufficiency, execution, and reproducibility remain unproven |
+| Notices `VERIFIED_SYNTHETIC_NOTICE_SCHEMA` | Exact signed canonical notice JSON names the same Target/release/artifact/source and links all and only declared license entries by path and SHA-256; legal completeness is unproven |
+| Source review `SYNTHETIC_FIRMWARE_SOURCE_REVIEW_EVIDENCE` | Internally branded distribution candidate, source inspection, and notice inspection identify one distribution/root and exact three object digests; no bytes, Catalog admission, or writer path is produced |
 | Catalog `NOT_ADMITTED_UNTRUSTED_SYNTHETIC` | Candidate evidence exists for software tests only; no Target Catalog record or release authority was created |
 | Write `BLOCKED_SYNTHETIC_FIXTURE` | The evidence is structurally unable to authorize or feed a current Firmware writer |
 | `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |
