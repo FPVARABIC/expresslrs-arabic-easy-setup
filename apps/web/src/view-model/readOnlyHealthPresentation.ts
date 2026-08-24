@@ -15,10 +15,7 @@ export const readOnlyHealthPresentationCheckIds = Object.freeze([
   "CONNECTION_STABILITY",
 ] as const satisfies readonly ReadOnlyHealthCheckId[]);
 
-export type ReadOnlyHealthPresentationTone =
-  | "SAFE"
-  | "ATTENTION"
-  | "BLOCKED";
+export type ReadOnlyHealthPresentationTone = "SAFE" | "ATTENTION" | "BLOCKED";
 
 export interface ReadOnlyHealthPresentationRow {
   readonly id: ReadOnlyHealthCheckId;
@@ -138,14 +135,10 @@ function overallPresentation(overall: ReadOnlyHealthOverall): {
   });
 }
 
-function rebuildChecks(value: unknown): ReadonlyMap<
-  ReadOnlyHealthCheckId,
-  ReadOnlyHealthCheckStatus
-> {
-  const rebuilt = new Map<
-    ReadOnlyHealthCheckId,
-    ReadOnlyHealthCheckStatus
-  >();
+function rebuildChecks(
+  value: unknown,
+): ReadonlyMap<ReadOnlyHealthCheckId, ReadOnlyHealthCheckStatus> {
+  const rebuilt = new Map<ReadOnlyHealthCheckId, ReadOnlyHealthCheckStatus>();
 
   if (!Array.isArray(value)) {
     return rebuilt;
