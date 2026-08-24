@@ -107,7 +107,7 @@ Current validation is software-only:
 
 The health implementation has 9 focused adversarial tests, the diagnostic composition adapter adds 8 tests, the Advanced presentation model adds 6 tests, and the isolated React panel adds 4 tests.
 
-The current reviewed M5 software checkpoint is `5243d1505962df7882b32453db911431dfc7c24e`. GitHub Actions CI run #84 passed the complete clean-install quality, test, build, license, and high-severity advisory gates with 529/529 Vitest cases across 38 test files. It also verified 272 lockfile entries, 9 workspace dependency boundaries, 113 local links across 64 Markdown files, 248 dependency license records with 0 reviewed exceptions, and no known high-severity vulnerability.
+The current reviewed M5 software checkpoint is `5243d1505962df7882b32453db911431dfc7c24e`. GitHub Actions CI run #84 passed the complete clean-install quality, test, build, license, and high-severity advisory gates with 529/529 Vitest cases across 38 test files. It also verified 272 lockfile entries, 9 workspace dependency boundaries, 95 local links across 64 Markdown files, 248 dependency license records with 0 reviewed exceptions, and no known high-severity vulnerability.
 
 ## Next software-only slice
 

@@ -67,7 +67,7 @@ CI run #84 passed:
 - TypeScript strict checking;
 - dependency-boundary verification for 9 workspace packages;
 - Browser security-header verification;
-- Markdown-link verification: 113 local links across 64 Markdown files;
+- Markdown-link verification: 95 local links across 64 Markdown files;
 - complete `MASTER_PLAN.md` contract verification;
 - Vitest: 38/38 files, 529/529 tests;
 - production Web build;
