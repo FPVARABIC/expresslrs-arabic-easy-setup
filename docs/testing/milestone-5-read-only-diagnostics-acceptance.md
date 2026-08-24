@@ -2,12 +2,12 @@
 
 ## Scope
 
-This checkpoint accepts the software-only read-only Diagnostics foundation, its safe report-to-health composition adapter, and the isolated Advanced-mode presentation boundary. It does not accept a physical diagnostics provider, Hardware writes, automatic repair, Firmware flashing, RF changes, or Hardware validation.
+This checkpoint accepts the software-only read-only Diagnostics foundation, its safe report-to-health composition adapter, and its explicit-read-gated Advanced-mode application wiring. It does not accept a physical diagnostics provider, Hardware writes, automatic repair, Firmware flashing, RF changes, or Hardware validation.
 
 ## Candidate
 
-- current reviewed software checkpoint: `5243d1505962df7882b32453db911431dfc7c24e`
-- GitHub Actions: CI run #84
+- current reviewed software checkpoint: `f1128b3d288113967e7d1377e377c01a2bf5f2dd`
+- GitHub Actions: [CI run #88](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32778550160)
 - validation level: `BUILD_TESTED`
 - Hardware validation: `NONE`
 - write disposition: `BLOCKED_NO_HARDWARE_AUTHORITY`
@@ -25,7 +25,7 @@ The Diagnostics package has a deterministic health assessment over six fixed evi
 
 It also has a Core-owned adapter that composes the existing privacy-safe diagnostic report into the assessment while independently allowlisting supplemental compatibility, Binding and Firmware states.
 
-The Web package now adds a fixed Advanced-mode presentation model and an isolated React panel. The presenter revalidates the Core assessment envelope and exposes only six fixed rows, translation keys, status labels and presentation tones. The panel receives only this presentation model and has no device-command or automatic-repair callback.
+The Web package has a fixed Advanced-mode presentation model and React panel. The application wires them only after an explicit Local HTTP read, composes only the privacy-safe report plus deliberately unknown compatibility/Binding/Firmware states, and clears the panel when the origin changes. The presenter revalidates the Core assessment envelope and exposes only six fixed rows, translation keys, status labels and presentation tones. The panel receives only this presentation model and has no device-command or automatic-repair callback.
 
 Acceptance requires all of the following:
 
@@ -45,7 +45,11 @@ Acceptance requires all of the following:
 - `STABLE_OBSERVED` is derived only from a diagnostic report that has already admitted a consistent reconnect comparison;
 - failed reads map configuration availability to attention, while cancellation remains unknown rather than falsely unsupported;
 - extra raw/secret-like properties on report, assessment, or supplemental input are ignored;
-- the isolated presentation renders exactly six health rows and no repair/action button;
+- the presentation remains absent from Easy Mode and before an explicit Advanced-mode device read;
+- the wired presentation renders exactly six health rows and no repair/action button;
+- a self-reported Target never becomes a guessed compatibility or approved Firmware result;
+- changing the selected origin clears the previous assessment;
+- a stable connection result appears only after the existing manual reconnect comparison becomes consistent;
 - the Arabic presentation uses existing translations and contains no question-form punctuation;
 - the ordinary Easy UI remains unchanged with exactly three primary actions.
 
@@ -57,9 +61,9 @@ The composition adapter adds 8 focused tests in `packages/diagnostics/src/read-o
 
 The Advanced presentation model adds 6 focused tests in `apps/web/src/view-model/readOnlyHealthPresentation.test.ts`.
 
-The isolated React panel adds 4 focused tests in `apps/web/src/components/ReadOnlyHealthPanel.test.tsx`.
+The React panel adds 4 focused tests in `apps/web/src/components/ReadOnlyHealthPanel.test.tsx`. The existing application integration suite now also asserts Advanced-only visibility, explicit-read gating, safe composition, origin reset, and reconnect-category updates.
 
-CI run #84 passed:
+[CI run #88](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32778550160) passed on the exact wiring candidate:
 
 - frozen dependency install and supply-chain policy for 272 lockfile entries;
 - Prettier;
@@ -78,7 +82,7 @@ CI run #84 passed:
 
 This acceptance does not claim:
 
-- that the new health panel is wired into the normal application yet;
+- continuous monitoring or an automatic live-connection claim;
 - Hardware-tested diagnostics;
 - real-device Binding state verification beyond existing evidence boundaries;
 - an admitted production Target Catalog;
@@ -90,4 +94,4 @@ This acceptance does not claim:
 
 ## Exit status
 
-The software-only M5 Diagnostics foundation, safe diagnostic composition adapter, and isolated Advanced presentation boundary are accepted at `BUILD_TESTED` for continued construction. Physical validation and every real write path remain separate future gates. The next software step is application wiring behind Advanced Mode only.
+The software-only M5 Diagnostics foundation, safe diagnostic composition adapter, and explicit-read-gated Advanced application wiring are accepted at `BUILD_TESTED`. Physical validation, production trust, and every real write path remain separate future gates. The next promotion gate is the documented read-only Hardware/Browser matrix.

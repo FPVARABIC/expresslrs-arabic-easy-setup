@@ -47,15 +47,17 @@ Connection stability is not inferred from a single successful read. `STABLE_OBSE
 
 ## Advanced-mode presentation boundary
 
-The Web package now contains a separate presentation model, `createReadOnlyHealthPresentation`, and an isolated `ReadOnlyHealthPanel` component intended for Advanced Mode only.
+The Web package contains a separate presentation model, `createReadOnlyHealthPresentation`, and a `ReadOnlyHealthPanel` component wired into Advanced Mode only.
 
 The presentation model accepts the already-rebuilt Core health assessment, revalidates its fixed envelope and converts it into exactly six rows with translation keys and presentation tones. It deliberately ignores findings and every extra runtime property, so raw device values, provider diagnostics, recommendation payloads and secret-like fields cannot become UI data by accident.
 
 A forged assessment that claims a different write disposition fails closed to a blocked presentation with unknown rows. Accessor-backed hostile input is never executed.
 
-The component itself receives only this fixed presentation model. It renders no automatic-repair button and has no callback capable of issuing a device command. Arabic and English use the existing translation catalog, and the focused Arabic test rejects question-form punctuation.
+The application creates the existing privacy-safe Local HTTP support report after an explicit read, supplies only `UNKNOWN` compatibility, Binding, and Firmware supplemental states, passes the result through the Core adapter, and then gives only the fixed presentation model to the component. It does not infer a Target Catalog match or approved Firmware state from self-reported device values.
 
-This presentation component is validated in isolation before it is wired into the existing Advanced workspace. The ordinary Easy Mode remains unchanged with exactly three primary actions.
+The component renders no automatic-repair button and has no callback capable of issuing a device command. Arabic and English use the translation catalog, and the Arabic integration checks reject question-form punctuation.
+
+The panel is absent from Easy Mode, absent when Advanced Mode is first opened, and appears only after an explicit Local HTTP read has produced a safe categorical report. Changing the selected device origin clears the prior report and the panel. A consistent manual reconnect can update only the reviewed connection category. The ordinary Easy Mode remains unchanged with exactly three primary actions.
 
 ## Fail-closed behavior
 
@@ -105,13 +107,13 @@ Current validation is software-only:
 - no real writer is admitted;
 - no Hardware, RF, range, reliability, recovery, or safe-update claim is made.
 
-The health implementation has 9 focused adversarial tests, the diagnostic composition adapter adds 8 tests, the Advanced presentation model adds 6 tests, and the isolated React panel adds 4 tests.
+The health implementation has 9 focused adversarial tests, the diagnostic composition adapter adds 8 tests, the Advanced presentation model adds 6 tests, and the React panel adds 4 focused tests. Application integration tests additionally verify Advanced-only visibility, explicit-read gating, six fixed rows, no guessed compatibility, no raw-value reflection, no action button, origin-reset behavior, and reconnect-category updates.
 
-The current reviewed M5 software checkpoint is `5243d1505962df7882b32453db911431dfc7c24e`. GitHub Actions CI run #84 passed the complete clean-install quality, test, build, license, and high-severity advisory gates with 529/529 Vitest cases across 38 test files. It also verified 272 lockfile entries, 9 workspace dependency boundaries, 95 local links across 64 Markdown files, 248 dependency license records with 0 reviewed exceptions, and no known high-severity vulnerability.
+The reviewed Advanced wiring checkpoint is `f1128b3d288113967e7d1377e377c01a2bf5f2dd`. GitHub Actions [CI run #88](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32778550160) passed the complete clean-install quality, test, build, license, and high-severity advisory gates with 529/529 Vitest cases across 38 test files. It also verified 272 lockfile entries, 9 workspace dependency boundaries, 95 local links across 64 Markdown files, 248 dependency license records with 0 reviewed exceptions, and no known high-severity vulnerability. Local measured coverage is 92.81% lines and 88.38% branches across the workspace; the Web application reaches 97.51% lines and 92.14% branches.
 
-## Next software-only slice
+## Next validation gate
 
-The next M5 work is to wire the already-tested `ReadOnlyHealthPanel` into the existing Advanced workspace without expanding the ordinary three-action Easy UI. That wiring must preserve:
+The Advanced application wiring is complete at `BUILD_TESTED`. Further promotion requires the documented external read-only Hardware/Browser matrix while preserving:
 
 - no raw-value propagation;
 - no guessed Target or compatibility;
@@ -119,4 +121,4 @@ The next M5 work is to wire the already-tested `ReadOnlyHealthPanel` into the ex
 - no device write authority;
 - no Hardware validation claim before physical evidence exists.
 
-A later physical diagnostics provider remains a separate gate and must not be inferred from this software-only foundation.
+A physical diagnostics provider, real Hardware observations, and any production trust or write authority remain separate gates and must not be inferred from this software-only foundation.
