@@ -38,6 +38,9 @@ describe("ReadOnlyHealthPanel", () => {
   it("renders only the six fixed health rows plus the read-only boundary", () => {
     const presentation = renderPanel(healthyAssessment(), "en");
 
+    expect(
+      screen.getByRole("heading", { name: "Read-only device health" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Detection confidence")).toBeInTheDocument();
     expect(screen.getByText("Target")).toBeInTheDocument();
     expect(
@@ -56,7 +59,9 @@ describe("ReadOnlyHealthPanel", () => {
   it("uses Arabic translations without introducing question-form prompts", () => {
     renderPanel(healthyAssessment(), "ar");
 
-    const panel = screen.getByRole("region");
+    const panel = screen.getByRole("region", {
+      name: "حالة الجهاز للقراءة فقط",
+    });
     expect(panel.textContent).not.toContain("؟");
     expect(panel.textContent).not.toContain("?");
   });

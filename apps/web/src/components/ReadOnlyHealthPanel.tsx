@@ -18,9 +18,10 @@ export function ReadOnlyHealthPanel({
   return (
     <section
       className="technical-panel read-only-health-panel"
-      aria-label={translate("advanced.heading")}
+      aria-label={translate("advanced.health.heading")}
       data-health-tone={presentation.tone}
     >
+      <h3>{translate("advanced.health.heading")}</h3>
       <div className="read-only-health-summary" role="status">
         <strong>{translate(presentation.overallKey)}</strong>
         <p>{translate(presentation.summaryKey)}</p>

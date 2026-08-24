@@ -204,6 +204,7 @@ export const en = {
   "safety.readOnlyDescription":
     "This screen uses deterministic mock scenarios. Hardware access and write providers are intentionally disabled.",
   "advanced.heading": "Technical details",
+  "advanced.health.heading": "Read-only device health",
   "advanced.session": "Session",
   "advanced.owner": "Session owner",
   "advanced.ownerValue": "Web foundation preview",

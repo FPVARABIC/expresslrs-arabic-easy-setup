@@ -1333,6 +1333,25 @@ svg {
   background: rgba(7, 17, 28, 0.58);
 }
 
+.read-only-health-panel h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+.read-only-health-summary {
+  margin-block-end: 1rem;
+}
+
+.read-only-health-summary p,
+.read-only-health-boundary {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+}
+
+.read-only-health-boundary {
+  margin-block-start: 1rem;
+}
+
 .advanced-section {
   margin-block-start: 1.25rem;
   padding: 1.3rem;

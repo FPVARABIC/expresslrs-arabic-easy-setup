@@ -203,6 +203,7 @@ export const ar = {
   "safety.readOnlyDescription":
     "تعرض هذه الشاشة سيناريوهات محاكاة حتمية. الوصول إلى الأجهزة والكتابة عليها غير مفعّلين عمدًا.",
   "advanced.heading": "التفاصيل التقنية",
+  "advanced.health.heading": "حالة الجهاز للقراءة فقط",
   "advanced.session": "جلسة الاتصال",
   "advanced.owner": "مالك الجلسة",
   "advanced.ownerValue": "معاينة Web التأسيسية",

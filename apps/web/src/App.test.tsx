@@ -82,6 +82,9 @@ describe("Arabic-first Web foundation", () => {
         name: "اقرأ معلومات جهاز ExpressLRS عبر Wi-Fi",
       }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "حالة الجهاز للقراءة فقط" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("أدلة هوية الجهاز")).not.toBeInTheDocument();
     expect(document.querySelectorAll("button.task-card")).toHaveLength(3);
     expect(document.body.textContent).not.toMatch(/[؟?]/u);
@@ -120,6 +123,9 @@ describe("Arabic-first Web foundation", () => {
     expect(
       screen.getByRole("button", { name: "قراءة معلومات الجهاز" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "حالة الجهاز للقراءة فقط" }),
+    ).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -160,6 +166,30 @@ describe("Arabic-first Web foundation", () => {
     expect(
       screen.getByRole("button", { name: "إعادة قراءة معلومات الجهاز" }),
     ).toBeInTheDocument();
+    const healthPanel = screen.getByRole("region", {
+      name: "حالة الجهاز للقراءة فقط",
+    });
+    expect(
+      within(healthPanel).getByText("العمليات الحساسة متوقفة"),
+    ).toBeInTheDocument();
+    expect(within(healthPanel).getAllByRole("term")).toHaveLength(6);
+    expect(within(healthPanel).getAllByRole("definition")).toHaveLength(6);
+    expect(
+      within(healthPanel).getByText("الإعدادات الضرورية"),
+    ).toBeInTheDocument();
+    expect(within(healthPanel).getByText("مكتمل")).toBeInTheDocument();
+    const compatibilityRow = within(healthPanel)
+      .getByText("تعريف الجهاز (Target)")
+      .closest("div");
+    expect(compatibilityRow).not.toBeNull();
+    expect(
+      within(compatibilityRow as HTMLElement).getByText("غير معروف"),
+    ).toBeInTheDocument();
+    expect(within(healthPanel).queryByRole("button")).not.toBeInTheDocument();
+    expect(healthPanel.textContent).not.toMatch(
+      /Example|EXAMPLE|4\.1\.0|private/iu,
+    );
+    expect(healthPanel.textContent).not.toMatch(/[؟?]/u);
     expect(screen.queryByText("private-device-ssid")).not.toBeInTheDocument();
     expect(screen.queryByText("private-home-network")).not.toBeInTheDocument();
     expect(screen.queryByText("private-password")).not.toBeInTheDocument();
@@ -452,6 +482,16 @@ describe("Arabic-first Web foundation", () => {
         exact: false,
       }),
     ).toBeInTheDocument();
+    const healthPanel = screen.getByRole("region", {
+      name: "حالة الجهاز للقراءة فقط",
+    });
+    const connectionRow = within(healthPanel)
+      .getByText("الاتصال")
+      .closest("div");
+    expect(connectionRow).not.toBeNull();
+    expect(
+      within(connectionRow as HTMLElement).getByText("مكتمل"),
+    ).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
@@ -670,6 +710,9 @@ describe("Arabic-first Web foundation", () => {
       screen.queryByRole("button", { name: "نسخ تفاصيل الدعم الآمنة" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("تم جمع معلومات الجهاز")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "حالة الجهاز للقراءة فقط" }),
+    ).not.toBeInTheDocument();
   });
 
   it("localizes the selected scenario values in Arabic and English", async () => {

@@ -6,9 +6,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type {
-  ReadOnlyReconnectState,
-  ReadOnlyStageCategory,
+import {
+  createReadOnlyHealthAssessmentFromDiagnosticReport,
+  type ReadOnlyReconnectState,
+  type ReadOnlyStageCategory,
 } from "@elrs-easy/diagnostics";
 import { scrubAuditDetails } from "@elrs-easy/domain";
 import {
@@ -46,6 +47,8 @@ import {
   type LocalHttpDiscoveryOutcome,
   type LocalHttpFactKey,
 } from "./view-model/localHttpDiscovery";
+import { ReadOnlyHealthPanel } from "./components/ReadOnlyHealthPanel";
+import { createReadOnlyHealthPresentation } from "./view-model/readOnlyHealthPresentation";
 
 type TaskId = "bind" | "update" | "setup";
 type CopyState = "idle" | "copied" | "failed";
@@ -95,6 +98,12 @@ const realOriginDefinitions: readonly {
   { origin: expressLrsLocalHttpOrigins[2], labelKey: "real.origin.tx" },
 ];
 
+const unknownReadOnlyHealthSupplemental = Object.freeze({
+  compatibility: "UNKNOWN",
+  binding: "UNKNOWN",
+  firmware: "UNKNOWN",
+} as const);
+
 function cancelledLocalHttpOutcome(
   observedStages: readonly ReadOnlyStageCategory[],
 ): LocalHttpDiscoveryOutcome {
@@ -138,6 +147,7 @@ export function App() {
   const [realReconnectState, setRealReconnectState] =
     useState<ReadOnlyReconnectState>("NOT_ATTEMPTED");
   const [realAttempts, setRealAttempts] = useState(0);
+  const [realBaselineAvailable, setRealBaselineAvailable] = useState(false);
   const [realCopyState, setRealCopyState] = useState<CopyState>("idle");
   const [realCopyRunning, setRealCopyRunning] = useState(false);
   const demoRequestSequence = useRef(0);
@@ -166,6 +176,23 @@ export function App() {
     scenarioId,
   );
   const direction = getDirection(locale);
+  const realHealthPresentation = useMemo(
+    () =>
+      realOutcome === null
+        ? null
+        : createReadOnlyHealthPresentation(
+            createReadOnlyHealthAssessmentFromDiagnosticReport(
+              createLocalHttpSupportReport({
+                outcome: realOutcome,
+                attempts: realAttempts,
+                baselineAvailable: realBaselineAvailable,
+                reconnectState: realReconnectState,
+              }),
+              unknownReadOnlyHealthSupplemental,
+            ),
+          ),
+    [realAttempts, realBaselineAvailable, realOutcome, realReconnectState],
+  );
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -202,6 +229,7 @@ export function App() {
     setRealProgress([]);
     setRealReconnectState("NOT_ATTEMPTED");
     setRealAttempts(0);
+    setRealBaselineAvailable(false);
     setRealCopyState("idle");
     setRealCopyRunning(false);
     realAttemptSequence.current = 0;
@@ -257,6 +285,7 @@ export function App() {
         if (outcome.state === "SUCCESS") {
           if (baseline === null) {
             realBaselineFacts.current = outcome.facts;
+            setRealBaselineAvailable(true);
             setRealReconnectState("NOT_ATTEMPTED");
             realReconnectPending.current = false;
           } else if (realReconnectPending.current) {
@@ -318,7 +347,7 @@ export function App() {
     const requestId = ++realCopyRequestSequence.current;
     const outcome = realOutcome;
     const attempts = realAttempts;
-    const baselineAvailable = realBaselineFacts.current !== null;
+    const baselineAvailable = realBaselineAvailable;
     const reconnectState = realReconnectState;
     setRealCopyState("idle");
     setRealCopyRunning(true);
@@ -765,6 +794,13 @@ export function App() {
                 cancelButtonRef={realCancelButton}
                 resultSummaryRef={realResultSummary}
               />
+
+              {realHealthPresentation === null ? null : (
+                <ReadOnlyHealthPanel
+                  presentation={realHealthPresentation}
+                  translate={t}
+                />
+              )}
 
               <div className="technical-panel">
                 <dl className="technical-grid">
