@@ -12,11 +12,13 @@ Phase 0 خرجت إلى Foundation/Mock فقط، مع بقاء Hardware/write/re
 - [حدود Core API التجريبية](core-api.md).
 - [مسارات Binding/Update التجريبية وحالات الفشل](mock-workflows.md).
 - [مرشح Milestone 2A للاتصال الحقيقي للقراءة فقط](milestone-2-read-only-device.md).
+- [أساس Milestone 5 للتشخيص البرمجي للقراءة فقط](milestone-5-read-only-diagnostics.md).
 - [ADR-0010: قرار Local HTTP للقراءة فقط](../adr/ADR-0010-read-only-local-http-discovery.md).
 - [أدلة قبول Milestone 1 الحالية](../testing/milestone-1-acceptance.md).
 - [أدلة قبول مرشح Milestone 2A](../testing/milestone-2-read-only-acceptance.md).
+- [أدلة قبول أساس Milestone 5 للتشخيص للقراءة فقط](../testing/milestone-5-read-only-diagnostics-acceptance.md).
 - [إجراء اختبار العتاد والمتصفح للقراءة فقط](../testing/milestone-2-hardware-browser-runbook.md).
 
 البنية ليست API مستقرة بعد. يوجد Browser Local HTTP candidate للقراءة فقط،
-دون اعتماد Hardware أو Target ودون أي write capability. لا يوجد Provider
-حقيقي لـAndroid أو Firmware write.
+ودائرة Diagnostics برمجية للقراءة فقط، دون اعتماد Hardware أو Target ودون أي
+write capability. لا يوجد Provider حقيقي لـAndroid أو Firmware write.
