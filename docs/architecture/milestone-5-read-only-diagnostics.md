@@ -45,6 +45,18 @@ A configuration read is considered available only after a consistent successful 
 
 Connection stability is not inferred from a single successful read. `STABLE_OBSERVED` requires a report whose own contract has admitted `CONSISTENT`, which in turn requires an available baseline, at least two attempts and a successful comparison. `REQUIRED` or `CHANGED` maps to reconnect attention; no reconnect evidence maps to `UNKNOWN`.
 
+## Advanced-mode presentation boundary
+
+The Web package now contains a separate presentation model, `createReadOnlyHealthPresentation`, and an isolated `ReadOnlyHealthPanel` component intended for Advanced Mode only.
+
+The presentation model accepts the already-rebuilt Core health assessment, revalidates its fixed envelope and converts it into exactly six rows with translation keys and presentation tones. It deliberately ignores findings and every extra runtime property, so raw device values, provider diagnostics, recommendation payloads and secret-like fields cannot become UI data by accident.
+
+A forged assessment that claims a different write disposition fails closed to a blocked presentation with unknown rows. Accessor-backed hostile input is never executed.
+
+The component itself receives only this fixed presentation model. It renders no automatic-repair button and has no callback capable of issuing a device command. Arabic and English use the existing translation catalog, and the focused Arabic test rejects question-form punctuation.
+
+This presentation component is validated in isolation before it is wired into the existing Advanced workspace. The ordinary Easy Mode remains unchanged with exactly three primary actions.
+
 ## Fail-closed behavior
 
 Runtime input is treated as untrusted.
@@ -55,7 +67,7 @@ Runtime input is treated as untrusted.
 - an identity below `CONFIRMED` blocks the assessment;
 - explicit unsupported compatibility blocks the assessment;
 - unknown or attention states never become a pass;
-- forged diagnostic envelopes fall back to unknown evidence;
+- forged diagnostic or health envelopes fall back to blocked/unknown evidence;
 - all returned structures are immutable.
 
 The overall assessment is one of:
@@ -93,13 +105,13 @@ Current validation is software-only:
 - no real writer is admitted;
 - no Hardware, RF, range, reliability, recovery, or safe-update claim is made.
 
-The health implementation has 9 focused adversarial tests, and the diagnostic composition adapter adds 8 more tests covering valid composition, missing reconnect evidence, failed/cancelled reads, forged envelopes, hostile accessors, invalid supplemental states and secret-like extra properties.
+The health implementation has 9 focused adversarial tests, the diagnostic composition adapter adds 8 tests, the Advanced presentation model adds 6 tests, and the isolated React panel adds 4 tests.
 
-The current M5 checkpoint is `d44191909961665dff8359093b200b800bc1fc9c`. GitHub Actions CI run #75 passed the complete clean-install quality, test, build, license, and high-severity advisory gates with 519/519 Vitest cases across 36 test files.
+The current reviewed M5 software checkpoint is `5243d1505962df7882b32453db911431dfc7c24e`. GitHub Actions CI run #84 passed the complete clean-install quality, test, build, license, and high-severity advisory gates with 529/529 Vitest cases across 38 test files. It also verified 272 lockfile entries, 9 workspace dependency boundaries, 113 local links across 64 Markdown files, 248 dependency license records with 0 reviewed exceptions, and no known high-severity vulnerability.
 
 ## Next software-only slice
 
-The next M5 work can expose this already-safe assessment through an Advanced-mode presentation layer without expanding the ordinary three-action Easy UI. That presentation must preserve:
+The next M5 work is to wire the already-tested `ReadOnlyHealthPanel` into the existing Advanced workspace without expanding the ordinary three-action Easy UI. That wiring must preserve:
 
 - no raw-value propagation;
 - no guessed Target or compatibility;
