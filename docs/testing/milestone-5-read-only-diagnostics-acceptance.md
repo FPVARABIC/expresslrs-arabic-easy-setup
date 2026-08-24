@@ -2,12 +2,12 @@
 
 ## Scope
 
-This checkpoint accepts only the software-only read-only Diagnostics foundation. It does not accept a physical diagnostics provider, Hardware writes, automatic repair, Firmware flashing, RF changes, or Hardware validation.
+This checkpoint accepts only the software-only read-only Diagnostics foundation and its safe report-to-health composition adapter. It does not accept a physical diagnostics provider, Hardware writes, automatic repair, Firmware flashing, RF changes, or Hardware validation.
 
 ## Candidate
 
-- implementation candidate: `16f62614f59aa654a096aeb2993ae9eaeb1e8135`
-- GitHub Actions: CI run #68
+- implementation candidate: `d44191909961665dff8359093b200b800bc1fc9c`
+- GitHub Actions: CI run #75
 - validation level: `BUILD_TESTED`
 - Hardware validation: `NONE`
 - write disposition: `BLOCKED_NO_HARDWARE_AUTHORITY`
@@ -23,6 +23,8 @@ The Diagnostics package now has a deterministic health assessment over six fixed
 5. configuration read availability;
 6. connection stability.
 
+It also has a Core-owned adapter that composes the existing privacy-safe diagnostic report into the assessment while independently allowlisting supplemental compatibility, Binding and Firmware states.
+
 Acceptance requires all of the following:
 
 - a fully healthy software evidence set may return `READ_ONLY_HEALTHY` but still cannot authorize any write;
@@ -34,13 +36,20 @@ Acceptance requires all of the following:
 - attacker-controlled strings are not reflected into output;
 - output collections and nested findings are immutable;
 - no raw device values, identifiers, credentials, or persistence are included;
-- every finding has `automaticFixAvailable: false`.
+- every finding has `automaticFixAvailable: false`;
+- a forged report envelope falls back to unknown evidence;
+- a successful read does not imply stable connection by itself;
+- `STABLE_OBSERVED` is derived only from a diagnostic report that has already admitted a consistent reconnect comparison;
+- failed reads map configuration availability to attention, while cancellation remains unknown rather than falsely unsupported;
+- extra raw/secret-like properties on report or supplemental input are ignored.
 
 ## Automated evidence
 
-The M5 slice adds 9 focused tests in `packages/diagnostics/src/read-only-health.test.ts`.
+The M5 health slice adds 9 focused tests in `packages/diagnostics/src/read-only-health.test.ts`.
 
-CI run #68 passed:
+The composition adapter adds 8 focused tests in `packages/diagnostics/src/read-only-health-adapter.test.ts`.
+
+CI run #75 passed:
 
 - frozen dependency install and supply-chain policy for 272 lockfile entries;
 - Prettier;
@@ -48,9 +57,9 @@ CI run #68 passed:
 - TypeScript strict checking;
 - dependency-boundary verification for 9 workspace packages;
 - Browser security-header verification;
-- Markdown-link verification;
+- Markdown-link verification: 113 local links across 64 Markdown files;
 - complete `MASTER_PLAN.md` contract verification;
-- Vitest: 35/35 files, 511/511 tests;
+- Vitest: 36/36 files, 519/519 tests;
 - production Web build;
 - dependency license policy for 248 package/version records across 11 observed expressions with 0 reviewed exceptions;
 - high-severity dependency audit with no known vulnerabilities.
@@ -70,4 +79,4 @@ This acceptance does not claim:
 
 ## Exit status
 
-The software-only M5 Diagnostics foundation is accepted at `BUILD_TESTED` for continued construction. Physical validation and every real write path remain separate future gates.
+The software-only M5 Diagnostics foundation and safe diagnostic composition adapter are accepted at `BUILD_TESTED` for continued construction. Physical validation and every real write path remain separate future gates.
