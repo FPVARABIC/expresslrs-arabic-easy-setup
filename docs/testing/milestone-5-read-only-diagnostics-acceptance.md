@@ -2,19 +2,19 @@
 
 ## Scope
 
-This checkpoint accepts only the software-only read-only Diagnostics foundation and its safe report-to-health composition adapter. It does not accept a physical diagnostics provider, Hardware writes, automatic repair, Firmware flashing, RF changes, or Hardware validation.
+This checkpoint accepts the software-only read-only Diagnostics foundation, its safe report-to-health composition adapter, and the isolated Advanced-mode presentation boundary. It does not accept a physical diagnostics provider, Hardware writes, automatic repair, Firmware flashing, RF changes, or Hardware validation.
 
 ## Candidate
 
-- implementation candidate: `d44191909961665dff8359093b200b800bc1fc9c`
-- GitHub Actions: CI run #75
+- current reviewed software checkpoint: `5243d1505962df7882b32453db911431dfc7c24e`
+- GitHub Actions: CI run #84
 - validation level: `BUILD_TESTED`
 - Hardware validation: `NONE`
 - write disposition: `BLOCKED_NO_HARDWARE_AUTHORITY`
 
 ## Accepted behavior
 
-The Diagnostics package now has a deterministic health assessment over six fixed evidence categories:
+The Diagnostics package has a deterministic health assessment over six fixed evidence categories:
 
 1. device identity;
 2. compatibility;
@@ -24,6 +24,8 @@ The Diagnostics package now has a deterministic health assessment over six fixed
 6. connection stability.
 
 It also has a Core-owned adapter that composes the existing privacy-safe diagnostic report into the assessment while independently allowlisting supplemental compatibility, Binding and Firmware states.
+
+The Web package now adds a fixed Advanced-mode presentation model and an isolated React panel. The presenter revalidates the Core assessment envelope and exposes only six fixed rows, translation keys, status labels and presentation tones. The panel receives only this presentation model and has no device-command or automatic-repair callback.
 
 Acceptance requires all of the following:
 
@@ -35,13 +37,17 @@ Acceptance requires all of the following:
 - accessor-backed hostile fields are not executed;
 - attacker-controlled strings are not reflected into output;
 - output collections and nested findings are immutable;
-- no raw device values, identifiers, credentials, or persistence are included;
+- no raw device values, identifiers, credentials, persistence, or raw findings are included in the presentation boundary;
 - every finding has `automaticFixAvailable: false`;
-- a forged report envelope falls back to unknown evidence;
+- a forged diagnostic report envelope falls back to unknown evidence;
+- a forged health assessment that changes the write disposition falls back to a blocked presentation;
 - a successful read does not imply stable connection by itself;
 - `STABLE_OBSERVED` is derived only from a diagnostic report that has already admitted a consistent reconnect comparison;
 - failed reads map configuration availability to attention, while cancellation remains unknown rather than falsely unsupported;
-- extra raw/secret-like properties on report or supplemental input are ignored.
+- extra raw/secret-like properties on report, assessment, or supplemental input are ignored;
+- the isolated presentation renders exactly six health rows and no repair/action button;
+- the Arabic presentation uses existing translations and contains no question-form punctuation;
+- the ordinary Easy UI remains unchanged with exactly three primary actions.
 
 ## Automated evidence
 
@@ -49,7 +55,11 @@ The M5 health slice adds 9 focused tests in `packages/diagnostics/src/read-only-
 
 The composition adapter adds 8 focused tests in `packages/diagnostics/src/read-only-health-adapter.test.ts`.
 
-CI run #75 passed:
+The Advanced presentation model adds 6 focused tests in `apps/web/src/view-model/readOnlyHealthPresentation.test.ts`.
+
+The isolated React panel adds 4 focused tests in `apps/web/src/components/ReadOnlyHealthPanel.test.tsx`.
+
+CI run #84 passed:
 
 - frozen dependency install and supply-chain policy for 272 lockfile entries;
 - Prettier;
@@ -59,7 +69,7 @@ CI run #75 passed:
 - Browser security-header verification;
 - Markdown-link verification: 113 local links across 64 Markdown files;
 - complete `MASTER_PLAN.md` contract verification;
-- Vitest: 36/36 files, 519/519 tests;
+- Vitest: 38/38 files, 529/529 tests;
 - production Web build;
 - dependency license policy for 248 package/version records across 11 observed expressions with 0 reviewed exceptions;
 - high-severity dependency audit with no known vulnerabilities.
@@ -68,6 +78,7 @@ CI run #75 passed:
 
 This acceptance does not claim:
 
+- that the new health panel is wired into the normal application yet;
 - Hardware-tested diagnostics;
 - real-device Binding state verification beyond existing evidence boundaries;
 - an admitted production Target Catalog;
@@ -79,4 +90,4 @@ This acceptance does not claim:
 
 ## Exit status
 
-The software-only M5 Diagnostics foundation and safe diagnostic composition adapter are accepted at `BUILD_TESTED` for continued construction. Physical validation and every real write path remain separate future gates.
+The software-only M5 Diagnostics foundation, safe diagnostic composition adapter, and isolated Advanced presentation boundary are accepted at `BUILD_TESTED` for continued construction. Physical validation and every real write path remain separate future gates. The next software step is application wiring behind Advanced Mode only.
