@@ -3,7 +3,7 @@
 | Field | Value |
 | --- | --- |
 | Date | 2026-08-24 |
-| Phase | Milestone 2A — Hardened read-only real-device candidate |
+| Phase | Milestone 5 — Software-only read-only Diagnostics checkpoint (M2A Hardware gates deferred) |
 | Local branch | `feat/read-only-device-foundation` |
 | Remote repository | `https://github.com/FPVARABIC/expresslrs-arabic-easy-setup`; public repository with M2A [Draft PR #3](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/3) |
 | Public Web preview | [Live GitHub Pages preview](https://fpvarabic.github.io/expresslrs-arabic-easy-setup/); the deployment workflow checks out and revalidates an explicitly reviewed app SHA before publishing |
@@ -80,6 +80,9 @@
 - The Local HTTP transport now uses fixed 256 KiB storage, rejects empty or excessive chunks, enforces a strict JSON/UTF-8 boundary, and releases an origin only after normal completion or proven successful cleanup. A rejected, absent, accessor-backed, or otherwise unprovable cleanup keeps that origin fail-closed quarantined for the current JavaScript realm.
 - Provider-controlled error reasons/details, write receipts, verification diagnostics, reconnect descriptors, and attacker-controlled audit field names no longer cross Workflow/audit export boundaries without a Core-owned rebuild. Accessor-backed provider metadata is treated as absent rather than executed, and Audit output uses bounded counts and fixed categories.
 - A framework-independent Diagnostics package creates value-free, fixed-category support reports and rejects inconsistent success/reconnect claims.
+- M5 adds `createReadOnlyHealthAssessment`, covering identity, compatibility, Binding, Firmware, read-only configuration availability, and observed connection stability with fixed reviewed findings. Even `READ_ONLY_HEALTHY` remains `BLOCKED_NO_HARDWARE_AUTHORITY`, every finding has `automaticFixAvailable: false`, and raw values, identifiers, credentials, and persistence are excluded.
+- A Core-owned M5 adapter now composes the existing privacy-safe read-only diagnostic report into the health assessment using only allowlisted categorical evidence. Forged envelopes, hostile accessors, unknown supplemental states, and raw or secret-like extra properties fail closed; a stable connection is admitted only after the existing report contract has accepted a consistent reconnect comparison with baseline evidence and at least two attempts.
+- M5 implementation candidate `d44191909961665dff8359093b200b800bc1fc9c` passed official CI run #75. The documented checkpoint `1cfa75b2ffa7db10d876f25c2d4eb8783e48e1c4` passed CI run #77 with formatting, zero-warning ESLint, strict TypeScript, nine-package dependency boundaries, Browser security-header checks, 113 local links across 64 Markdown files, the complete Master Plan contract, 519/519 Vitest cases across 36 files, production Web build, 248 dependency license records with zero reviewed exceptions, and no known high-severity advisory.
 - The real-device UI now exposes honest Workflow progress, manual refresh/reconnect snapshot comparison, focus movement, connection guidance, and explicit safe support copy without polling or a live-connection claim.
 - A production `_headers` artifact and deterministic checker restrict CSP connections to self plus the three reviewed ExpressLRS origins and enforce the policy in source/build output.
 - The GitHub Pages preview candidate now derives and verifies the repository base path, injects a partial reviewed CSP meta policy, uses the agreed dark-green/turquoise/pale-yellow direction, keeps Easy tasks first, and ships required runtime/font notices. Official deployment Actions are pinned to immutable SHAs and may upload only the quality-gated Web `dist` artifact.
@@ -89,11 +92,12 @@
 - Every Synthetic update now uses a Core-owned `firmware-update-post-write-v1` plan requiring reconnect, the same session-local device identity, the expected Target, and the expected Firmware version. Strict plan evaluation plus the provider's reviewed verification shape is required for `SUCCESS`; the immutable plan and provenance snapshot are returned as evidence.
 - Candidate `ee8221feebb6b68d591d38581d4b1d2ef0253cc3` passed official [CI run #33](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32426675388) and [run #34](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32426676818). Exact-SHA [reviewed Pages deploy run #4](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32426876024) then passed and the live bundle was verified to contain the canonical multi-method selector while retaining Arabic/RTL and the three-action Easy UI.
 - The first public GitHub Pages deployment passed from `main` in [run #1](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32419758878), after checking out and revalidating exact reviewed app SHA `8889381e9f60e93b647efa02117ae0bf513970f4`. The live page was verified at the repository subpath with Arabic/RTL default, English/LTR switching, Easy tasks before the real-device experiment, Advanced Mode off by default, repository-scoped JS/CSS assets, the reviewed meta CSP, and `no-referrer`. This is still not Hardware or trusted-host evidence.
-- The current local M2A candidate passes formatting, ESLint with zero warnings, TypeScript, nine-package dependency boundaries, security-header checks, 93 local links across 62 Markdown files, the complete Master Plan contract, 502/502 Vitest cases across 34 files, and the production Web/Pages build. The dependency policy verifies 248 package/version records across 11 observed license expressions with no exception, and the high-severity advisory audit reports no known vulnerability. This is not Hardware evidence.
+- The current software candidate passes formatting, ESLint with zero warnings, strict TypeScript, nine-package dependency boundaries, security-header checks, 113 local links across 64 Markdown files, the complete Master Plan contract, 519/519 Vitest cases across 36 files, and the production Web/Pages build. The dependency policy verifies 248 package/version records across 11 observed license expressions with no exception, and the high-severity advisory audit reports no known vulnerability. This remains software evidence only; Hardware validation is None.
 - M2A [Draft PR #3](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/3) remains open and unmerged. The immediately preceding Manifest candidate `9b9544e51107af6fca2847c59e18e3f1f6783672` passed official [CI run #39](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32478925756), [run #40](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32478925760), and exact-SHA [reviewed Pages deploy run #7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/32479022847).
 
 ## In progress
 
+- Continue M5 with an Advanced-mode presentation layer for the already-safe health assessment without changing the ordinary three-action Easy UI, exposing raw values, or granting automatic repair/write authority.
 - Hold the completed software-only provenance chain at `BLOCKED_SYNTHETIC_FIXTURE`; any further promotion requires owner decisions or external evidence rather than another implied trust claim.
 - Review ADR-0016's initial-root ceremony, clock assurance, and proposed atomic IndexedDB bundle before any admission or persistence implementation.
 - Review M2A Draft PR #3 and complete the still-pending M1 owner acceptance review.
@@ -115,6 +119,7 @@
 
 ## Next
 
+- Add the M5 read-only health presentation to Advanced Mode only; keep Easy Mode at exactly three primary actions and do not expose automatic repair or any device write authority.
 - Conduct owner review of M1 evidence and M2A Draft PR #3; keep it Draft until the external gates are resolved.
 - Run the documented read-only Hardware/Browser runbook; record exact device, Firmware, browser, OS, field behavior, disconnect/reconnect, and privacy observations.
 - Keep the real Targets adapter empty/license-safe until upstream permission is resolved; never promote a self-reported Target alone.
