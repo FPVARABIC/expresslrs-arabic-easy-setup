@@ -9,7 +9,10 @@ import { createTranslator } from "@elrs-easy/i18n";
 import { ReadOnlyHealthPanel } from "./ReadOnlyHealthPanel";
 import { createReadOnlyHealthPresentation } from "../view-model/readOnlyHealthPresentation";
 
-function renderPanel(assessment: ReadOnlyHealthAssessment, locale: "ar" | "en") {
+function renderPanel(
+  assessment: ReadOnlyHealthAssessment,
+  locale: "ar" | "en",
+) {
   const presentation = createReadOnlyHealthPresentation(assessment);
   render(
     <ReadOnlyHealthPanel
@@ -37,7 +40,9 @@ describe("ReadOnlyHealthPanel", () => {
 
     expect(screen.getByText("Detection confidence")).toBeInTheDocument();
     expect(screen.getByText("Target")).toBeInTheDocument();
-    expect(screen.getByText("Bind transmitter and receiver")).toBeInTheDocument();
+    expect(
+      screen.getByText("Bind transmitter and receiver"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Firmware")).toBeInTheDocument();
     expect(screen.getByText("Essential settings")).toBeInTheDocument();
     expect(screen.getByText("Connection")).toBeInTheDocument();
@@ -69,7 +74,9 @@ describe("ReadOnlyHealthPanel", () => {
       "en",
     );
 
-    expect(screen.getByText("Sensitive operations are blocked")).toBeInTheDocument();
+    expect(
+      screen.getByText("Sensitive operations are blocked"),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
