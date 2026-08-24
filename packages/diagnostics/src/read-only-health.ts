@@ -51,10 +51,7 @@ export const readOnlyHealthCheckIds = Object.freeze([
 export type ReadOnlyHealthCheckId = (typeof readOnlyHealthCheckIds)[number];
 
 export type ReadOnlyHealthCheckStatus =
-  | "PASS"
-  | "ATTENTION"
-  | "BLOCKED"
-  | "UNKNOWN";
+  "PASS" | "ATTENTION" | "BLOCKED" | "UNKNOWN";
 
 export const readOnlyHealthFindingIds = Object.freeze([
   "IDENTITY_CONFIRMED",
@@ -77,14 +74,11 @@ export const readOnlyHealthFindingIds = Object.freeze([
   "SENSITIVE_ACTIONS_BLOCKED",
   "HARDWARE_VALIDATION_PENDING",
 ] as const);
-export type ReadOnlyHealthFindingId =
-  (typeof readOnlyHealthFindingIds)[number];
+export type ReadOnlyHealthFindingId = (typeof readOnlyHealthFindingIds)[number];
 
 export type ReadOnlyHealthSeverity = "INFO" | "WARNING" | "BLOCKING";
 export type ReadOnlyHealthOverall =
-  | "READ_ONLY_HEALTHY"
-  | "NEEDS_REVIEW"
-  | "BLOCKED";
+  "READ_ONLY_HEALTHY" | "NEEDS_REVIEW" | "BLOCKED";
 
 export interface ReadOnlyHealthInput {
   readonly confidence: DetectionConfidence;
@@ -206,11 +200,7 @@ function evaluateCompatibility(state: ReadOnlyCompatibilityState): {
   if (state === "SUPPORTED_BY_CATALOG") {
     return Object.freeze({
       check: check("COMPATIBILITY", "PASS"),
-      finding: finding(
-        "COMPATIBILITY_SUPPORTED",
-        "INFO",
-        "KEEP_READ_ONLY",
-      ),
+      finding: finding("COMPATIBILITY_SUPPORTED", "INFO", "KEEP_READ_ONLY"),
     });
   }
   if (state === "UNSUPPORTED") {
@@ -255,11 +245,7 @@ function evaluateBinding(state: ReadOnlyBindingState): {
   }
   return Object.freeze({
     check: check("BINDING_STATE", "UNKNOWN"),
-    finding: finding(
-      "BINDING_UNKNOWN",
-      "WARNING",
-      "COLLECT_BINDING_EVIDENCE",
-    ),
+    finding: finding("BINDING_UNKNOWN", "WARNING", "COLLECT_BINDING_EVIDENCE"),
   });
 }
 
