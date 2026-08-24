@@ -114,6 +114,19 @@ Success is `SYNTHETIC_FIRMWARE_SOURCE_REVIEW_EVIDENCE` with:
 All Core copies of compressed source, decompressed archive, entries, and notices
 are cleared or discarded before return. No bytes or copy closure is returned.
 
+## Verification evidence
+
+The adversarial suite directly covers empty, truncated, false-header, and
+digest-mismatched gzip input; invalid, failing, cancelled, late, exception-
+suppressing, oversized, and over-count decompression output; invalid USTAR
+headers, paths, duplicate paths, padding, terminators, entry counts, and entry
+digests; all bounded inventory/notice JSON failure mappings; release and source
+linkage mismatch; and cloned or cross-root evidence joins.
+
+The measured `firmware-source-evidence.ts` module reaches 95.26% statements,
+95.12% lines, and 93.44% branches. These are software-only Synthetic tests and
+do not change any trust, Hardware, distribution, or writer claim.
+
 ## What this does not prove
 
 - The unadmitted root, signer, archive, notices, or declarations belong to this
@@ -153,7 +166,7 @@ catalog-admitted, writable, Hardware-tested, Stable, or supported Firmware.
   linkage to the archive's declared license entries.
 - Catalog admission, production networking, durable trust, and every writer
   remain structurally blocked.
-- The next safe slice can model a bounded Synthetic build-recipe receipt and an
+- The subsequent ADR-0021 slice models a bounded Synthetic build recipe and
   independent fixture-output comparison without invoking a real toolchain or
   admitting production Firmware.
 
@@ -162,5 +175,6 @@ catalog-admitted, writable, Hardware-tested, Stable, or supported Firmware.
 - [ADR-0017: Bounded Synthetic gzip and executable identity](ADR-0017-bounded-synthetic-gzip-and-executable-identity.md)
 - [ADR-0018: Synthetic dual-form Manifest linkage](ADR-0018-synthetic-dual-form-manifest-linkage.md)
 - [ADR-0019: Bounded Synthetic distribution acquisition](ADR-0019-bounded-synthetic-distribution-acquisition.md)
+- [ADR-0021: Bounded Synthetic build recipe and output comparison](ADR-0021-bounded-synthetic-build-recipe-and-output-comparison.md)
 - [Core API Boundary](../architecture/core-api.md)
 - [Validation Levels](../testing/validation-levels.md)
