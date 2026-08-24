@@ -12,7 +12,7 @@ function createSuccessfulReport(
     errorCode: null,
     retryable: false,
     verificationPassed: true,
-    attempts: 1,
+    attempts: reconnectState === "CONSISTENT" ? 2 : 1,
     baselineAvailable: reconnectState === "CONSISTENT",
     reconnectState,
     factCategories: ["TARGET", "FIRMWARE_VERSION", "DEVICE_ROLE"],
