@@ -1,4 +1,5 @@
-# Publishes only the exact reviewed candidate pinned below.\nname: Deploy reviewed Pages candidate
+# Publishes only the exact reviewed candidate pinned below.
+name: Deploy reviewed Pages candidate
 
 on:
   push:
@@ -12,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  REVIEWED_SHA: 89f232dc8d165857809fcd627b356530443e2a40
+  REVIEWED_SHA: f1128b3d288113967e7d1377e377c01a2bf5f2dd
   PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
 
 concurrency:
