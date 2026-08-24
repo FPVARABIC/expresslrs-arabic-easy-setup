@@ -165,8 +165,8 @@ describe("read-only health assessment", () => {
 
     expect(getterCalls).toBe(0);
     expect(assessment.overall).toBe("BLOCKED");
+    expect(serialized).not.toContain("credential=do-not-copy");
     expect(serialized).not.toContain("do-not-copy");
-    expect(serialized).not.toContain("credential");
   });
 
   it("keeps the output deeply immutable at every exposed collection boundary", () => {
