@@ -85,7 +85,7 @@ describe("read-only health assessment", () => {
       id: "COMPATIBILITY",
       status: "BLOCKED",
     });
-    expect(assessment.findings[1].id).toBe("COMPATIBILITY_UNSUPPORTED");
+    expect(assessment.findings[1]?.id).toBe("COMPATIBILITY_UNSUPPORTED");
   });
 
   it("uses review status for non-blocking operational attention", () => {
@@ -184,7 +184,9 @@ describe("read-only health assessment", () => {
     expect(Object.isFrozen(assessment.findings)).toBe(true);
     expect(Object.isFrozen(assessment.privacy)).toBe(true);
     expect(assessment.checks.every((item) => Object.isFrozen(item))).toBe(true);
-    expect(assessment.findings.every((item) => Object.isFrozen(item))).toBe(true);
+    expect(assessment.findings.every((item) => Object.isFrozen(item))).toBe(
+      true,
+    );
   });
 
   it("exports frozen reviewed registries with stable cardinality", () => {
