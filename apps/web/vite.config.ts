@@ -15,7 +15,7 @@ const pagesContentSecurityPolicy = [
   "object-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
-  "worker-src 'none'",
+  "worker-src 'self'",
 ].join("; ");
 
 function normalizeBase(value: string): string {

@@ -134,7 +134,7 @@ function validate(source, label) {
   requireExactDirective(directives, "manifest-src", ["'self'"]);
   requireExactDirective(directives, "script-src", ["'self'"]);
   requireExactDirective(directives, "style-src", ["'self'"]);
-  requireExactDirective(directives, "worker-src", ["'none'"]);
+  requireExactDirective(directives, "worker-src", ["'self'"]);
 
   const connectSources = directives.get("connect-src");
   if (

@@ -67,6 +67,7 @@ jobs:
           pnpm typecheck
           pnpm check:boundaries
           pnpm check:security-headers
+          pnpm check:pwa-safety
           pnpm check:links
           pnpm check:master-plan
           pnpm test

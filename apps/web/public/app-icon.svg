@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ELRS Easy">
+  <rect width="512" height="512" rx="112" fill="#071713"/>
+  <circle cx="256" cy="292" r="38" fill="#6de7d7"/>
+  <path d="M156 260a142 142 0 0 1 200 0" fill="none" stroke="#6de7d7" stroke-width="34" stroke-linecap="round"/>
+  <path d="M102 198a220 220 0 0 1 308 0" fill="none" stroke="#f0dea0" stroke-width="34" stroke-linecap="round"/>
+  <path d="M256 332v82" fill="none" stroke="#6de7d7" stroke-width="34" stroke-linecap="round"/>
+</svg>
