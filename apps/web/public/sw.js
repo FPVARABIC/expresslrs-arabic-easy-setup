@@ -1,3 +1,5 @@
+/* global self, caches */
+
 const CACHE_PREFIX = "elrs-easy-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}v1`;
 const CACHEABLE_DESTINATIONS = new Set([
