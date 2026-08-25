@@ -25,7 +25,9 @@ async function collectFiles(directory, prefix = "") {
   for (const entry of entries) {
     const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isDirectory()) {
-      files.push(...(await collectFiles(path.join(directory, entry.name), relativePath)));
+      files.push(
+        ...(await collectFiles(path.join(directory, entry.name), relativePath)),
+      );
     } else if (entry.isFile() && !excludedFiles.has(relativePath)) {
       files.push(relativePath);
     }
@@ -149,7 +151,11 @@ if (relativeFiles.length === 0 || relativeFiles.length > 256) {
 
 const buildId = await buildShellIdentity(relativeFiles);
 const precacheUrls = Object.freeze(relativeFiles.map(toScopedUrl));
-await writeFile(workerPath, createWorkerSource({ buildId, precacheUrls }), "utf8");
+await writeFile(
+  workerPath,
+  createWorkerSource({ buildId, precacheUrls }),
+  "utf8",
+);
 console.log(
   `Generated versioned PWA worker ${buildId} for ${precacheUrls.length} shell files.`,
 );

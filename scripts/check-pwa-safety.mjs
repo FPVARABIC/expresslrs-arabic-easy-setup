@@ -159,7 +159,9 @@ function validateBuiltWorker(source) {
       url.includes("..") ||
       url.includes("?") ||
       url.includes("#") ||
-      sensitiveFragments.some((fragment) => url.toLowerCase().includes(fragment))
+      sensitiveFragments.some((fragment) =>
+        url.toLowerCase().includes(fragment),
+      )
     ) {
       fail(`built Service Worker contains unsafe precache URL ${String(url)}`);
     }
@@ -229,7 +231,9 @@ if (process.argv.includes("--built")) {
   validateBuiltWorker(builtWorker);
   validateBuiltIndex(builtIndex);
   if (builtManifest !== sourceManifest || builtIcon !== sourceIcon) {
-    fail("built manifest and icon must exactly match the reviewed source files");
+    fail(
+      "built manifest and icon must exactly match the reviewed source files",
+    );
   }
 }
 
