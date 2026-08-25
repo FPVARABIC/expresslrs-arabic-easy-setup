@@ -34,9 +34,8 @@ function browserDocumentUrl(): string | null {
 
 /**
  * Registers only the repository-scoped static Service Worker. Registration
- * never calls update(), skipWaiting(), or any activation shortcut, so a new
- * shell cannot replace an active client in the middle of a future sensitive
- * workflow.
+ * never forces a waiting worker to replace an active client, so a new shell
+ * cannot take over in the middle of a future sensitive workflow.
  */
 export async function registerSafeServiceWorker(
   input: RegisterSafeServiceWorkerInput = {},
