@@ -1,7 +1,5 @@
 export type ServiceWorkerRegistrationOutcome =
-  | "REGISTERED"
-  | "UNAVAILABLE"
-  | "FAILED";
+  "REGISTERED" | "UNAVAILABLE" | "FAILED";
 
 export interface ServiceWorkerRegistrationPort {
   register(
@@ -55,7 +53,10 @@ export async function registerSafeServiceWorker(
     const pageUrl = new URL(documentUrl);
     const scriptUrl = new URL("./sw.js", pageUrl);
     const scopeUrl = new URL("./", pageUrl);
-    if (scriptUrl.origin !== pageUrl.origin || scopeUrl.origin !== pageUrl.origin) {
+    if (
+      scriptUrl.origin !== pageUrl.origin ||
+      scopeUrl.origin !== pageUrl.origin
+    ) {
       return "FAILED";
     }
 

@@ -17,8 +17,7 @@ describe("safe Service Worker registration", () => {
     const outcome = await registerSafeServiceWorker({
       serviceWorker: registrationPort(register),
       secureContext: true,
-      documentUrl:
-        "https://fpvarabic.github.io/expresslrs-arabic-easy-setup/",
+      documentUrl: "https://fpvarabic.github.io/expresslrs-arabic-easy-setup/",
     });
 
     expect(outcome).toBe("REGISTERED");

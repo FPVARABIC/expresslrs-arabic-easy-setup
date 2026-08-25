@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  getLimitedOfflineCopy,
-  type NetworkModeLocale,
-} from "@elrs-easy/i18n";
+import { getLimitedOfflineCopy, type NetworkModeLocale } from "@elrs-easy/i18n";
 
 function readLocale(): NetworkModeLocale {
   return document.documentElement.lang === "en" ? "en" : "ar";

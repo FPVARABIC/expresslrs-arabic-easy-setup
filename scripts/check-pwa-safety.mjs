@@ -40,7 +40,11 @@ function validateManifest(source, label) {
   expectExact(manifest.display, "standalone", `${label} display`);
   expectExact(manifest.lang, "ar", `${label} lang`);
   expectExact(manifest.dir, "rtl", `${label} dir`);
-  expectExact(manifest.background_color, "#071713", `${label} background_color`);
+  expectExact(
+    manifest.background_color,
+    "#071713",
+    `${label} background_color`,
+  );
   expectExact(manifest.theme_color, "#071713", `${label} theme_color`);
   if (!Array.isArray(manifest.icons) || manifest.icons.length !== 1) {
     fail(`${label} must contain exactly one reviewed app icon`);
