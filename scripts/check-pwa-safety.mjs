@@ -16,6 +16,15 @@ const registrationPath = path.join(
   repositoryRoot,
   "apps/web/src/pwa/register-service-worker.ts",
 );
+const mainPath = path.join(repositoryRoot, "apps/web/src/main.tsx");
+const sensitiveFragments = [
+  "/firmware",
+  "/artifacts",
+  "/catalog",
+  "/release",
+  "/update-metadata",
+  "/update-manifest",
+];
 
 function fail(message) {
   throw new Error(`PWA safety policy failed: ${message}`);
@@ -56,43 +65,104 @@ function validateManifest(source, label) {
   expectExact(icon.purpose, "any maskable", `${label} icon purpose`);
 }
 
-function validateWorker(source, label) {
+function requireNoForcedActivation(source, label) {
+  if (/skipWaiting\s*\(|clients\.claim\s*\(/u.test(source)) {
+    fail(`${label} must not force activation into an existing client`);
+  }
+}
+
+function validateSourceWorker(source) {
   const requiredFragments = [
     'const CACHE_PREFIX = "elrs-easy-shell-"',
     'if (request.method !== "GET")',
     "requestUrl.origin !== self.location.origin",
     "SENSITIVE_PATH_FRAGMENTS.some",
     "CACHEABLE_DESTINATIONS.has(request.destination)",
-    "const response = await fetch(request);",
-    "const cached = await cache.match(request);",
-    "event.respondWith(networkFirst(event.request));",
   ];
   for (const fragment of requiredFragments) {
     if (!source.includes(fragment)) {
-      fail(`${label} is missing reviewed guard ${fragment}`);
+      fail(`apps/web/public/sw.js is missing reviewed guard ${fragment}`);
     }
   }
-  for (const sensitiveFragment of [
-    "/firmware",
-    "/artifacts",
-    "/catalog",
-    "/release",
-    "/update-metadata",
-    "/update-manifest",
-  ]) {
-    if (!source.includes(`"${sensitiveFragment}"`)) {
-      fail(`${label} does not explicitly bypass ${sensitiveFragment}`);
+  for (const fragment of sensitiveFragments) {
+    if (!source.includes(`"${fragment}"`)) {
+      fail(`apps/web/public/sw.js does not explicitly bypass ${fragment}`);
     }
   }
-  if (/skipWaiting\s*\(|clients\.claim\s*\(/u.test(source)) {
-    fail(`${label} must not force activation into an existing client`);
+  requireNoForcedActivation(source, "apps/web/public/sw.js");
+}
+
+function extractPrecacheUrls(source) {
+  const startMarker = "const PRECACHE_URLS = Object.freeze(";
+  const start = source.indexOf(startMarker);
+  if (start < 0) {
+    fail("built Service Worker is missing PRECACHE_URLS");
   }
-  const networkIndex = source.indexOf("const response = await fetch(request);");
-  const cacheFallbackIndex = source.indexOf(
-    "const cached = await cache.match(request);",
+  const valueStart = start + startMarker.length;
+  const end = source.indexOf(");", valueStart);
+  if (end < 0) {
+    fail("built Service Worker has malformed PRECACHE_URLS");
+  }
+  try {
+    return JSON.parse(source.slice(valueStart, end));
+  } catch {
+    fail("built Service Worker PRECACHE_URLS must be canonical JSON data");
+  }
+}
+
+function validateBuiltWorker(source) {
+  if (!source.includes('const BUILD_KIND = "production-precache"')) {
+    fail("built Service Worker must be the production precache worker");
+  }
+  const cacheMatch = source.match(
+    /const CACHE_NAME = `\$\{CACHE_PREFIX\}([0-9a-f]{16})`;/u,
   );
-  if (networkIndex < 0 || cacheFallbackIndex <= networkIndex) {
-    fail(`${label} must be network-first with cache only as failure fallback`);
+  if (cacheMatch === null) {
+    fail("built Service Worker cache identity must be a 16-hex build digest");
+  }
+  if (!source.includes('self.addEventListener("install"')) {
+    fail("built Service Worker must atomically precache during install");
+  }
+  if (!source.includes("cache.addAll(PRECACHE_URLS)")) {
+    fail("built Service Worker must fail installation if shell precache fails");
+  }
+  if (!source.includes('cache.match("./index.html")')) {
+    fail("built Service Worker must bind navigation to its versioned shell");
+  }
+  requireNoForcedActivation(source, "built Service Worker");
+  for (const fragment of sensitiveFragments) {
+    if (!source.includes(`"${fragment}"`)) {
+      fail(`built Service Worker does not explicitly bypass ${fragment}`);
+    }
+  }
+
+  const urls = extractPrecacheUrls(source);
+  if (!Array.isArray(urls) || urls.length === 0 || urls.length > 256) {
+    fail("built Service Worker precache list is outside the reviewed bound");
+  }
+  if (new Set(urls).size !== urls.length) {
+    fail("built Service Worker precache list contains duplicates");
+  }
+  for (const required of [
+    "./index.html",
+    "./manifest.webmanifest",
+    "./app-icon.svg",
+  ]) {
+    if (!urls.includes(required)) {
+      fail(`built Service Worker precache list is missing ${required}`);
+    }
+  }
+  for (const url of urls) {
+    if (
+      typeof url !== "string" ||
+      !url.startsWith("./") ||
+      url.includes("..") ||
+      url.includes("?") ||
+      url.includes("#") ||
+      sensitiveFragments.some((fragment) => url.toLowerCase().includes(fragment))
+    ) {
+      fail(`built Service Worker contains unsafe precache URL ${String(url)}`);
+    }
   }
 }
 
@@ -123,16 +193,24 @@ function validateRegistration(source) {
   }
 }
 
+function validateMain(source) {
+  if (!source.includes("if (import.meta.env.PROD)")) {
+    fail("Service Worker registration must be production-only");
+  }
+}
+
 const sourceManifest = await readFile(sourceManifestPath, "utf8");
 const sourceWorker = await readFile(sourceWorkerPath, "utf8");
 const sourceIcon = await readFile(sourceIconPath, "utf8");
 const sourceIndex = await readFile(sourceIndexPath, "utf8");
 const registration = await readFile(registrationPath, "utf8");
+const mainSource = await readFile(mainPath, "utf8");
 
 validateManifest(sourceManifest, "apps/web/public/manifest.webmanifest");
-validateWorker(sourceWorker, "apps/web/public/sw.js");
+validateSourceWorker(sourceWorker);
 validateSourceIndex(sourceIndex);
 validateRegistration(registration);
+validateMain(mainSource);
 
 if (!sourceIcon.startsWith("<svg") || sourceIcon.includes("<script")) {
   fail("the reviewed SVG icon must be a static script-free SVG");
@@ -148,14 +226,10 @@ if (process.argv.includes("--built")) {
   const builtIndex = await readFile(path.join(distRoot, "index.html"), "utf8");
 
   validateManifest(builtManifest, "apps/web/dist/manifest.webmanifest");
-  validateWorker(builtWorker, "apps/web/dist/sw.js");
+  validateBuiltWorker(builtWorker);
   validateBuiltIndex(builtIndex);
-  if (
-    builtManifest !== sourceManifest ||
-    builtWorker !== sourceWorker ||
-    builtIcon !== sourceIcon
-  ) {
-    fail("built PWA static files must exactly match the reviewed source files");
+  if (builtManifest !== sourceManifest || builtIcon !== sourceIcon) {
+    fail("built manifest and icon must exactly match the reviewed source files");
   }
 }
 

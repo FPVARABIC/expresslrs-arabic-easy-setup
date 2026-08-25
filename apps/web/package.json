@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node ../../scripts/check-security-headers.mjs --built && node ../../scripts/check-pwa-safety.mjs --built",
+    "build": "tsc --noEmit && vite build && node ../../scripts/build-pwa-worker.mjs && node ../../scripts/check-security-headers.mjs --built && node ../../scripts/check-pwa-safety.mjs --built",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

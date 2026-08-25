@@ -28,10 +28,12 @@ function startServiceWorkerRegistration() {
   void registerSafeServiceWorker();
 }
 
-if (document.readyState === "complete") {
-  startServiceWorkerRegistration();
-} else {
-  window.addEventListener("load", startServiceWorkerRegistration, {
-    once: true,
-  });
+if (import.meta.env.PROD) {
+  if (document.readyState === "complete") {
+    startServiceWorkerRegistration();
+  } else {
+    window.addEventListener("load", startServiceWorkerRegistration, {
+      once: true,
+    });
+  }
 }
