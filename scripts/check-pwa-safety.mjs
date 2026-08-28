@@ -16,6 +16,10 @@ const registrationPath = path.join(
   repositoryRoot,
   "apps/web/src/pwa/register-service-worker.ts",
 );
+const updateNoticePath = path.join(
+  repositoryRoot,
+  "apps/web/src/pwa/ApplicationUpdateNotice.tsx",
+);
 const mainPath = path.join(repositoryRoot, "apps/web/src/main.tsx");
 const sensitiveFragments = [
   "/firmware",
@@ -195,9 +199,24 @@ function validateRegistration(source) {
   }
 }
 
-function validateMain(source) {
-  if (!source.includes("if (import.meta.env.PROD)")) {
+function validateUpdateNotice(source) {
+  if (!source.includes("enabled = import.meta.env.PROD")) {
     fail("Service Worker registration must be production-only");
+  }
+  if (!source.includes("register = registerSafeServiceWorker")) {
+    fail("the update notice must use the reviewed registration boundary");
+  }
+  if (source.includes("skipWaiting") || source.includes("location.reload")) {
+    fail("the update notice must not activate or reload a waiting worker");
+  }
+}
+
+function validateMain(source) {
+  if (!source.includes("<ApplicationUpdateNotice />")) {
+    fail("the Web shell must mount the reviewed application-update notice");
+  }
+  if (source.includes("registerSafeServiceWorker")) {
+    fail("main.tsx must not bypass the reviewed update-notice boundary");
   }
 }
 
@@ -206,12 +225,14 @@ const sourceWorker = await readFile(sourceWorkerPath, "utf8");
 const sourceIcon = await readFile(sourceIconPath, "utf8");
 const sourceIndex = await readFile(sourceIndexPath, "utf8");
 const registration = await readFile(registrationPath, "utf8");
+const updateNotice = await readFile(updateNoticePath, "utf8");
 const mainSource = await readFile(mainPath, "utf8");
 
 validateManifest(sourceManifest, "apps/web/public/manifest.webmanifest");
 validateSourceWorker(sourceWorker);
 validateSourceIndex(sourceIndex);
 validateRegistration(registration);
+validateUpdateNotice(updateNotice);
 validateMain(mainSource);
 
 if (!sourceIcon.startsWith("<svg") || sourceIcon.includes("<script")) {
