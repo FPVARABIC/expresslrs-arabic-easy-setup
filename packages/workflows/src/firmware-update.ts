@@ -5,12 +5,13 @@ import {
 } from "@elrs-easy/compatibility";
 import {
   rebuildDiscoveryDescriptors,
+  rebuildProviderId,
   type DeviceSessionManager,
 } from "@elrs-easy/device";
 import type {
+  ArtifactManifestTrustStatus,
   ArtifactProvenance,
   ArtifactProvenanceValidationLevel,
-  ArtifactManifestTrustStatus,
   CancellationSignal,
   DeviceDescriptor,
   DeviceSession,
@@ -29,15 +30,16 @@ import {
   verifyFirmwareArtifactBytes,
 } from "./firmware-artifact-bytes.js";
 import { selectFirmwareUpdateProvider } from "./firmware-update-provider-selection.js";
-
 import {
   acquireWorkflowSession,
   assertNotAborted,
   identityGateError,
   inspectHeldDevice,
   isAbortError,
+  readOwnDataProperty,
   readProviderDataProperty,
   releaseIfHeld,
+  requireDataMethod,
   safeOperationError,
 } from "./sensitive-operation-helpers.js";
 import type {
@@ -71,9 +73,40 @@ export interface FirmwareUpdateResult {
   readonly verification: "EXPECTED_FIRMWARE_OBSERVED";
 }
 
+const maximumUpdateProviders = 32;
+
+function snapshotProviderRegistry(value: unknown): readonly FirmwareUpdateProvider[] {
+  if (!Array.isArray(value)) {
+    return Object.freeze([]);
+  }
+  const length = readOwnDataProperty(value, "length");
+  if (
+    !Number.isInteger(length) ||
+    (length as number) < 0 ||
+    (length as number) > maximumUpdateProviders
+  ) {
+    return Object.freeze([]);
+  }
+  const providers: FirmwareUpdateProvider[] = [];
+  for (let index = 0; index < (length as number); index += 1) {
+    const provider = readOwnDataProperty(value, index);
+    if (typeof provider !== "object" || provider === null) {
+      return Object.freeze([]);
+    }
+    providers.push(provider as FirmwareUpdateProvider);
+  }
+  return Object.freeze(providers);
+}
+
+function safeOptionalCount(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+    ? (value as number)
+    : undefined;
+}
+
 /**
- * Safe update orchestration contract exercised only by synthetic providers in
- * Milestone 1. Real flash providers are explicitly deferred.
+ * Safe update orchestration contract exercised only by Synthetic providers in
+ * the pre-Hardware phase. Real flash providers remain explicitly deferred.
  */
 export async function runFirmwareUpdate(input: {
   readonly operationId: string;
@@ -89,24 +122,53 @@ export async function runFirmwareUpdate(input: {
   readonly observer?: OperationObserver<FirmwareUpdateResult>;
   readonly signal?: CancellationSignal;
 }): Promise<OperationRecord<FirmwareUpdateResult>> {
-  // The operation machine publishes IDLE from its constructor. Snapshot every
-  // caller-controlled input before that observer boundary so later mutation of
-  // the input object cannot change device intent, artifact identity, provider
-  // selection, or confirmation after validation has begun.
-  const operationId = input.operationId;
-  const descriptor: DeviceDescriptor = Object.freeze({ ...input.descriptor });
-  const artifactSnapshot = snapshotFirmwareUpdateArtifact(input.artifact);
-  const artifactByteSnapshot = snapshotFirmwareArtifactBytes(
-    input.artifactBytes,
+  // Snapshot every data envelope before the operation machine publishes IDLE.
+  // Accessors/iterators are not used to copy device intent or provider lists.
+  const operationId = rebuildProviderId(
+    readOwnDataProperty(input, "operationId"),
   );
-  const artifactDigestProvider = input.artifactDigestProvider;
-  const providers = Object.freeze([...input.providers]);
-  const sessions = input.sessions;
-  const catalog = input.catalog;
-  const userConfirmed = input.userConfirmed;
-  const clock = input.clock;
-  const observer = input.observer;
-  const signal = input.signal;
+  const [descriptor] = rebuildDiscoveryDescriptors([
+    readOwnDataProperty(input, "descriptor"),
+  ]);
+  if (descriptor === undefined) {
+    throw new TypeError("Firmware descriptor rebuild returned no value");
+  }
+  const artifactSnapshot = snapshotFirmwareUpdateArtifact(
+    readOwnDataProperty(input, "artifact") as FirmwareUpdateArtifact,
+  );
+  const artifactByteSnapshot = snapshotFirmwareArtifactBytes(
+    readOwnDataProperty(input, "artifactBytes"),
+  );
+  const artifactDigestProvider = readOwnDataProperty(
+    input,
+    "artifactDigestProvider",
+  ) as FirmwareArtifactDigestProvider | undefined;
+  const providers = snapshotProviderRegistry(
+    readOwnDataProperty(input, "providers"),
+  );
+  const sessions = readOwnDataProperty(input, "sessions") as
+    | DeviceSessionManager
+    | undefined;
+  const catalog = readOwnDataProperty(input, "catalog") as
+    | TargetCatalog
+    | undefined;
+  const userConfirmed = readOwnDataProperty(input, "userConfirmed");
+  const clock = readOwnDataProperty(input, "clock") as WorkflowClock | undefined;
+  const observer = readOwnDataProperty(input, "observer") as
+    | OperationObserver<FirmwareUpdateResult>
+    | undefined;
+  const signal = readOwnDataProperty(input, "signal") as
+    | CancellationSignal
+    | undefined;
+  if (
+    artifactDigestProvider === undefined ||
+    sessions === undefined ||
+    catalog === undefined ||
+    typeof userConfirmed !== "boolean"
+  ) {
+    throw new TypeError("Firmware update workflow input is invalid");
+  }
+
   const machine = new VerifiedOperationMachine<FirmwareUpdateResult>({
     id: operationId,
     type: "FIRMWARE_UPDATE",
@@ -189,16 +251,48 @@ export async function runFirmwareUpdate(input: {
     providerAssurance = providerSelection.providerAssurance;
     updateMethod = providerSelection.updateMethod;
     updateCapabilityId = providerSelection.updateCapabilityId;
-    const artifactValid = await provider.validateArtifact(
+
+    const validateArtifact = requireDataMethod(
+      provider,
+      "validateArtifact",
+      "FIRMWARE_VALIDATE_METHOD_UNAVAILABLE",
+    );
+    const prepareUpdate = requireDataMethod(
+      provider,
+      "prepareUpdate",
+      "FIRMWARE_PREPARE_METHOD_UNAVAILABLE",
+    );
+    const writeFirmware = requireDataMethod(
+      provider,
+      "writeFirmware",
+      "FIRMWARE_WRITE_METHOD_UNAVAILABLE",
+    );
+    const reboot = requireDataMethod(
+      provider,
+      "reboot",
+      "FIRMWARE_REBOOT_METHOD_UNAVAILABLE",
+    );
+    const reconnect = requireDataMethod(
+      provider,
+      "reconnect",
+      "FIRMWARE_RECONNECT_METHOD_UNAVAILABLE",
+    );
+    const verifyFirmware = requireDataMethod(
+      provider,
+      "verifyFirmware",
+      "FIRMWARE_VERIFY_METHOD_UNAVAILABLE",
+    );
+
+    const artifactValid = await Reflect.apply(validateArtifact, provider, [
       createProviderArtifact(),
       signal,
-    );
+    ]);
     assertNotAborted(signal);
     if (artifactValid !== true) {
       return machine.fail({
         code: "ARTIFACT_INVALID",
         reason: "ARTIFACT_INTEGRITY_CHECK_FAILED",
-        details: { sha256: artifact.sha256 },
+        details: { artifactSha256: artifact.sha256 },
         retryable: false,
       });
     }
@@ -260,16 +354,20 @@ export async function runFirmwareUpdate(input: {
     machine.transition("EXECUTING");
     assertNotAborted(signal);
     sessions.assertHeld(session);
-    await provider.prepareUpdate(session, createProviderArtifact(), signal);
+    await Reflect.apply(prepareUpdate, provider, [
+      session,
+      createProviderArtifact(),
+      signal,
+    ]);
     assertNotAborted(signal);
     sessions.assertHeld(session);
     assertNotAborted(signal);
     writeStarted = true;
-    const receipt = await provider.writeFirmware(
+    const receipt = await Reflect.apply(writeFirmware, provider, [
       session,
       createProviderArtifact(),
       signal,
-    );
+    ]);
     writeCompleted =
       readProviderDataProperty(receipt, "writeCompleted") === true;
     assertNotAborted(signal);
@@ -282,30 +380,33 @@ export async function runFirmwareUpdate(input: {
       });
     }
     sessions.assertHeld(session);
-    const bytesWritten = readProviderDataProperty(receipt, "bytesWritten");
-    const totalBytes = readProviderDataProperty(receipt, "totalBytes");
+    const bytesWritten = safeOptionalCount(
+      readProviderDataProperty(receipt, "bytesWritten"),
+    );
+    const totalBytes = safeOptionalCount(
+      readProviderDataProperty(receipt, "totalBytes"),
+    );
     machine.transition("WRITE_COMPLETED", {
       messageCode: "PROVIDER_WRITE_COMPLETED",
-      ...(bytesWritten === undefined
-        ? {}
-        : { bytesWritten: bytesWritten as number }),
-      ...(totalBytes === undefined ? {} : { totalBytes: totalBytes as number }),
+      ...(bytesWritten === undefined ? {} : { bytesWritten }),
+      ...(totalBytes === undefined ? {} : { totalBytes }),
     });
     assertNotAborted(signal);
 
     machine.transition("REBOOTING");
     assertNotAborted(signal);
-    await provider.reboot(session, signal);
+    await Reflect.apply(reboot, provider, [session, signal]);
     assertNotAborted(signal);
     releaseIfHeld(sessions, session);
     session = null;
 
     machine.transition("RECONNECTING");
     assertNotAborted(signal);
-    const reportedReconnectedDescriptor = await provider.reconnect(
-      descriptor.id,
-      signal,
-    );
+    const reportedReconnectedDescriptor = (await Reflect.apply(
+      reconnect,
+      provider,
+      [descriptor.id, signal],
+    )) as DeviceDescriptor | null;
     assertNotAborted(signal);
     if (reportedReconnectedDescriptor === null) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
@@ -356,11 +457,11 @@ export async function runFirmwareUpdate(input: {
 
     machine.transition("VERIFYING");
     assertNotAborted(signal);
-    const verification = await provider.verifyFirmware(
+    const verification = await Reflect.apply(verifyFirmware, provider, [
       session,
       artifact,
       signal,
-    );
+    ]);
     assertNotAborted(signal);
     sessions.assertHeld(session);
     const verificationValid = readProviderDataProperty(verification, "valid");
