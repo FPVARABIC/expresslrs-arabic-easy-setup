@@ -12,8 +12,7 @@ export const softwareReadinessGateIds = [
   "CI_QUALITY_GATES",
 ] as const;
 
-export type SoftwareReadinessGateId =
-  (typeof softwareReadinessGateIds)[number];
+export type SoftwareReadinessGateId = (typeof softwareReadinessGateIds)[number];
 
 export type SoftwareReadinessGateState = "PASS" | "BLOCKED" | "INCOMPLETE";
 
@@ -30,9 +29,7 @@ export interface SoftwareReadinessReport {
   readonly schemaVersion: 1;
   readonly type: "SOFTWARE_ONLY_READINESS_REPORT";
   readonly status:
-    | "READY_FOR_HARDWARE_VALIDATION"
-    | "SOFTWARE_GAPS_REMAIN"
-    | "INVALID_INPUT";
+    "READY_FOR_HARDWARE_VALIDATION" | "SOFTWARE_GAPS_REMAIN" | "INVALID_INPUT";
   readonly gateStates: Readonly<
     Record<SoftwareReadinessGateId, SoftwareReadinessGateState>
   >;

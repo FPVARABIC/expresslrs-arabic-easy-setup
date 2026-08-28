@@ -3,9 +3,21 @@ import { describe, expect, it, vi } from "vitest";
 import {
   registerSafeServiceWorker,
   type ServiceWorkerRegistrationPort,
+  type ServiceWorkerRegistrationView,
+  type ServiceWorkerStatePort,
 } from "./register-service-worker";
 
-function registrationPort(register = vi.fn().mockResolvedValue({})) {
+function registrationView(): ServiceWorkerRegistrationView {
+  return {
+    waiting: null,
+    installing: null,
+    addEventListener: vi.fn(),
+  };
+}
+
+function registrationPort(
+  register = vi.fn().mockResolvedValue(registrationView()),
+) {
   return {
     register,
   } satisfies ServiceWorkerRegistrationPort;
@@ -13,7 +25,7 @@ function registrationPort(register = vi.fn().mockResolvedValue({})) {
 
 describe("safe Service Worker registration", () => {
   it("registers the worker inside the current repository path without update-cache reuse", async () => {
-    const register = vi.fn().mockResolvedValue({});
+    const register = vi.fn().mockResolvedValue(registrationView());
     const outcome = await registerSafeServiceWorker({
       serviceWorker: registrationPort(register),
       secureContext: true,
@@ -30,8 +42,86 @@ describe("safe Service Worker registration", () => {
     );
   });
 
+  it("reports an already waiting worker without forcing activation", async () => {
+    const onWaiting = vi.fn();
+    const waiting: ServiceWorkerStatePort = {
+      state: "installed",
+      addEventListener: vi.fn(),
+    };
+    const register = vi.fn().mockResolvedValue({
+      waiting,
+      installing: null,
+      addEventListener: vi.fn(),
+    } satisfies ServiceWorkerRegistrationView);
+
+    await registerSafeServiceWorker({
+      serviceWorker: registrationPort(register),
+      secureContext: true,
+      documentUrl: "https://example.test/app/",
+      onWaiting,
+    });
+
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a newly installed waiting worker after updatefound", async () => {
+    let updateFound: (() => void) | null = null;
+    let stateChanged: (() => void) | null = null;
+    const installing = {
+      state: "installing",
+      addEventListener(_type: "statechange", listener: () => void) {
+        stateChanged = listener;
+      },
+    } satisfies ServiceWorkerStatePort;
+    const registration = {
+      waiting: null as ServiceWorkerStatePort | null,
+      installing,
+      addEventListener(_type: "updatefound", listener: () => void) {
+        updateFound = listener;
+      },
+    } satisfies ServiceWorkerRegistrationView;
+    const onWaiting = vi.fn();
+
+    await registerSafeServiceWorker({
+      serviceWorker: registrationPort(vi.fn().mockResolvedValue(registration)),
+      secureContext: true,
+      documentUrl: "https://example.test/app/",
+      onWaiting,
+    });
+
+    updateFound?.();
+    installing.state = "installed";
+    registration.waiting = installing;
+    stateChanged?.();
+
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+  });
+
+  it("contains presentation callback failures without failing registration", async () => {
+    const waiting: ServiceWorkerStatePort = {
+      state: "installed",
+      addEventListener: vi.fn(),
+    };
+    const register = vi.fn().mockResolvedValue({
+      waiting,
+      installing: null,
+      addEventListener: vi.fn(),
+    } satisfies ServiceWorkerRegistrationView);
+
+    await expect(
+      registerSafeServiceWorker({
+        serviceWorker: registrationPort(register),
+        secureContext: true,
+        documentUrl: "https://example.test/app/",
+        onWaiting() {
+          throw new Error("secret=do-not-copy");
+        },
+      }),
+    ).resolves.toBe("REGISTERED");
+  });
+
   it("does not register in an insecure context", async () => {
-    const register = vi.fn().mockResolvedValue({});
+    const register = vi.fn().mockResolvedValue(registrationView());
     await expect(
       registerSafeServiceWorker({
         serviceWorker: registrationPort(register),

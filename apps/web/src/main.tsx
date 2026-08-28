@@ -3,8 +3,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { defaultLocale, getDirection } from "@elrs-easy/i18n";
 import { App } from "./App";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { ApplicationUpdateNotice } from "./pwa/ApplicationUpdateNotice";
 import { NetworkModeNotice } from "./pwa/NetworkModeNotice";
-import { registerSafeServiceWorker } from "./pwa/register-service-worker";
 import "./styles.css";
 import "./pwa/pwa.css";
 
@@ -20,20 +21,9 @@ if (!root) {
 createRoot(root).render(
   <StrictMode>
     <NetworkModeNotice />
-    <App />
+    <ApplicationUpdateNotice />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </StrictMode>,
 );
-
-function startServiceWorkerRegistration() {
-  void registerSafeServiceWorker();
-}
-
-if (import.meta.env.PROD) {
-  if (document.readyState === "complete") {
-    startServiceWorkerRegistration();
-  } else {
-    window.addEventListener("load", startServiceWorkerRegistration, {
-      once: true,
-    });
-  }
-}

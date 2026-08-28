@@ -1,6 +1,17 @@
 export type ServiceWorkerRegistrationOutcome =
   "REGISTERED" | "UNAVAILABLE" | "FAILED";
 
+export interface ServiceWorkerStatePort {
+  readonly state: string;
+  addEventListener(type: "statechange", listener: () => void): void;
+}
+
+export interface ServiceWorkerRegistrationView {
+  readonly waiting: ServiceWorkerStatePort | null;
+  readonly installing: ServiceWorkerStatePort | null;
+  addEventListener(type: "updatefound", listener: () => void): void;
+}
+
 export interface ServiceWorkerRegistrationPort {
   register(
     scriptUrl: string,
@@ -8,20 +19,56 @@ export interface ServiceWorkerRegistrationPort {
       readonly scope: string;
       readonly updateViaCache: "none";
     },
-  ): Promise<unknown>;
+  ): Promise<ServiceWorkerRegistrationView>;
 }
 
 export interface RegisterSafeServiceWorkerInput {
   readonly serviceWorker?: ServiceWorkerRegistrationPort | null;
   readonly secureContext?: boolean;
   readonly documentUrl?: string;
+  readonly onWaiting?: () => void;
+}
+
+function adaptWorker(worker: ServiceWorker | null): ServiceWorkerStatePort | null {
+  if (worker === null) {
+    return null;
+  }
+  return {
+    get state() {
+      return worker.state;
+    },
+    addEventListener(type, listener) {
+      worker.addEventListener(type, listener);
+    },
+  };
+}
+
+function adaptRegistration(
+  registration: ServiceWorkerRegistration,
+): ServiceWorkerRegistrationView {
+  return {
+    get waiting() {
+      return adaptWorker(registration.waiting);
+    },
+    get installing() {
+      return adaptWorker(registration.installing);
+    },
+    addEventListener(type, listener) {
+      registration.addEventListener(type, listener);
+    },
+  };
 }
 
 function browserServiceWorker(): ServiceWorkerRegistrationPort | null {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
     return null;
   }
-  return navigator.serviceWorker;
+  const container = navigator.serviceWorker;
+  return {
+    async register(scriptUrl, options) {
+      return adaptRegistration(await container.register(scriptUrl, options));
+    },
+  };
 }
 
 function browserSecureContext(): boolean {
@@ -30,6 +77,41 @@ function browserSecureContext(): boolean {
 
 function browserDocumentUrl(): string | null {
   return typeof document === "undefined" ? null : document.baseURI;
+}
+
+function observeWaitingWorker(
+  registration: ServiceWorkerRegistrationView,
+  onWaiting: (() => void) | undefined,
+): void {
+  if (onWaiting === undefined) {
+    return;
+  }
+
+  let notified = false;
+  const notifyIfWaiting = () => {
+    if (notified || registration.waiting === null) {
+      return;
+    }
+    notified = true;
+    try {
+      onWaiting();
+    } catch {
+      // Host presentation callbacks cannot alter registration safety.
+    }
+  };
+
+  notifyIfWaiting();
+  registration.addEventListener("updatefound", () => {
+    const installing = registration.installing;
+    if (installing === null) {
+      return;
+    }
+    installing.addEventListener("statechange", () => {
+      if (installing.state === "installed") {
+        notifyIfWaiting();
+      }
+    });
+  });
 }
 
 /**
@@ -43,6 +125,7 @@ export async function registerSafeServiceWorker(
   const serviceWorker = input.serviceWorker ?? browserServiceWorker();
   const secureContext = input.secureContext ?? browserSecureContext();
   const documentUrl = input.documentUrl ?? browserDocumentUrl();
+  const onWaiting = input.onWaiting;
 
   if (!secureContext || serviceWorker === null || documentUrl === null) {
     return "UNAVAILABLE";
@@ -59,10 +142,11 @@ export async function registerSafeServiceWorker(
       return "FAILED";
     }
 
-    await serviceWorker.register(scriptUrl.toString(), {
+    const registration = await serviceWorker.register(scriptUrl.toString(), {
       scope: scopeUrl.pathname,
       updateViaCache: "none",
     });
+    observeWaitingWorker(registration, onWaiting);
     return "REGISTERED";
   } catch {
     return "FAILED";
