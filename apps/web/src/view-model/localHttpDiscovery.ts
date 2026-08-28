@@ -16,11 +16,13 @@ import {
   type OperationErrorCode,
 } from "@elrs-easy/domain";
 import {
+  assessLocalNetworkPermission,
   createExpressLrsLocalHttpEvidencePolicy,
   ExpressLrsLocalHttpDiscoveryProvider,
   expressLrsLocalHttpOrigins,
   type BrowserFetch,
   type ExpressLrsLocalHttpOrigin,
+  type LocalNetworkPermissionState,
 } from "@elrs-easy/platform-browser";
 import { ReadOnlyExpressLrsModule } from "@elrs-easy/workflows";
 
@@ -56,6 +58,7 @@ export interface LocalHttpDiscoveryOutcome {
 }
 
 export type LocalHttpProgressObserver = (stage: ReadOnlyStageCategory) => void;
+export type LocalNetworkPermissionAssessment = () => Promise<LocalNetworkPermissionState>;
 
 const emptyTargetCatalog = new InMemoryTargetCatalog(
   {
@@ -172,16 +175,27 @@ export async function runLocalHttpDiscovery(input: {
   readonly signal?: CancellationSignal;
   readonly fetch?: BrowserFetch;
   readonly onProgress?: LocalHttpProgressObserver;
+  readonly permissionAssessment?: LocalNetworkPermissionAssessment;
 }): Promise<LocalHttpDiscoveryOutcome> {
-  // Snapshot getter-backed host input exactly once before construction or any
-  // network await. The request origin and its stable endpoint id must never
-  // diverge if a caller mutates the input object mid-operation.
   const origin = input.origin;
   const signal = input.signal;
   const browserFetch = input.fetch;
   const onProgress = input.onProgress;
+  const permissionAssessment =
+    input.permissionAssessment ?? assessLocalNetworkPermission;
   const stages = new Set<ReadOnlyStageCategory>();
   try {
+    const permissionState = await permissionAssessment();
+    if (permissionState === "DENIED") {
+      addProgressStage(stages, "FAILED", onProgress);
+      return terminalOutcome({
+        state: "FAILED",
+        errorCode: "PERMISSION_DENIED",
+        retryable: false,
+        stageCategories: [...stages],
+      });
+    }
+
     const provider = new ExpressLrsLocalHttpDiscoveryProvider({
       origin,
       createDeviceId: () => endpointDeviceId(origin),
