@@ -74,4 +74,37 @@ describe("createSoftwareReadinessReport", () => {
     expect(Object.isFrozen(report.missingSoftwareGates)).toBe(true);
     expect(Object.isFrozen(report.externallyBlockedGates)).toBe(true);
   });
+
+  it("fails closed without executing accessor-backed gate values", () => {
+    let executed = false;
+    const gate = Object.defineProperty({}, "id", {
+      get() {
+        executed = true;
+        return "FOUNDATION";
+      },
+    });
+    Object.defineProperty(gate, "state", { value: "PASS" });
+
+    const report = createSoftwareReadinessReport({ gates: [gate] });
+
+    expect(executed).toBe(false);
+    expect(report.status).toBe("INVALID_INPUT");
+    expect(report.realWritesEnabled).toBe(false);
+    expect(report.performanceClaimsAllowed).toBe(false);
+  });
+
+  it("bounds the number of caller-supplied gate declarations", () => {
+    const report = createSoftwareReadinessReport({
+      gates: Array.from(
+        { length: softwareReadinessGateIds.length + 1 },
+        () => ({
+          id: "FOUNDATION" as const,
+          state: "PASS" as const,
+        }),
+      ),
+    });
+
+    expect(report.status).toBe("INVALID_INPUT");
+    expect(report.missingSoftwareGates).toEqual([...softwareReadinessGateIds]);
+  });
 });

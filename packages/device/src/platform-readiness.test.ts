@@ -101,4 +101,38 @@ describe("createPlatformReadinessPlan", () => {
     expect(Object.isFrozen(plan)).toBe(true);
     expect(Object.isFrozen(plan.readCandidates)).toBe(true);
   });
+
+  it("fails closed on an unknown runtime host without guessing a platform", () => {
+    const plan = createPlatformReadinessPlan({
+      host: "UNREVIEWED_HOST",
+      adapters: [],
+    });
+
+    expect(plan.status).toBe("INVALID");
+    expect(plan.invalidReason).toBe("INVALID_HOST");
+    expect(plan.host).toBeNull();
+    expect(plan.nextGate).toBe("INVALID_INPUT");
+    expect(plan.writeDisposition).toBe("BLOCKED_PENDING_HARDWARE_VALIDATION");
+  });
+
+  it("does not execute accessor-backed adapter declarations", () => {
+    let executed = false;
+    const adapter = Object.defineProperty({}, "adapter", {
+      get() {
+        executed = true;
+        return "LOCAL_HTTP";
+      },
+    });
+    Object.defineProperty(adapter, "implemented", { value: true });
+
+    const plan = createPlatformReadinessPlan({
+      host: "WEB_DESKTOP",
+      adapters: [adapter],
+    });
+
+    expect(executed).toBe(false);
+    expect(plan.status).toBe("INVALID");
+    expect(plan.invalidReason).toBe("INVALID_ADAPTERS");
+    expect(plan.readCandidates).toEqual([]);
+  });
 });

@@ -39,14 +39,16 @@ describe("network and shell copy", () => {
   it("keeps the Arabic application-failure message fixed and device-safe", () => {
     const copy = getApplicationFailureCopy("ar");
     expect(copy.title).toBe("تعذر عرض التطبيق");
-    expect(copy.description).toContain("لم يُرسل أي أمر إلى الجهاز");
+    expect(copy.description).toContain("فحالتها غير مؤكدة");
+    expect(copy.description).not.toContain("لم يُرسل أي أمر إلى الجهاز");
     expect(`${copy.title}${copy.description}`).not.toMatch(/[؟?]/u);
   });
 
   it("provides an English application-failure fallback", () => {
     const copy = getApplicationFailureCopy("en");
     expect(copy.title).toBe("The app could not be displayed");
-    expect(copy.description).toContain("No device command was sent");
+    expect(copy.description).toContain("its state is uncertain");
+    expect(copy.description).not.toContain("No device command was sent");
     expect(`${copy.title}${copy.description}`).not.toMatch(/[؟?]/u);
   });
 });

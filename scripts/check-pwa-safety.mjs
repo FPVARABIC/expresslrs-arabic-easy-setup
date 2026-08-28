@@ -201,19 +201,23 @@ function validateRegistration(source) {
 
 function validateUpdateNotice(source) {
   if (!source.includes("enabled = import.meta.env.PROD")) {
-    fail("Service Worker registration must be production-only");
+    fail("Service Worker registration must remain production-only");
   }
   if (!source.includes("register = registerSafeServiceWorker")) {
     fail("the update notice must use the reviewed registration boundary");
   }
-  if (source.includes("skipWaiting") || source.includes("location.reload")) {
+  if (
+    /<button|location\.reload\s*\(|postMessage\s*\(|skipWaiting\s*\(/u.test(
+      source,
+    )
+  ) {
     fail("the update notice must not activate or reload a waiting worker");
   }
 }
 
 function validateMain(source) {
   if (!source.includes("<ApplicationUpdateNotice />")) {
-    fail("the Web shell must mount the reviewed application-update notice");
+    fail("the application shell must mount the reviewed update notice");
   }
   if (source.includes("registerSafeServiceWorker")) {
     fail("main.tsx must not bypass the reviewed update-notice boundary");

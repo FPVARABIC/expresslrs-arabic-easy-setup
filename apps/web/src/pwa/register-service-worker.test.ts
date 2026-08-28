@@ -65,22 +65,23 @@ describe("safe Service Worker registration", () => {
   });
 
   it("reports a newly installed waiting worker after updatefound", async () => {
-    let waitingAvailable = false;
+    let updateFound: () => void = () => {
+      throw new Error("updatefound listener was not registered");
+    };
+    let stateChanged: () => void = () => {
+      throw new Error("statechange listener was not registered");
+    };
     const installing = {
       state: "installing",
       addEventListener(_type: "statechange", listener: () => void) {
-        installing.state = "installed";
-        waitingAvailable = true;
-        listener();
+        stateChanged = listener;
       },
     } satisfies ServiceWorkerStatePort;
     const registration = {
-      get waiting() {
-        return waitingAvailable ? installing : null;
-      },
+      waiting: null as ServiceWorkerStatePort | null,
       installing,
       addEventListener(_type: "updatefound", listener: () => void) {
-        listener();
+        updateFound = listener;
       },
     } satisfies ServiceWorkerRegistrationView;
     const onWaiting = vi.fn();
@@ -92,6 +93,10 @@ describe("safe Service Worker registration", () => {
       onWaiting,
     });
 
+    updateFound();
+    installing.state = "installed";
+    registration.waiting = installing;
+    stateChanged();
     expect(onWaiting).toHaveBeenCalledTimes(1);
   });
 
@@ -118,6 +123,35 @@ describe("safe Service Worker registration", () => {
     ).resolves.toBe("REGISTERED");
   });
 
+  it("contains malformed late update events without creating a waiting claim", async () => {
+    let updateFound: () => void = () => {
+      throw new Error("updatefound listener was not registered");
+    };
+    const onWaiting = vi.fn();
+    const registration = {
+      waiting: null,
+      get installing(): ServiceWorkerStatePort | null {
+        throw new Error("secret=malformed-platform-view");
+      },
+      addEventListener(_type: "updatefound", listener: () => void) {
+        updateFound = listener;
+      },
+    } satisfies ServiceWorkerRegistrationView;
+
+    await expect(
+      registerSafeServiceWorker({
+        serviceWorker: registrationPort(
+          vi.fn().mockResolvedValue(registration),
+        ),
+        secureContext: true,
+        documentUrl: "https://example.test/app/",
+        onWaiting,
+      }),
+    ).resolves.toBe("REGISTERED");
+    expect(() => updateFound()).not.toThrow();
+    expect(onWaiting).not.toHaveBeenCalled();
+  });
+
   it("does not register in an insecure context", async () => {
     const register = vi.fn().mockResolvedValue(registrationView());
     await expect(
@@ -136,6 +170,16 @@ describe("safe Service Worker registration", () => {
         serviceWorker: null,
         secureContext: true,
         documentUrl: "https://example.test/app/",
+      }),
+    ).resolves.toBe("UNAVAILABLE");
+  });
+
+  it("reports unavailable for an explicitly absent document URL", async () => {
+    await expect(
+      registerSafeServiceWorker({
+        serviceWorker: registrationPort(),
+        secureContext: true,
+        documentUrl: null,
       }),
     ).resolves.toBe("UNAVAILABLE");
   });

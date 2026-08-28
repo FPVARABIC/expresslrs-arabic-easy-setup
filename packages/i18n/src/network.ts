@@ -51,12 +51,12 @@ const applicationFailureCopy: Readonly<
   ar: Object.freeze({
     title: "تعذر عرض التطبيق",
     description:
-      "أغلق هذه الصفحة وافتح التطبيق من جديد. لم يُرسل أي أمر إلى الجهاز بسبب هذا الخطأ.",
+      "أغلق هذه الصفحة وافتح التطبيق من جديد. إذا كانت عملية جارية فحالتها غير مؤكدة؛ تحقق من الجهاز قبل إعادة المحاولة.",
   }),
   en: Object.freeze({
     title: "The app could not be displayed",
     description:
-      "Close this page and open the app again. No device command was sent because of this error.",
+      "Close this page and open the app again. If an operation was running, its state is uncertain; verify the device before retrying.",
   }),
 });
 

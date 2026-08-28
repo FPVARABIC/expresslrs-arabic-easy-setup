@@ -73,6 +73,14 @@ jobs:
           pnpm test
           pnpm build
 
+      - name: Build and verify the GitHub Pages artifact
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+        run: |
+          pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+
       - name: Generate dependency license inventory
         run: pnpm licenses:report
 

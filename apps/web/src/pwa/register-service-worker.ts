@@ -25,7 +25,7 @@ export interface ServiceWorkerRegistrationPort {
 export interface RegisterSafeServiceWorkerInput {
   readonly serviceWorker?: ServiceWorkerRegistrationPort | null;
   readonly secureContext?: boolean;
-  readonly documentUrl?: string;
+  readonly documentUrl?: string | null;
   readonly onWaiting?: () => void;
 }
 
@@ -91,7 +91,13 @@ function observeWaitingWorker(
 
   let notified = false;
   const notifyIfWaiting = () => {
-    if (notified || registration.waiting === null) {
+    let waiting = false;
+    try {
+      waiting = registration.waiting !== null;
+    } catch {
+      // A malformed platform view cannot create an update-ready claim.
+    }
+    if (notified || !waiting) {
       return;
     }
     notified = true;
@@ -103,17 +109,29 @@ function observeWaitingWorker(
   };
 
   notifyIfWaiting();
-  registration.addEventListener("updatefound", () => {
-    const installing = registration.installing;
-    if (installing === null) {
-      return;
-    }
-    installing.addEventListener("statechange", () => {
-      if (installing.state === "installed") {
-        notifyIfWaiting();
+  try {
+    registration.addEventListener("updatefound", () => {
+      try {
+        const installing = registration.installing;
+        if (installing === null) {
+          return;
+        }
+        installing.addEventListener("statechange", () => {
+          try {
+            if (installing.state === "installed") {
+              notifyIfWaiting();
+            }
+          } catch {
+            // A malformed worker state remains unreported and inactive.
+          }
+        });
+      } catch {
+        // Platform update events are observational and cannot fail the app.
       }
     });
-  });
+  } catch {
+    // Registration remains usable even when update observation is unavailable.
+  }
 }
 
 /**
@@ -124,9 +142,13 @@ function observeWaitingWorker(
 export async function registerSafeServiceWorker(
   input: RegisterSafeServiceWorkerInput = {},
 ): Promise<ServiceWorkerRegistrationOutcome> {
-  const serviceWorker = input.serviceWorker ?? browserServiceWorker();
+  const serviceWorker =
+    input.serviceWorker === undefined
+      ? browserServiceWorker()
+      : input.serviceWorker;
   const secureContext = input.secureContext ?? browserSecureContext();
-  const documentUrl = input.documentUrl ?? browserDocumentUrl();
+  const documentUrl =
+    input.documentUrl === undefined ? browserDocumentUrl() : input.documentUrl;
   const onWaiting = input.onWaiting;
 
   if (!secureContext || serviceWorker === null || documentUrl === null) {

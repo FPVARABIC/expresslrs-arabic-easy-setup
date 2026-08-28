@@ -49,6 +49,8 @@ export function ApplicationUpdateNotice({
             setAvailable(true);
           }
         },
+      }).catch(() => {
+        // A host integration failure stays a silent fixed failure outcome.
       });
     };
 

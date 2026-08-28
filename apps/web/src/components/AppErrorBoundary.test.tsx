@@ -32,7 +32,8 @@ describe("AppErrorBoundary", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("تعذر عرض التطبيق");
-    expect(alert).toHaveTextContent("لم يُرسل أي أمر إلى الجهاز");
+    expect(alert).toHaveTextContent("فحالتها غير مؤكدة");
+    expect(alert).not.toHaveTextContent("لم يُرسل أي أمر إلى الجهاز");
     expect(alert).not.toHaveTextContent("secret=must-not-render");
     consoleError.mockRestore();
   });

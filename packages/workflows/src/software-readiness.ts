@@ -1,3 +1,5 @@
+import { readOwnDataProperty } from "./sensitive-operation-helpers.js";
+
 export const softwareReadinessGateIds = [
   "FOUNDATION",
   "EASY_MODE",
@@ -59,6 +61,20 @@ function defaultStates(): Record<
   };
 }
 
+function invalidReport(): SoftwareReadinessReport {
+  return Object.freeze({
+    schemaVersion: 1,
+    type: "SOFTWARE_ONLY_READINESS_REPORT",
+    status: "INVALID_INPUT",
+    gateStates: Object.freeze(defaultStates()),
+    missingSoftwareGates: Object.freeze([...softwareReadinessGateIds]),
+    externallyBlockedGates: Object.freeze([]),
+    hardwareValidation: "NONE",
+    realWritesEnabled: false,
+    performanceClaimsAllowed: false,
+  });
+}
+
 /**
  * Summarizes only the software work that can be closed before physical
  * validation. BLOCKED is reserved for an external/hardware gate and does not
@@ -66,33 +82,40 @@ function defaultStates(): Record<
  * and performance claims disabled.
  */
 export function createSoftwareReadinessReport(
-  input: SoftwareReadinessInput,
+  input: SoftwareReadinessInput | unknown,
 ): SoftwareReadinessReport {
   const states = defaultStates();
   const seen = new Set<SoftwareReadinessGateId>();
+  const gates = readOwnDataProperty(input, "gates");
+  if (!Array.isArray(gates)) {
+    return invalidReport();
+  }
+  const length = readOwnDataProperty(gates, "length");
+  if (
+    !Number.isInteger(length) ||
+    (length as number) < 0 ||
+    (length as number) > softwareReadinessGateIds.length
+  ) {
+    return invalidReport();
+  }
 
-  for (const gate of input.gates) {
+  for (let index = 0; index < (length as number); index += 1) {
+    const gate = readOwnDataProperty(gates, index);
+    const id = readOwnDataProperty(gate, "id");
+    const state = readOwnDataProperty(gate, "state");
     if (
-      typeof gate !== "object" ||
-      gate === null ||
-      !softwareReadinessGateIds.includes(gate.id) ||
-      !(["PASS", "BLOCKED", "INCOMPLETE"] as const).includes(gate.state) ||
-      seen.has(gate.id)
+      typeof id !== "string" ||
+      !softwareReadinessGateIds.includes(id as SoftwareReadinessGateId) ||
+      typeof state !== "string" ||
+      !(["PASS", "BLOCKED", "INCOMPLETE"] as const).includes(
+        state as SoftwareReadinessGateState,
+      ) ||
+      seen.has(id as SoftwareReadinessGateId)
     ) {
-      return Object.freeze({
-        schemaVersion: 1,
-        type: "SOFTWARE_ONLY_READINESS_REPORT",
-        status: "INVALID_INPUT",
-        gateStates: Object.freeze(defaultStates()),
-        missingSoftwareGates: Object.freeze([...softwareReadinessGateIds]),
-        externallyBlockedGates: Object.freeze([]),
-        hardwareValidation: "NONE",
-        realWritesEnabled: false,
-        performanceClaimsAllowed: false,
-      });
+      return invalidReport();
     }
-    seen.add(gate.id);
-    states[gate.id] = gate.state;
+    seen.add(id as SoftwareReadinessGateId);
+    states[id as SoftwareReadinessGateId] = state as SoftwareReadinessGateState;
   }
 
   const missingSoftwareGates = Object.freeze(

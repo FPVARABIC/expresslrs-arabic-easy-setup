@@ -41,4 +41,13 @@ describe("ApplicationUpdateNotice", () => {
     await screen.findByText("App update ready");
     expect(register).toHaveBeenCalledTimes(1);
   });
+
+  it("contains a rejected host registration without rendering a false update", async () => {
+    const register = vi.fn().mockRejectedValue(new Error("secret=host-error"));
+    render(<ApplicationUpdateNotice enabled register={register} />);
+    fireEvent.load(window);
+
+    await waitFor(() => expect(register).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
 });

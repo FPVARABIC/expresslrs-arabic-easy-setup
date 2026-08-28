@@ -25,7 +25,7 @@ describe("analyzePerformanceExperiment", () => {
     expect(analysis.performanceClaimAllowed).toBe(false);
   });
 
-  it("can return KEEP only from Hardware-observed improved metrics", () => {
+  it("requires external review even for caller-declared Hardware improvements", () => {
     const analysis = analyzePerformanceExperiment({
       hypothesisId: "HYP-001",
       evidenceLevel: "HARDWARE_OBSERVED",
@@ -33,8 +33,11 @@ describe("analyzePerformanceExperiment", () => {
       metrics: [improvingMetric],
     });
 
-    expect(analysis.decision).toBe("KEEP");
-    expect(analysis.performanceClaimAllowed).toBe(true);
+    expect(analysis.decision).toBe("REVIEW_HARDWARE_EVIDENCE");
+    expect(analysis.hardwareEvidenceDisposition).toBe(
+      "UNVERIFIED_CALLER_DECLARATION",
+    );
+    expect(analysis.performanceClaimAllowed).toBe(false);
     expect(analysis.summaries[0]?.threshold).toBe("IMPROVED");
   });
 
@@ -170,5 +173,64 @@ describe("analyzePerformanceExperiment", () => {
     expect(Object.isFrozen(analysis)).toBe(true);
     expect(Object.isFrozen(analysis.summaries)).toBe(true);
     expect(Object.isFrozen(analysis.summaries[0])).toBe(true);
+  });
+
+  it("rejects an unreviewed evidence label instead of treating it as Synthetic", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-010",
+      evidenceLevel: "FLIGHT_PROVEN",
+      minimumPairedRuns: 2,
+      metrics: [improvingMetric],
+    });
+
+    expect(analysis.status).toBe("INVALID");
+    expect(analysis.invalidReason).toBe("INVALID_EVIDENCE_LEVEL");
+    expect(analysis.evidenceLevel).toBe("UNKNOWN");
+    expect(analysis.performanceClaimAllowed).toBe(false);
+  });
+
+  it("does not execute accessor-backed metric values", () => {
+    let executed = false;
+    const metric = Object.defineProperty({}, "id", {
+      get() {
+        executed = true;
+        return "RECOVERY_MS";
+      },
+    });
+    for (const [key, value] of Object.entries({
+      direction: "LOWER_IS_BETTER",
+      baseline: [100, 90],
+      candidate: [80, 70],
+      requiredImprovementPercent: 5,
+      allowedRegressionPercent: 2,
+    })) {
+      Object.defineProperty(metric, key, { value });
+    }
+
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-011",
+      evidenceLevel: "SYNTHETIC",
+      minimumPairedRuns: 2,
+      metrics: [metric],
+    });
+
+    expect(executed).toBe(false);
+    expect(analysis.invalidReason).toBe("INVALID_METRIC");
+    expect(analysis.performanceClaimAllowed).toBe(false);
+  });
+
+  it("bounds the number of metric declarations", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-012",
+      evidenceLevel: "SYNTHETIC",
+      minimumPairedRuns: 2,
+      metrics: Array.from({ length: 33 }, (_, index) => ({
+        ...improvingMetric,
+        id: `METRIC_${index}`,
+      })),
+    });
+
+    expect(analysis.invalidReason).toBe("TOO_MANY_METRICS");
+    expect(analysis.summaries).toEqual([]);
   });
 });
