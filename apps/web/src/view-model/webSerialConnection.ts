@@ -40,6 +40,12 @@ export type WebSerialConnectOutcome =
     };
 
 function errorName(error: unknown): string {
+  if (
+    typeof DOMException !== "undefined" &&
+    error instanceof DOMException
+  ) {
+    return error.name;
+  }
   return error instanceof Error ? error.name : "";
 }
 
