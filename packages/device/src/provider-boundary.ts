@@ -75,6 +75,44 @@ function fail(
   });
 }
 
+function readOwnDataProperty(value: unknown, key: PropertyKey): unknown {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function boundedArraySnapshot(
+  value: unknown,
+  maximum: number,
+  reason: string,
+  code: "IDENTITY_UNKNOWN" | "PROVIDER_UNSUPPORTED" = "PROVIDER_UNSUPPORTED",
+): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    fail(code, reason);
+  }
+  const length = readOwnDataProperty(value, "length");
+  if (
+    !Number.isInteger(length) ||
+    (length as number) < 0 ||
+    (length as number) > maximum
+  ) {
+    fail(code, reason);
+  }
+  const snapshot: unknown[] = [];
+  for (let index = 0; index < (length as number); index += 1) {
+    snapshot.push(readOwnDataProperty(value, index));
+  }
+  return Object.freeze(snapshot);
+}
+
 function record(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     fail("PROVIDER_UNSUPPORTED", "DISCOVERY_PROVIDER_VALUE_INVALID");
@@ -120,10 +158,8 @@ function identityText(value: unknown, reason: string): string {
 }
 
 function stringArray(value: unknown, reason: string): readonly string[] {
-  if (!Array.isArray(value) || value.length > maximumEvidenceItems) {
-    fail("PROVIDER_UNSUPPORTED", reason);
-  }
-  return Object.freeze(value.map((item) => plainText(item, reason)));
+  const values = boundedArraySnapshot(value, maximumEvidenceItems, reason);
+  return Object.freeze(values.map((item) => plainText(item, reason)));
 }
 
 export function rebuildProviderId(value: unknown): string {
@@ -134,24 +170,30 @@ export function rebuildProviderId(value: unknown): string {
 export function rebuildDiscoveryDescriptors(
   value: unknown,
 ): readonly DeviceDescriptor[] {
-  if (!Array.isArray(value) || value.length > maximumDescriptors) {
-    fail("PROVIDER_UNSUPPORTED", "DISCOVERY_DESCRIPTOR_LIST_INVALID");
-  }
+  const values = boundedArraySnapshot(
+    value,
+    maximumDescriptors,
+    "DISCOVERY_DESCRIPTOR_LIST_INVALID",
+  );
 
   const ids = new Set<string>();
-  const descriptors = value.map((item) => {
+  const descriptors: DeviceDescriptor[] = [];
+  for (const item of values) {
     const raw = record(item);
-    const id = machineToken(raw.id, "DISCOVERY_DESCRIPTOR_ID_INVALID");
+    const id = machineToken(
+      readOwnDataProperty(raw, "id"),
+      "DISCOVERY_DESCRIPTOR_ID_INVALID",
+    );
     if (ids.has(id)) {
       fail("IDENTITY_AMBIGUOUS", "DUPLICATE_DEVICE_DESCRIPTOR_ID");
     }
     ids.add(id);
 
     const transport = machineToken(
-      raw.transport,
+      readOwnDataProperty(raw, "transport"),
       "DISCOVERY_DESCRIPTOR_TRANSPORT_INVALID",
     );
-    const connectionState = raw.connectionState;
+    const connectionState = readOwnDataProperty(raw, "connectionState");
     if (
       typeof connectionState !== "string" ||
       !connectionStates.includes(
@@ -164,20 +206,20 @@ export function rebuildDiscoveryDescriptors(
       fail("CONNECTION_LOST", "DISCOVERED_DEVICE_NOT_CONNECTED");
     }
 
-    let displayHint: string | undefined;
-    if (raw.displayHint !== undefined) {
-      displayHint = identityText(
-        raw.displayHint,
-        "DISCOVERY_DISPLAY_HINT_INVALID",
-      );
-    }
-    return Object.freeze({
-      id,
-      transport,
-      connectionState: "CONNECTED" as const,
-      ...(displayHint === undefined ? {} : { displayHint }),
-    });
-  });
+    const rawDisplayHint = readOwnDataProperty(raw, "displayHint");
+    const displayHint =
+      rawDisplayHint === undefined
+        ? undefined
+        : identityText(rawDisplayHint, "DISCOVERY_DISPLAY_HINT_INVALID");
+    descriptors.push(
+      Object.freeze({
+        id,
+        transport,
+        connectionState: "CONNECTED" as const,
+        ...(displayHint === undefined ? {} : { displayHint }),
+      }),
+    );
+  }
 
   return Object.freeze(descriptors);
 }
@@ -198,39 +240,46 @@ function untrustedClassification(): IdentityEvidenceTrust {
   };
 }
 
-function validateClassification(
-  value: IdentityEvidenceTrust,
-): IdentityEvidenceTrust {
+function validateClassification(value: IdentityEvidenceTrust): IdentityEvidenceTrust {
   const sourceKind = machineToken(
-    value.sourceKind,
+    readOwnDataProperty(value, "sourceKind"),
     "IDENTITY_POLICY_SOURCE_KIND_INVALID",
   );
   const sourceInstanceId = machineToken(
-    value.sourceInstanceId,
+    readOwnDataProperty(value, "sourceInstanceId"),
     "IDENTITY_POLICY_SOURCE_INSTANCE_INVALID",
   );
   const trustDomain = machineToken(
-    value.trustDomain,
+    readOwnDataProperty(value, "trustDomain"),
     "IDENTITY_POLICY_TRUST_DOMAIN_INVALID",
   );
-  if (!evidenceStrengths.includes(value.strength)) {
+  const strength = readOwnDataProperty(value, "strength");
+  const reliability = readOwnDataProperty(value, "reliability");
+  if (
+    typeof strength !== "string" ||
+    !evidenceStrengths.includes(strength as EvidenceStrength)
+  ) {
     fail("IDENTITY_UNKNOWN", "IDENTITY_POLICY_STRENGTH_INVALID");
   }
-  if (!evidenceReliabilities.includes(value.reliability)) {
+  if (
+    typeof reliability !== "string" ||
+    !evidenceReliabilities.includes(reliability as EvidenceReliability)
+  ) {
     fail("IDENTITY_UNKNOWN", "IDENTITY_POLICY_RELIABILITY_INVALID");
   }
   return {
     sourceKind,
     sourceInstanceId,
     trustDomain,
-    strength: value.strength,
-    reliability: value.reliability,
+    strength: strength as EvidenceStrength,
+    reliability: reliability as EvidenceReliability,
   };
 }
 
 /**
  * Copies provider facts into Core-owned immutable values. Provider-reported
- * normalization and trust metadata are ignored by construction.
+ * normalization and trust metadata are ignored by construction. Provider-owned
+ * accessors and sparse/proxy array elements are never executed.
  */
 export function rebuildDiscoveryEvidence(input: {
   readonly value: unknown;
@@ -238,30 +287,52 @@ export function rebuildDiscoveryEvidence(input: {
   readonly providerId: string;
   readonly policy?: IdentityEvidenceTrustPolicy;
 }): RebuiltIdentityEvidence {
-  if (
-    !Array.isArray(input.value) ||
-    input.value.length > maximumEvidenceItems
-  ) {
-    fail("IDENTITY_UNKNOWN", "IDENTITY_EVIDENCE_LIST_INVALID");
+  const values = boundedArraySnapshot(
+    readOwnDataProperty(input, "value"),
+    maximumEvidenceItems,
+    "IDENTITY_EVIDENCE_LIST_INVALID",
+    "IDENTITY_UNKNOWN",
+  );
+  const rawProvider = readOwnDataProperty(input, "provider");
+  const rawProviderId = readOwnDataProperty(input, "providerId");
+  const rawPolicy = readOwnDataProperty(input, "policy");
+  if (typeof rawProvider !== "object" || rawProvider === null) {
+    fail("PROVIDER_UNSUPPORTED", "DISCOVERY_PROVIDER_VALUE_INVALID");
+  }
+  const provider = rawProvider as DiscoveryProvider;
+  const providerId = rebuildProviderId(rawProviderId);
+  const policy =
+    rawPolicy === undefined
+      ? untrustedIdentityEvidencePolicy
+      : (rawPolicy as IdentityEvidenceTrustPolicy);
+  const classify = readOwnDataProperty(policy, "classify");
+  if (typeof classify !== "function") {
+    fail("IDENTITY_UNKNOWN", "IDENTITY_POLICY_CLASSIFIER_INVALID");
   }
 
-  const policy = input.policy ?? untrustedIdentityEvidencePolicy;
   const safeIdByReportedId = new Map<string, string>();
-  const evidence = input.value.map((item, index) => {
-    const raw = record(item);
-    const reportedId = machineToken(raw.id, "IDENTITY_EVIDENCE_ID_INVALID");
+  const evidence: DeviceIdentityEvidence[] = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const raw = record(values[index]);
+    const reportedId = machineToken(
+      readOwnDataProperty(raw, "id"),
+      "IDENTITY_EVIDENCE_ID_INVALID",
+    );
     if (safeIdByReportedId.has(reportedId)) {
       fail("IDENTITY_AMBIGUOUS", "DUPLICATE_EVIDENCE_IDS");
     }
     const safeId = `evidence-${index + 1}`;
     safeIdByReportedId.set(reportedId, safeId);
 
-    const claim = plainText(raw.claim, "IDENTITY_EVIDENCE_CLAIM_INVALID");
+    const claim = plainText(
+      readOwnDataProperty(raw, "claim"),
+      "IDENTITY_EVIDENCE_CLAIM_INVALID",
+    );
     if (!allowedIdentityClaims.has(claim)) {
       fail("IDENTITY_UNKNOWN", "IDENTITY_CLAIM_NOT_ALLOWLISTED");
     }
     const rawValue = identityText(
-      raw.rawValue,
+      readOwnDataProperty(raw, "rawValue"),
       "IDENTITY_EVIDENCE_VALUE_INVALID",
     );
     const normalizedValue = normalizeIdentityValue(rawValue);
@@ -280,13 +351,13 @@ export function rebuildDiscoveryEvidence(input: {
       fail("IDENTITY_UNKNOWN", "CUSTOM_HARDWARE_PRESENCE_VALUE_INVALID");
     }
 
-    const rawSource = record(raw.source);
+    const rawSource = record(readOwnDataProperty(raw, "source"));
     const reportedSourceKind = machineToken(
-      rawSource.kind,
+      readOwnDataProperty(rawSource, "kind"),
       "IDENTITY_EVIDENCE_SOURCE_KIND_INVALID",
     );
     const observedAt = plainText(
-      raw.observedAt,
+      readOwnDataProperty(raw, "observedAt"),
       "IDENTITY_EVIDENCE_TIMESTAMP_INVALID",
     );
     if (
@@ -296,12 +367,19 @@ export function rebuildDiscoveryEvidence(input: {
       fail("IDENTITY_UNKNOWN", "IDENTITY_EVIDENCE_TIMESTAMP_INVALID");
     }
 
-    const classified = policy.classify({
-      provider: input.provider,
-      providerId: input.providerId,
-      claim,
-      reportedSourceKind,
-    });
+    let classified: IdentityEvidenceTrust | null;
+    try {
+      classified = Reflect.apply(classify, policy, [
+        {
+          provider,
+          providerId,
+          claim: claim as IdentityClaim,
+          reportedSourceKind,
+        },
+      ]) as IdentityEvidenceTrust | null;
+    } catch {
+      fail("IDENTITY_UNKNOWN", "IDENTITY_POLICY_CLASSIFIER_FAILED");
+    }
     const trust = validateClassification(
       classified ?? untrustedClassification(),
     );
@@ -312,22 +390,24 @@ export function rebuildDiscoveryEvidence(input: {
       fail("IDENTITY_UNKNOWN", "TARGET_SPECIFIC_POLICY_CLAIM_INVALID");
     }
 
-    return createIdentityEvidence({
-      id: safeId,
-      claim,
-      rawValue,
-      source: {
-        kind: trust.sourceKind,
-        instanceId: trust.sourceInstanceId,
-        trustDomain: trust.trustDomain,
-      },
-      strength: trust.strength,
-      reliability: trust.reliability,
-      observedAt,
-      // Explicitly normalize inside Core. raw.normalizedValue is never read.
-      normalize: normalizeIdentityValue,
-    });
-  });
+    evidence.push(
+      createIdentityEvidence({
+        id: safeId,
+        claim: claim as IdentityClaim,
+        rawValue,
+        source: {
+          kind: trust.sourceKind,
+          instanceId: trust.sourceInstanceId,
+          trustDomain: trust.trustDomain,
+        },
+        strength: trust.strength,
+        reliability: trust.reliability,
+        observedAt,
+        // Explicitly normalize inside Core. raw.normalizedValue is never read.
+        normalize: normalizeIdentityValue,
+      }),
+    );
+  }
 
   return Object.freeze({
     evidence: Object.freeze(evidence),
@@ -340,24 +420,35 @@ export function rebuildDiscoveryCapabilities(input: {
   readonly value: unknown;
   readonly safeIdByReportedId: ReadonlyMap<string, string>;
 }): readonly Capability[] {
-  if (!Array.isArray(input.value) || input.value.length > maximumCapabilities) {
-    fail("PROVIDER_UNSUPPORTED", "DEVICE_CAPABILITY_LIST_INVALID");
+  const values = boundedArraySnapshot(
+    readOwnDataProperty(input, "value"),
+    maximumCapabilities,
+    "DEVICE_CAPABILITY_LIST_INVALID",
+  );
+  const safeIdByReportedId = readOwnDataProperty(input, "safeIdByReportedId");
+  if (!(safeIdByReportedId instanceof Map)) {
+    fail("PROVIDER_UNSUPPORTED", "DEVICE_CAPABILITY_PROVENANCE_MAP_INVALID");
   }
 
   const capabilityIds = new Set<string>();
-  const capabilities = input.value.map((item) => {
+  const capabilities: Capability[] = [];
+  for (const item of values) {
     const raw = record(item);
-    const id = machineToken(raw.id, "DEVICE_CAPABILITY_ID_INVALID");
+    const id = machineToken(
+      readOwnDataProperty(raw, "id"),
+      "DEVICE_CAPABILITY_ID_INVALID",
+    );
     if (capabilityIds.has(id)) {
       fail("PROVIDER_UNSUPPORTED", "DUPLICATE_DEVICE_CAPABILITY_ID");
     }
     capabilityIds.add(id);
-    if (typeof raw.available !== "boolean") {
+    const available = readOwnDataProperty(raw, "available");
+    if (typeof available !== "boolean") {
       fail("PROVIDER_UNSUPPORTED", "DEVICE_CAPABILITY_AVAILABILITY_INVALID");
     }
 
     const reportedEvidenceIds = stringArray(
-      raw.sourceEvidenceIds,
+      readOwnDataProperty(raw, "sourceEvidenceIds"),
       "DEVICE_CAPABILITY_EVIDENCE_IDS_INVALID",
     );
     if (reportedEvidenceIds.length === 0) {
@@ -369,7 +460,7 @@ export function rebuildDiscoveryCapabilities(input: {
     const safeEvidenceIds: string[] = [];
     const seenEvidenceIds = new Set<string>();
     for (const reportedId of reportedEvidenceIds) {
-      const safeId = input.safeIdByReportedId.get(reportedId);
+      const safeId = (safeIdByReportedId as Map<string, string>).get(reportedId);
       if (safeId === undefined || seenEvidenceIds.has(safeId)) {
         fail(
           "PROVIDER_UNSUPPORTED",
@@ -380,24 +471,25 @@ export function rebuildDiscoveryCapabilities(input: {
       safeEvidenceIds.push(safeId);
     }
 
-    if (
-      !Array.isArray(raw.limitations) ||
-      raw.limitations.length > maximumCapabilities
-    ) {
-      fail("PROVIDER_UNSUPPORTED", "DEVICE_CAPABILITY_LIMITATIONS_INVALID");
-    }
+    const limitationsValues = boundedArraySnapshot(
+      readOwnDataProperty(raw, "limitations"),
+      maximumCapabilities,
+      "DEVICE_CAPABILITY_LIMITATIONS_INVALID",
+    );
     const limitations = Object.freeze(
-      raw.limitations.map((limitation) =>
+      limitationsValues.map((limitation) =>
         machineToken(limitation, "DEVICE_CAPABILITY_LIMITATIONS_INVALID"),
       ),
     );
-    return Object.freeze({
-      id,
-      available: raw.available,
-      sourceEvidenceIds: Object.freeze(safeEvidenceIds),
-      limitations: Object.freeze([...limitations]),
-    });
-  });
+    capabilities.push(
+      Object.freeze({
+        id,
+        available,
+        sourceEvidenceIds: Object.freeze(safeEvidenceIds),
+        limitations: Object.freeze([...limitations]),
+      }),
+    );
+  }
 
   return Object.freeze(capabilities);
 }
