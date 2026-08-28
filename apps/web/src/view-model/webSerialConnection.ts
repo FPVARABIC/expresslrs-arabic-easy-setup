@@ -78,11 +78,13 @@ function normalizeBaudRate(value: unknown): number {
  * Success proves only that the browser transport opened; it does not prove
  * that the selected device is ExpressLRS or that any target is compatible.
  */
-export async function connectWebSerialReadOnly(input: {
-  readonly navigatorObject?: unknown;
-  readonly secureContext?: boolean;
-  readonly baudRate?: number;
-} = {}): Promise<WebSerialConnectOutcome> {
+export async function connectWebSerialReadOnly(
+  input: {
+    readonly navigatorObject?: unknown;
+    readonly secureContext?: boolean;
+    readonly baudRate?: number;
+  } = {},
+): Promise<WebSerialConnectOutcome> {
   const secureContext =
     input.secureContext ??
     (typeof globalThis.isSecureContext === "boolean"
