@@ -289,7 +289,9 @@ select:focus-visible,
 .scenario-chip {
   border-radius: 6px;
   background: var(--surface-strong);
-  transition: border-color 120ms ease, color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .scenario-chip:hover,
@@ -318,7 +320,9 @@ select:focus-visible,
   border-color: var(--line);
   border-radius: 6px;
   background: var(--surface-strong);
-  transition: border-color 120ms ease, background 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
 .task-card:not(:disabled):hover,
