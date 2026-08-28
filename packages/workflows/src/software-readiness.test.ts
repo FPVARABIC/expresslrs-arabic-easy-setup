@@ -16,7 +16,7 @@ describe("createSoftwareReadinessReport", () => {
     expect(report.missingSoftwareGates).toContain("WEB_PREVIEW");
   });
 
-  it("allows external blocks without pretending they passed", () => {
+  it("reports external blocks separately instead of calling them ready", () => {
     const report = createSoftwareReadinessReport({
       gates: softwareReadinessGateIds.map((id) => ({
         id,
@@ -24,9 +24,24 @@ describe("createSoftwareReadinessReport", () => {
       })),
     });
 
-    expect(report.status).toBe("READY_FOR_HARDWARE_VALIDATION");
+    expect(report.status).toBe("EXTERNAL_GATES_BLOCKED");
     expect(report.externallyBlockedGates).toEqual(["WEB_PREVIEW"]);
     expect(report.gateStates.WEB_PREVIEW).toBe("BLOCKED");
+  });
+
+  it("never reports ready when every declaration is externally blocked", () => {
+    const report = createSoftwareReadinessReport({
+      gates: softwareReadinessGateIds.map((id) => ({
+        id,
+        state: "BLOCKED" as const,
+      })),
+    });
+
+    expect(report.status).toBe("EXTERNAL_GATES_BLOCKED");
+    expect(report.externallyBlockedGates).toEqual([
+      ...softwareReadinessGateIds,
+    ]);
+    expect(report.missingSoftwareGates).toEqual([]);
   });
 
   it("requires every software gate to be accounted for", () => {
