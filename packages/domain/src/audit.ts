@@ -119,6 +119,20 @@ export interface CreateAuditEventInput {
   readonly details?: Readonly<Record<string, unknown>>;
 }
 
+function readOwnDataProperty(value: unknown, key: PropertyKey): unknown {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function fieldTokens(field: string): readonly string[] {
   return field
     .normalize("NFKC")
@@ -290,7 +304,10 @@ export function scrubAuditDetails(
   });
 }
 
-function requireIdentifier(value: string, label: string): string {
+function requireIdentifier(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a safe opaque identifier`);
+  }
   const normalized = value.trim();
   if (!/^[a-z0-9][a-z0-9._:+-]{0,159}$/iu.test(normalized)) {
     throw new TypeError(`${label} must be a safe opaque identifier`);
@@ -298,7 +315,10 @@ function requireIdentifier(value: string, label: string): string {
   return normalized;
 }
 
-function requireTimestamp(value: string): string {
+function requireTimestamp(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new TypeError("Audit event timestamp must be a canonical UTC ISO timestamp");
+  }
   const normalized = value.trim();
   const parsed = new Date(normalized);
   if (
@@ -324,35 +344,52 @@ function requireEnumValue<T extends string>(
   return value as T;
 }
 
-export function createAuditEvent(input: CreateAuditEventInput): AuditEvent {
-  if (!Number.isSafeInteger(input.sequence) || input.sequence < 0) {
+export function createAuditEvent(input: CreateAuditEventInput | unknown): AuditEvent {
+  const sequence = readOwnDataProperty(input, "sequence");
+  if (!Number.isSafeInteger(sequence) || (sequence as number) < 0) {
     throw new TypeError("Audit event sequence must be a non-negative integer");
   }
-  const scrubbed = scrubAuditDetails(input.details ?? {});
+  const rawDetails = readOwnDataProperty(input, "details");
+  const details =
+    rawDetails === undefined
+      ? {}
+      : rawDetails !== null && typeof rawDetails === "object" && !Array.isArray(rawDetails)
+        ? (rawDetails as Readonly<Record<string, unknown>>)
+        : {};
+  const scrubbed = scrubAuditDetails(details);
+  const providerId = readOwnDataProperty(input, "providerId");
 
   return Object.freeze({
     schemaVersion: "1",
-    id: requireIdentifier(input.id, "Audit event id"),
-    operationId: requireIdentifier(input.operationId, "Audit operation id"),
-    sequence: input.sequence,
-    occurredAt: requireTimestamp(input.occurredAt),
+    id: requireIdentifier(readOwnDataProperty(input, "id"), "Audit event id"),
+    operationId: requireIdentifier(
+      readOwnDataProperty(input, "operationId"),
+      "Audit operation id",
+    ),
+    sequence: sequence as number,
+    occurredAt: requireTimestamp(readOwnDataProperty(input, "occurredAt")),
     operationType: requireIdentifier(
-      input.operationType,
+      readOwnDataProperty(input, "operationType"),
       "Audit operation type",
     ),
-    stage: requireIdentifier(input.stage, "Audit stage"),
-    eventCode: requireIdentifier(input.eventCode, "Audit event code"),
-    outcome: requireEnumValue(input.outcome, auditOutcomes, "Audit outcome"),
+    stage: requireIdentifier(readOwnDataProperty(input, "stage"), "Audit stage"),
+    eventCode: requireIdentifier(
+      readOwnDataProperty(input, "eventCode"),
+      "Audit event code",
+    ),
+    outcome: requireEnumValue(
+      readOwnDataProperty(input, "outcome"),
+      auditOutcomes,
+      "Audit outcome",
+    ),
     severity: requireEnumValue(
-      input.severity,
+      readOwnDataProperty(input, "severity"),
       auditSeverities,
       "Audit severity",
     ),
-    ...(input.providerId === undefined
+    ...(providerId === undefined
       ? {}
-      : {
-          providerId: requireIdentifier(input.providerId, "Audit provider id"),
-        }),
+      : { providerId: requireIdentifier(providerId, "Audit provider id") }),
     safeDetails: scrubbed.details,
     redactedFieldCount: scrubbed.redactedFieldCount,
     excludedFieldCount: scrubbed.excludedFieldCount,
