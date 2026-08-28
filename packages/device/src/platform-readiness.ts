@@ -49,13 +49,19 @@ export interface PlatformReadinessPlan {
   readonly writeDisposition: "BLOCKED_PENDING_HARDWARE_VALIDATION";
 }
 
-const hostPreference: Readonly<
-  Record<PlatformHost, readonly PlatformAdapterKind[]>
-> = Object.freeze({
-  WEB_DESKTOP: Object.freeze(["LOCAL_HTTP", "WEB_SERIAL", "WEB_USB"]),
-  WEB_ANDROID: Object.freeze(["LOCAL_HTTP", "WEB_SERIAL", "WEB_USB"]),
-  ANDROID_NATIVE: Object.freeze(["NATIVE_USB", "LOCAL_HTTP"]),
-});
+const hostPreference = Object.freeze({
+  WEB_DESKTOP: Object.freeze([
+    "LOCAL_HTTP",
+    "WEB_SERIAL",
+    "WEB_USB",
+  ] as const),
+  WEB_ANDROID: Object.freeze([
+    "LOCAL_HTTP",
+    "WEB_SERIAL",
+    "WEB_USB",
+  ] as const),
+  ANDROID_NATIVE: Object.freeze(["NATIVE_USB", "LOCAL_HTTP"] as const),
+}) satisfies Readonly<Record<PlatformHost, readonly PlatformAdapterKind[]>>;
 
 function implementedAdapters(
   input: readonly PlatformAdapterAvailability[],

@@ -143,9 +143,9 @@ describe("analyzePerformanceExperiment", () => {
     });
 
     expect(analysis.summaries[0]?.medianImprovementPercent).toBe(0);
-    expect(Number.isFinite(analysis.summaries[0]?.medianImprovementPercent)).toBe(
-      true,
-    );
+    expect(
+      Number.isFinite(analysis.summaries[0]?.medianImprovementPercent),
+    ).toBe(true);
   });
 
   it("rejects duplicate metrics instead of silently merging them", () => {

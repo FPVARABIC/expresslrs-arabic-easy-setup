@@ -23,9 +23,7 @@ describe("createPlatformReadinessPlan", () => {
       adapters: [{ adapter: "WEB_SERIAL", implemented: true }],
     });
 
-    expect(plan.writeDisposition).toBe(
-      "BLOCKED_PENDING_HARDWARE_VALIDATION",
-    );
+    expect(plan.writeDisposition).toBe("BLOCKED_PENDING_HARDWARE_VALIDATION");
     expect(plan.hardwareValidation).toBe("NONE");
     expect(plan.validationLevel).toBe("SOFTWARE_ONLY");
   });
