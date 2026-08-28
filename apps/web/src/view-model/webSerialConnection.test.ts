@@ -54,7 +54,9 @@ describe("read-only Web Serial connection", () => {
           serial: {
             requestPort: vi
               .fn()
-              .mockRejectedValue(new DOMException("cancelled", "NotFoundError")),
+              .mockRejectedValue(
+                new DOMException("cancelled", "NotFoundError"),
+              ),
           },
         },
         secureContext: true,
