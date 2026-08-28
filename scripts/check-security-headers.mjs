@@ -22,7 +22,7 @@ const requiredHeaders = new Map([
   ["cross-origin-resource-policy", "same-origin"],
   [
     "permissions-policy",
-    "bluetooth=(), camera=(), geolocation=(), hid=(), microphone=(), payment=(), serial=(), usb=()",
+    "bluetooth=(), camera=(), geolocation=(), hid=(), local-network=(self), microphone=(), payment=(), serial=(self), usb=(self)",
   ],
 ]);
 const expectedDirectiveNames = new Set([
