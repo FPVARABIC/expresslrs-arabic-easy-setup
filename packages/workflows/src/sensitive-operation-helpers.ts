@@ -124,12 +124,39 @@ export function copyExactUint8Array(value: unknown): Uint8Array | null {
 /** Kept as a provider-specific name at existing call sites. */
 export const readProviderDataProperty = readOwnDataProperty;
 
-/** Providers are untrusted and may ignore cancellation on their own. */
+/**
+ * CancellationSignal is an explicit control port rather than an untrusted data
+ * envelope. Browser/Node AbortSignal exposes `aborted` through its prototype,
+ * so this one property is intentionally read through the port contract. A
+ * throwing implementation fails closed instead of being treated as active.
+ */
 export function assertNotAborted(signal?: CancellationSignal): void {
-  if (readOwnDataProperty(signal, "aborted") === true) {
+  if (signal === undefined) {
+    return;
+  }
+  let aborted: boolean;
+  try {
+    aborted = signal.aborted;
+  } catch {
+    throw new CoreOperationError({
+      code: "INTERNAL_ERROR",
+      reason: "CANCELLATION_SIGNAL_UNREADABLE",
+      details: {},
+      retryable: false,
+    });
+  }
+  if (aborted === true) {
     const error = new Error("The sensitive operation was cancelled");
     error.name = "AbortError";
     throw error;
+  }
+  if (aborted !== false) {
+    throw new CoreOperationError({
+      code: "INTERNAL_ERROR",
+      reason: "CANCELLATION_SIGNAL_INVALID",
+      details: {},
+      retryable: false,
+    });
   }
 }
 
