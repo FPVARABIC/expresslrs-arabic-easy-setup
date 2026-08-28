@@ -58,7 +58,9 @@ function rejectedOperationError(): OperationError {
  * boundary or reach a host/export path. Provider-owned accessors are never
  * executed while sanitizing the envelope.
  */
-export function sanitizeOperationError(error: OperationError | unknown): OperationError {
+export function sanitizeOperationError(
+  error: OperationError | unknown,
+): OperationError {
   const rawCode = readOwnDataProperty(error, "code");
   const rawReason = readOwnDataProperty(error, "reason");
   const rawDetails = readOwnDataProperty(error, "details");

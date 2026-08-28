@@ -198,7 +198,8 @@ function syntheticEvidenceTrust(input: {
     sourceKind: "synthetic-runtime-config",
     sourceInstanceId: "synthetic-runtime-reader",
     trustDomain: "synthetic-runtime-firmware",
-    strength: input.claim === identityClaims.mcuFamily ? "GENERIC" : "SUPPORTING",
+    strength:
+      input.claim === identityClaims.mcuFamily ? "GENERIC" : "SUPPORTING",
     reliability: "VALIDATED",
   };
 }
@@ -239,8 +240,7 @@ export async function inspectHeldDevice(input: {
   const sessions = readOwnDataProperty(input, "sessions");
   const catalog = readOwnDataProperty(input, "catalog");
   const signal = readOwnDataProperty(input, "signal") as
-    | CancellationSignal
-    | undefined;
+    CancellationSignal | undefined;
   if (
     typeof reader !== "object" ||
     reader === null ||
@@ -273,7 +273,10 @@ export async function inspectHeldDevice(input: {
 
   assertNotAborted(signal);
   (sessions as DeviceSessionManager).assertHeld(session as DeviceSession);
-  const rawEvidence = await Reflect.apply(readIdentity, reader, [session, signal]);
+  const rawEvidence = await Reflect.apply(readIdentity, reader, [
+    session,
+    signal,
+  ]);
   assertNotAborted(signal);
   (sessions as DeviceSessionManager).assertHeld(session as DeviceSession);
   const rebuiltEvidence = rebuildDiscoveryEvidence({

@@ -64,14 +64,11 @@ export async function runEasyBinding(input: {
     throw new TypeError("Binding descriptor rebuild returned no value");
   }
   const provider = readOwnDataProperty(input, "provider") as
-    | BindingProvider
-    | undefined;
+    BindingProvider | undefined;
   const sessions = readOwnDataProperty(input, "sessions") as
-    | DeviceSessionManager
-    | undefined;
+    DeviceSessionManager | undefined;
   const catalog = readOwnDataProperty(input, "catalog") as
-    | TargetCatalog
-    | undefined;
+    TargetCatalog | undefined;
   // User intent is a trusted control value, not a Provider envelope. Capture
   // it exactly once before constructing the machine so a synchronous observer
   // cannot change the decision after the operation starts.
@@ -81,13 +78,12 @@ export async function runEasyBinding(input: {
   } catch {
     throw new TypeError("Binding workflow input is invalid");
   }
-  const clock = readOwnDataProperty(input, "clock") as WorkflowClock | undefined;
+  const clock = readOwnDataProperty(input, "clock") as
+    WorkflowClock | undefined;
   const observer = readOwnDataProperty(input, "observer") as
-    | OperationObserver<EasyBindingResult>
-    | undefined;
+    OperationObserver<EasyBindingResult> | undefined;
   const signal = readOwnDataProperty(input, "signal") as
-    | CancellationSignal
-    | undefined;
+    CancellationSignal | undefined;
   if (
     provider === undefined ||
     sessions === undefined ||
@@ -108,6 +104,8 @@ export async function runEasyBinding(input: {
   let commandCompleted = false;
 
   try {
+    assertNotAborted(signal);
+    machine.transition("PREPARING");
     const providerId = assertSensitiveProviderAdmitted(provider);
     const prepareBinding = requireDataMethod(
       provider,
@@ -131,7 +129,6 @@ export async function runEasyBinding(input: {
     );
 
     assertNotAborted(signal);
-    machine.transition("PREPARING");
     if (
       rebuildProviderId(readProviderDataProperty(provider, "id")) !== providerId
     ) {

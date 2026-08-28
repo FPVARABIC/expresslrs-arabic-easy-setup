@@ -75,7 +75,9 @@ export interface FirmwareUpdateResult {
 
 const maximumUpdateProviders = 32;
 
-function snapshotProviderRegistry(value: unknown): readonly FirmwareUpdateProvider[] {
+function snapshotProviderRegistry(
+  value: unknown,
+): readonly FirmwareUpdateProvider[] {
   if (!Array.isArray(value)) {
     return Object.freeze([]);
   }
@@ -147,19 +149,16 @@ export async function runFirmwareUpdate(input: {
     readOwnDataProperty(input, "providers"),
   );
   const sessions = readOwnDataProperty(input, "sessions") as
-    | DeviceSessionManager
-    | undefined;
+    DeviceSessionManager | undefined;
   const catalog = readOwnDataProperty(input, "catalog") as
-    | TargetCatalog
-    | undefined;
+    TargetCatalog | undefined;
   const userConfirmed = readOwnDataProperty(input, "userConfirmed");
-  const clock = readOwnDataProperty(input, "clock") as WorkflowClock | undefined;
+  const clock = readOwnDataProperty(input, "clock") as
+    WorkflowClock | undefined;
   const observer = readOwnDataProperty(input, "observer") as
-    | OperationObserver<FirmwareUpdateResult>
-    | undefined;
+    OperationObserver<FirmwareUpdateResult> | undefined;
   const signal = readOwnDataProperty(input, "signal") as
-    | CancellationSignal
-    | undefined;
+    CancellationSignal | undefined;
   if (
     artifactDigestProvider === undefined ||
     sessions === undefined ||

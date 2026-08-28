@@ -58,7 +58,8 @@ export interface LocalHttpDiscoveryOutcome {
 }
 
 export type LocalHttpProgressObserver = (stage: ReadOnlyStageCategory) => void;
-export type LocalNetworkPermissionAssessment = () => Promise<LocalNetworkPermissionState>;
+export type LocalNetworkPermissionAssessment =
+  () => Promise<LocalNetworkPermissionState>;
 
 const emptyTargetCatalog = new InMemoryTargetCatalog(
   {

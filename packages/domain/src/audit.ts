@@ -317,7 +317,9 @@ function requireIdentifier(value: unknown, label: string): string {
 
 function requireTimestamp(value: unknown): string {
   if (typeof value !== "string") {
-    throw new TypeError("Audit event timestamp must be a canonical UTC ISO timestamp");
+    throw new TypeError(
+      "Audit event timestamp must be a canonical UTC ISO timestamp",
+    );
   }
   const normalized = value.trim();
   const parsed = new Date(normalized);
@@ -344,7 +346,9 @@ function requireEnumValue<T extends string>(
   return value as T;
 }
 
-export function createAuditEvent(input: CreateAuditEventInput | unknown): AuditEvent {
+export function createAuditEvent(
+  input: CreateAuditEventInput | unknown,
+): AuditEvent {
   const sequence = readOwnDataProperty(input, "sequence");
   if (!Number.isSafeInteger(sequence) || (sequence as number) < 0) {
     throw new TypeError("Audit event sequence must be a non-negative integer");
@@ -353,7 +357,9 @@ export function createAuditEvent(input: CreateAuditEventInput | unknown): AuditE
   const details =
     rawDetails === undefined
       ? {}
-      : rawDetails !== null && typeof rawDetails === "object" && !Array.isArray(rawDetails)
+      : rawDetails !== null &&
+          typeof rawDetails === "object" &&
+          !Array.isArray(rawDetails)
         ? (rawDetails as Readonly<Record<string, unknown>>)
         : {};
   const scrubbed = scrubAuditDetails(details);
@@ -372,7 +378,10 @@ export function createAuditEvent(input: CreateAuditEventInput | unknown): AuditE
       readOwnDataProperty(input, "operationType"),
       "Audit operation type",
     ),
-    stage: requireIdentifier(readOwnDataProperty(input, "stage"), "Audit stage"),
+    stage: requireIdentifier(
+      readOwnDataProperty(input, "stage"),
+      "Audit stage",
+    ),
     eventCode: requireIdentifier(
       readOwnDataProperty(input, "eventCode"),
       "Audit event code",

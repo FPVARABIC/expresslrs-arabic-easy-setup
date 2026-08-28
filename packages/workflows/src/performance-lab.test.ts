@@ -322,5 +322,7 @@ describe("analyzePerformanceExperiment", () => {
     expect(analysis.status).toBe("VALID");
     expect(Number.isFinite(analysis.summaries[0]?.medianBaseline)).toBe(true);
     expect(analysis.summaries[0]?.medianBaseline).toBe(Number.MAX_VALUE);
+    expect(analysis.summaries[0]?.medianCandidate).toBe(Number.MAX_VALUE);
+    expect(analysis.summaries[0]?.medianImprovementPercent).toBe(0);
   });
 });

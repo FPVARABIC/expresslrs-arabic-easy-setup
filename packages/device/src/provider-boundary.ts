@@ -240,7 +240,9 @@ function untrustedClassification(): IdentityEvidenceTrust {
   };
 }
 
-function validateClassification(value: IdentityEvidenceTrust): IdentityEvidenceTrust {
+function validateClassification(
+  value: IdentityEvidenceTrust,
+): IdentityEvidenceTrust {
   const sourceKind = machineToken(
     readOwnDataProperty(value, "sourceKind"),
     "IDENTITY_POLICY_SOURCE_KIND_INVALID",
@@ -460,7 +462,9 @@ export function rebuildDiscoveryCapabilities(input: {
     const safeEvidenceIds: string[] = [];
     const seenEvidenceIds = new Set<string>();
     for (const reportedId of reportedEvidenceIds) {
-      const safeId = (safeIdByReportedId as Map<string, string>).get(reportedId);
+      const safeId = (safeIdByReportedId as Map<string, string>).get(
+        reportedId,
+      );
       if (safeId === undefined || seenEvidenceIds.has(safeId)) {
         fail(
           "PROVIDER_UNSUPPORTED",

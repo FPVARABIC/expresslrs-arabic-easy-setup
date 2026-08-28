@@ -55,8 +55,7 @@ export interface PerformanceExperimentAnalysis {
   readonly hypothesisId: string | null;
   readonly evidenceLevel: PerformanceEvidenceLevel | "UNKNOWN";
   readonly hardwareEvidenceDisposition:
-    | "NOT_PROVIDED"
-    | "UNVERIFIED_CALLER_DECLARATION";
+    "NOT_PROVIDED" | "UNVERIFIED_CALLER_DECLARATION";
   readonly status: "VALID" | "INVALID";
   readonly decision: PerformanceExperimentDecision;
   readonly summaries: readonly PerformanceMetricSummary[];
@@ -108,6 +107,9 @@ function normalizedImprovement(
   const raw = (candidate / baseline - 1) * 100;
   if (!Number.isFinite(raw)) {
     return null;
+  }
+  if (raw === 0) {
+    return 0;
   }
   return direction === "HIGHER_IS_BETTER" ? raw : -raw;
 }
@@ -202,7 +204,9 @@ function rebuildMetric(value: unknown): PerformanceMetricSeries | null {
     typeof id !== "string" ||
     !safeMachineId.test(id) ||
     typeof direction !== "string" ||
-    !performanceMetricDirections.includes(direction as PerformanceMetricDirection) ||
+    !performanceMetricDirections.includes(
+      direction as PerformanceMetricDirection,
+    ) ||
     typeof requiredImprovementPercent !== "number" ||
     !finiteNonNegative(requiredImprovementPercent) ||
     typeof allowedRegressionPercent !== "number" ||
@@ -295,9 +299,7 @@ export function analyzePerformanceExperiment(
       if (improvement === null) {
         return invalidAnalysis(
           input,
-          baseline === 0
-            ? "UNDEFINED_PERCENT_CHANGE"
-            : "NUMERIC_OVERFLOW",
+          baseline === 0 ? "UNDEFINED_PERCENT_CHANGE" : "NUMERIC_OVERFLOW",
         );
       }
       improvements.push(improvement);
@@ -311,7 +313,9 @@ export function analyzePerformanceExperiment(
     metrics.map((metric) => {
       const improvements = improvementsByMetric.get(metric.id);
       if (improvements === undefined) {
-        throw new Error("Validated performance metric has no improvement series");
+        throw new Error(
+          "Validated performance metric has no improvement series",
+        );
       }
       const medianImprovementPercent = median(improvements);
       const threshold: PerformanceMetricSummary["threshold"] =

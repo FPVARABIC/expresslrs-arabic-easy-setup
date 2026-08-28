@@ -84,9 +84,7 @@ export type FirmwareVerificationResult =
       readonly observedTargetId: string | null;
       readonly observedFirmwareVersion: string | null;
       readonly reason:
-        | "TARGET_MISMATCH"
-        | "VERSION_MISMATCH"
-        | "ARTIFACT_NOT_VERIFIED";
+        "TARGET_MISMATCH" | "VERSION_MISMATCH" | "ARTIFACT_NOT_VERIFIED";
     };
 
 /**
