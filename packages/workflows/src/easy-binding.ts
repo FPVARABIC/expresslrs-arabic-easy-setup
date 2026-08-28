@@ -14,11 +14,14 @@ import type {
 import {
   acquireWorkflowSession,
   assertNotAborted,
+  assertSensitiveProviderAdmitted,
   identityGateError,
   inspectHeldDevice,
   isAbortError,
+  readOwnDataProperty,
   readProviderDataProperty,
   releaseIfHeld,
+  requireDataMethod,
   safeOperationError,
 } from "./sensitive-operation-helpers.js";
 import type { BindingProvider } from "./sensitive-operation-contracts.js";
@@ -36,8 +39,9 @@ export interface EasyBindingResult {
 }
 
 /**
- * Foundation binding workflow. It is provider-agnostic; Milestone 1 supplies
- * synthetic providers only. A completed command never counts as a bound link.
+ * Foundation binding workflow. It is provider-agnostic; the pre-Hardware gate
+ * currently admits Synthetic providers only. A completed command never counts
+ * as a bound link.
  */
 export async function runEasyBinding(input: {
   readonly operationId: string;
@@ -52,18 +56,63 @@ export async function runEasyBinding(input: {
 }): Promise<OperationRecord<EasyBindingResult>> {
   // Capture every caller-controlled input before constructing the machine: its
   // constructor publishes IDLE synchronously, so an observer can run before
-  // the first workflow statement. Structured safety inputs are copied and
-  // frozen; live service/signal references are captured once and never read
-  // again through the mutable input object.
-  const operationId = input.operationId;
-  const descriptor: DeviceDescriptor = Object.freeze({ ...input.descriptor });
-  const provider = input.provider;
-  const sessions = input.sessions;
-  const catalog = input.catalog;
-  const userConfirmed = input.userConfirmed;
-  const clock = input.clock;
-  const observer = input.observer;
-  const signal = input.signal;
+  // the first workflow statement. Data envelopes are rebuilt without accessors;
+  // live services/control ports are captured once from own data properties.
+  const operationId = rebuildProviderId(
+    readOwnDataProperty(input, "operationId"),
+  );
+  const [descriptor] = rebuildDiscoveryDescriptors([
+    readOwnDataProperty(input, "descriptor"),
+  ]);
+  if (descriptor === undefined) {
+    throw new TypeError("Binding descriptor rebuild returned no value");
+  }
+  const provider = readOwnDataProperty(input, "provider") as
+    | BindingProvider
+    | undefined;
+  const sessions = readOwnDataProperty(input, "sessions") as
+    | DeviceSessionManager
+    | undefined;
+  const catalog = readOwnDataProperty(input, "catalog") as
+    | TargetCatalog
+    | undefined;
+  const userConfirmed = readOwnDataProperty(input, "userConfirmed");
+  const clock = readOwnDataProperty(input, "clock") as WorkflowClock | undefined;
+  const observer = readOwnDataProperty(input, "observer") as
+    | OperationObserver<EasyBindingResult>
+    | undefined;
+  const signal = readOwnDataProperty(input, "signal") as
+    | CancellationSignal
+    | undefined;
+  if (
+    provider === undefined ||
+    sessions === undefined ||
+    catalog === undefined ||
+    typeof userConfirmed !== "boolean"
+  ) {
+    throw new TypeError("Binding workflow input is invalid");
+  }
+  const providerId = assertSensitiveProviderAdmitted(provider);
+  const prepareBinding = requireDataMethod(
+    provider,
+    "prepareBinding",
+    "BINDING_PREPARE_METHOD_UNAVAILABLE",
+  );
+  const executeBinding = requireDataMethod(
+    provider,
+    "executeBinding",
+    "BINDING_EXECUTE_METHOD_UNAVAILABLE",
+  );
+  const reconnect = requireDataMethod(
+    provider,
+    "reconnect",
+    "BINDING_RECONNECT_METHOD_UNAVAILABLE",
+  );
+  const verifyBinding = requireDataMethod(
+    provider,
+    "verifyBinding",
+    "BINDING_VERIFY_METHOD_UNAVAILABLE",
+  );
   const machine = new VerifiedOperationMachine<EasyBindingResult>({
     id: operationId,
     type: "EASY_BINDING",
@@ -73,12 +122,20 @@ export async function runEasyBinding(input: {
   let session: DeviceSession | null = null;
   let commandStarted = false;
   let commandCompleted = false;
-  let providerId: string;
 
   try {
     assertNotAborted(signal);
     machine.transition("PREPARING");
-    providerId = rebuildProviderId(readProviderDataProperty(provider, "id"));
+    // Revalidate the immutable provider id after machine construction so later
+    // operation evidence uses the same captured identity.
+    if (rebuildProviderId(readProviderDataProperty(provider, "id")) !== providerId) {
+      return machine.fail({
+        code: "PROVIDER_UNSUPPORTED",
+        reason: "BINDING_PROVIDER_ID_CHANGED",
+        details: {},
+        retryable: false,
+      });
+    }
     assertNotAborted(signal);
     machine.transition("IDENTIFYING");
     assertNotAborted(signal);
@@ -119,12 +176,15 @@ export async function runEasyBinding(input: {
     machine.transition("EXECUTING");
     assertNotAborted(signal);
     sessions.assertHeld(session);
-    await provider.prepareBinding(session, signal);
+    await Reflect.apply(prepareBinding, provider, [session, signal]);
     assertNotAborted(signal);
     sessions.assertHeld(session);
     assertNotAborted(signal);
     commandStarted = true;
-    const receipt = await provider.executeBinding(session, signal);
+    const receipt = await Reflect.apply(executeBinding, provider, [
+      session,
+      signal,
+    ]);
     commandCompleted =
       readProviderDataProperty(receipt, "commandCompleted") === true;
     assertNotAborted(signal);
@@ -144,10 +204,11 @@ export async function runEasyBinding(input: {
       messageCode: "BINDING_COMMAND_COMPLETED_RECONNECTING",
     });
     assertNotAborted(signal);
-    const reportedReconnectedDescriptor = await provider.reconnect(
-      descriptor.id,
-      signal,
-    );
+    const reportedReconnectedDescriptor = (await Reflect.apply(
+      reconnect,
+      provider,
+      [descriptor.id, signal],
+    )) as DeviceDescriptor | null;
     assertNotAborted(signal);
     if (reportedReconnectedDescriptor === null) {
       return machine.endUncertain("RECOVERY_REQUIRED", {
@@ -198,7 +259,10 @@ export async function runEasyBinding(input: {
 
     machine.transition("VERIFYING");
     assertNotAborted(signal);
-    const verification = await provider.verifyBinding(session, signal);
+    const verification = await Reflect.apply(verifyBinding, provider, [
+      session,
+      signal,
+    ]);
     assertNotAborted(signal);
     sessions.assertHeld(session);
     const verificationPassed =
