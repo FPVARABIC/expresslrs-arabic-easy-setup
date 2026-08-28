@@ -20,4 +20,5 @@ export * from "./performance-lab.js";
 export * from "./read-only-discovery.js";
 export * from "./read-only-module-api.js";
 export * from "./sensitive-operation-contracts.js";
+export * from "./software-readiness.js";
 export * from "./verification-plan.js";
