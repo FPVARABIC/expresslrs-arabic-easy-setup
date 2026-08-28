@@ -29,48 +29,71 @@ export interface OperationError {
   readonly retryable: boolean;
 }
 
+function readOwnDataProperty(value: unknown, key: PropertyKey): unknown {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && "value" in descriptor
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rejectedOperationError(): OperationError {
+  return Object.freeze({
+    code: "INTERNAL_ERROR",
+    reason: "UNSAFE_PROVIDER_ERROR_REJECTED",
+    details: Object.freeze({}),
+    retryable: false,
+  });
+}
+
 /**
  * Public operation errors are safe-by-construction. Adapters may provide raw
  * diagnostics elsewhere, but only reviewed primitive fields can cross this
- * boundary or reach a host/export path.
+ * boundary or reach a host/export path. Provider-owned accessors are never
+ * executed while sanitizing the envelope.
  */
-export function sanitizeOperationError(error: OperationError): OperationError {
-  const runtimeError = error as Partial<OperationError>;
-  const codeIsKnown = operationErrorCodes.includes(
-    runtimeError.code as OperationErrorCode,
-  );
-  const reason =
-    typeof runtimeError.reason === "string" ? runtimeError.reason.trim() : "";
+export function sanitizeOperationError(error: OperationError | unknown): OperationError {
+  const rawCode = readOwnDataProperty(error, "code");
+  const rawReason = readOwnDataProperty(error, "reason");
+  const rawDetails = readOwnDataProperty(error, "details");
+  const rawRetryable = readOwnDataProperty(error, "retryable");
+  const codeIsKnown =
+    typeof rawCode === "string" &&
+    operationErrorCodes.includes(rawCode as OperationErrorCode);
+  const reason = typeof rawReason === "string" ? rawReason.trim() : "";
   const detailsAreSafeShape =
-    runtimeError.details !== null &&
-    typeof runtimeError.details === "object" &&
-    !Array.isArray(runtimeError.details);
+    rawDetails !== null &&
+    typeof rawDetails === "object" &&
+    !Array.isArray(rawDetails);
   if (
     !codeIsKnown ||
     !/^[A-Z0-9][A-Z0-9_:-]{0,127}$/u.test(reason) ||
     !detailsAreSafeShape ||
-    typeof runtimeError.retryable !== "boolean"
+    typeof rawRetryable !== "boolean"
   ) {
-    return Object.freeze({
-      code: "INTERNAL_ERROR",
-      reason: "UNSAFE_PROVIDER_ERROR_REJECTED",
-      details: Object.freeze({}),
-      retryable: false,
-    });
+    return rejectedOperationError();
   }
-  const scrubbed = scrubAuditDetails(runtimeError.details!);
+  const scrubbed = scrubAuditDetails(
+    rawDetails as Readonly<Record<string, unknown>>,
+  );
   return Object.freeze({
-    code: runtimeError.code!,
+    code: rawCode as OperationErrorCode,
     reason,
     details: scrubbed.details,
-    retryable: runtimeError.retryable,
+    retryable: rawRetryable,
   });
 }
 
 export class CoreOperationError extends Error {
   public readonly operationError: OperationError;
 
-  public constructor(operationError: OperationError) {
+  public constructor(operationError: OperationError | unknown) {
     const safeError = sanitizeOperationError(operationError);
     super(safeError.reason);
     this.name = "CoreOperationError";
