@@ -1,16 +1,24 @@
 import type { TargetCatalog } from "@elrs-easy/compatibility";
 import {
+  rebuildDiscoveryCapabilities,
+  rebuildDiscoveryEvidence,
+  rebuildProviderId,
   resolveDeviceIdentity,
   type DeviceSessionManager,
+  type IdentityEvidenceTrustPolicy,
 } from "@elrs-easy/device";
 import {
   CoreOperationError,
+  identityClaims,
   operationErrorCodes,
   type CancellationSignal,
   type Capability,
   type DeviceDescriptor,
   type DeviceIdentityResolution,
   type DeviceSession,
+  type EvidenceReliability,
+  type EvidenceStrength,
+  type IdentityClaim,
   type OperationError,
 } from "@elrs-easy/domain";
 
@@ -79,6 +87,23 @@ export function readDataMethod(
   return null;
 }
 
+export function requireDataMethod(
+  value: unknown,
+  key: PropertyKey,
+  reason: string,
+): (...arguments_: unknown[]) => unknown {
+  const method = readDataMethod(value, key);
+  if (method === null) {
+    throw new CoreOperationError({
+      code: "PROVIDER_UNSUPPORTED",
+      reason,
+      details: {},
+      retryable: false,
+    });
+  }
+  return method;
+}
+
 const exactUint8ArrayPrototype = Uint8Array.prototype;
 
 /** Copies only an exact Uint8Array, rejecting subclasses and other views. */
@@ -101,11 +126,72 @@ export const readProviderDataProperty = readOwnDataProperty;
 
 /** Providers are untrusted and may ignore cancellation on their own. */
 export function assertNotAborted(signal?: CancellationSignal): void {
-  if (signal?.aborted === true) {
+  if (readOwnDataProperty(signal, "aborted") === true) {
     const error = new Error("The sensitive operation was cancelled");
     error.name = "AbortError";
     throw error;
   }
+}
+
+function syntheticEvidenceTrust(input: {
+  readonly claim: IdentityClaim;
+  readonly reportedSourceKind: string;
+}): {
+  readonly sourceKind: string;
+  readonly sourceInstanceId: string;
+  readonly trustDomain: string;
+  readonly strength: EvidenceStrength;
+  readonly reliability: EvidenceReliability;
+} | null {
+  if (input.reportedSourceKind === "synthetic-bootloader") {
+    return input.claim === identityClaims.target
+      ? {
+          sourceKind: "synthetic-bootloader",
+          sourceInstanceId: "synthetic-bootloader-reader",
+          trustDomain: "synthetic-bootloader",
+          strength: "TARGET_SPECIFIC",
+          reliability: "VALIDATED",
+        }
+      : null;
+  }
+  if (input.reportedSourceKind !== "synthetic-runtime-config") {
+    return null;
+  }
+  if (input.claim === identityClaims.target) {
+    return {
+      sourceKind: "synthetic-runtime-config",
+      sourceInstanceId: "synthetic-runtime-reader",
+      trustDomain: "synthetic-runtime-firmware",
+      strength: "TARGET_SPECIFIC",
+      reliability: "VALIDATED",
+    };
+  }
+  return {
+    sourceKind: "synthetic-runtime-config",
+    sourceInstanceId: "synthetic-runtime-reader",
+    trustDomain: "synthetic-runtime-firmware",
+    strength: input.claim === identityClaims.mcuFamily ? "GENERIC" : "SUPPORTING",
+    reliability: "VALIDATED",
+  };
+}
+
+const syntheticSensitiveIdentityPolicy: IdentityEvidenceTrustPolicy =
+  Object.freeze({
+    classify(input) {
+      return syntheticEvidenceTrust(input);
+    },
+  });
+
+export function assertSensitiveProviderAdmitted(reader: unknown): string {
+  if (readOwnDataProperty(reader, "assurance") !== "SYNTHETIC_ONLY") {
+    throw new CoreOperationError({
+      code: "PROVIDER_UNSUPPORTED",
+      reason: "SENSITIVE_PROVIDER_ASSURANCE_NOT_ADMITTED",
+      details: {},
+      retryable: false,
+    });
+  }
+  return rebuildProviderId(readOwnDataProperty(reader, "id"));
 }
 
 export async function inspectHeldDevice(input: {
@@ -115,24 +201,72 @@ export async function inspectHeldDevice(input: {
   readonly catalog: TargetCatalog;
   readonly signal?: CancellationSignal;
 }): Promise<InspectedDevice> {
-  assertNotAborted(input.signal);
-  input.sessions.assertHeld(input.session);
-  const evidence = await input.reader.readIdentity(input.session, input.signal);
-  assertNotAborted(input.signal);
-  input.sessions.assertHeld(input.session);
-  const capabilities = await input.reader.readCapabilities(
-    input.session,
-    input.signal,
+  const reader = readOwnDataProperty(input, "reader");
+  const session = readOwnDataProperty(input, "session");
+  const sessions = readOwnDataProperty(input, "sessions");
+  const catalog = readOwnDataProperty(input, "catalog");
+  const signal = readOwnDataProperty(input, "signal") as
+    | CancellationSignal
+    | undefined;
+  if (
+    typeof reader !== "object" ||
+    reader === null ||
+    typeof session !== "object" ||
+    session === null ||
+    typeof sessions !== "object" ||
+    sessions === null ||
+    typeof catalog !== "object" ||
+    catalog === null
+  ) {
+    throw new CoreOperationError({
+      code: "PROVIDER_UNSUPPORTED",
+      reason: "SENSITIVE_INSPECTION_INPUT_INVALID",
+      details: {},
+      retryable: false,
+    });
+  }
+
+  const providerId = assertSensitiveProviderAdmitted(reader);
+  const readIdentity = requireDataMethod(
+    reader,
+    "readIdentity",
+    "SENSITIVE_PROVIDER_READ_IDENTITY_UNAVAILABLE",
   );
-  assertNotAborted(input.signal);
-  input.sessions.assertHeld(input.session);
+  const readCapabilities = requireDataMethod(
+    reader,
+    "readCapabilities",
+    "SENSITIVE_PROVIDER_READ_CAPABILITIES_UNAVAILABLE",
+  );
+
+  assertNotAborted(signal);
+  (sessions as DeviceSessionManager).assertHeld(session as DeviceSession);
+  const rawEvidence = await Reflect.apply(readIdentity, reader, [session, signal]);
+  assertNotAborted(signal);
+  (sessions as DeviceSessionManager).assertHeld(session as DeviceSession);
+  const rebuiltEvidence = rebuildDiscoveryEvidence({
+    value: rawEvidence,
+    provider: reader as IdentityReader,
+    providerId,
+    policy: syntheticSensitiveIdentityPolicy,
+  });
+  const rawCapabilities = await Reflect.apply(readCapabilities, reader, [
+    session,
+    signal,
+  ]);
+  assertNotAborted(signal);
+  (sessions as DeviceSessionManager).assertHeld(session as DeviceSession);
+  const capabilities = rebuildDiscoveryCapabilities({
+    value: rawCapabilities,
+    safeIdByReportedId: rebuiltEvidence.safeIdByReportedId,
+  });
+  const evidence = rebuiltEvidence.evidence;
 
   return Object.freeze({
     identity: resolveDeviceIdentity({
       evidence,
-      candidates: input.catalog.match(evidence),
+      candidates: (catalog as TargetCatalog).match(evidence),
     }),
-    capabilities: Object.freeze([...capabilities]),
+    capabilities,
   });
 }
 
