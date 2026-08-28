@@ -81,6 +81,28 @@ describe("analyzePerformanceExperiment", () => {
     expect(analysis.decision).toBe("MODIFY_OR_RETEST");
   });
 
+  it("does not classify an unchanged zero-threshold metric as improved", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-003B",
+      evidenceLevel: "HARDWARE_OBSERVED",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "PACKET_DELIVERY_RATIO",
+          direction: "HIGHER_IS_BETTER",
+          baseline: [99, 99],
+          candidate: [99, 99],
+          requiredImprovementPercent: 0,
+          allowedRegressionPercent: 0,
+        },
+      ],
+    });
+
+    expect(analysis.summaries[0]?.threshold).toBe("NEUTRAL");
+    expect(analysis.decision).toBe("MODIFY_OR_RETEST");
+    expect(analysis.performanceClaimAllowed).toBe(false);
+  });
+
   it("fails closed on mismatched paired-run counts", () => {
     const analysis = analyzePerformanceExperiment({
       hypothesisId: "HYP-004",
@@ -128,7 +150,7 @@ describe("analyzePerformanceExperiment", () => {
     expect(analysis.invalidReason).toBe("INSUFFICIENT_PAIRED_RUNS");
   });
 
-  it("handles a zero baseline without emitting Infinity", () => {
+  it("handles an unchanged zero baseline without emitting Infinity", () => {
     const analysis = analyzePerformanceExperiment({
       hypothesisId: "HYP-007",
       evidenceLevel: "HARDWARE_OBSERVED",
@@ -149,6 +171,30 @@ describe("analyzePerformanceExperiment", () => {
     expect(
       Number.isFinite(analysis.summaries[0]?.medianImprovementPercent),
     ).toBe(true);
+    expect(analysis.summaries[0]?.threshold).toBe("NEUTRAL");
+    expect(analysis.decision).toBe("MODIFY_OR_RETEST");
+  });
+
+  it("rejects changed zero baselines because percentage change is undefined", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-007B",
+      evidenceLevel: "HARDWARE_OBSERVED",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "DEADLINE_MISSES",
+          direction: "LOWER_IS_BETTER",
+          baseline: [0, 0],
+          candidate: [1, 1],
+          requiredImprovementPercent: 0,
+          allowedRegressionPercent: 0,
+        },
+      ],
+    });
+
+    expect(analysis.status).toBe("INVALID");
+    expect(analysis.invalidReason).toBe("UNDEFINED_PERCENT_CHANGE");
+    expect(analysis.performanceClaimAllowed).toBe(false);
   });
 
   it("rejects duplicate metrics instead of silently merging them", () => {
@@ -232,5 +278,49 @@ describe("analyzePerformanceExperiment", () => {
 
     expect(analysis.invalidReason).toBe("TOO_MANY_METRICS");
     expect(analysis.summaries).toEqual([]);
+  });
+
+  it("rejects arithmetic overflow instead of emitting an infinite summary", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-013",
+      evidenceLevel: "HARDWARE_OBSERVED",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "EXTREME_RATIO",
+          direction: "HIGHER_IS_BETTER",
+          baseline: [Number.MIN_VALUE, Number.MIN_VALUE],
+          candidate: [Number.MAX_VALUE, Number.MAX_VALUE],
+          requiredImprovementPercent: 1,
+          allowedRegressionPercent: 1,
+        },
+      ],
+    });
+
+    expect(analysis.status).toBe("INVALID");
+    expect(analysis.invalidReason).toBe("NUMERIC_OVERFLOW");
+    expect(analysis.performanceClaimAllowed).toBe(false);
+  });
+
+  it("computes even medians without overflowing their sum", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-014",
+      evidenceLevel: "SYNTHETIC",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "LARGE_LATENCY_UNIT",
+          direction: "LOWER_IS_BETTER",
+          baseline: [Number.MAX_VALUE, Number.MAX_VALUE],
+          candidate: [Number.MAX_VALUE, Number.MAX_VALUE],
+          requiredImprovementPercent: 1,
+          allowedRegressionPercent: 1,
+        },
+      ],
+    });
+
+    expect(analysis.status).toBe("VALID");
+    expect(Number.isFinite(analysis.summaries[0]?.medianBaseline)).toBe(true);
+    expect(analysis.summaries[0]?.medianBaseline).toBe(Number.MAX_VALUE);
   });
 });
