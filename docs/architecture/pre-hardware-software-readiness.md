@@ -4,15 +4,15 @@
 
 This document defines the point at which the project has completed the software work that can be implemented and truthfully validated before reference TX/RX Hardware is introduced.
 
-`READY_FOR_HARDWARE_VALIDATION` does **not** mean Stable Release, Hardware support, real flashing approval, RF improvement, or production trust. It means the software-only construction gates are implemented or explicitly blocked by an external decision/evidence gate that software cannot safely invent.
+`READY_FOR_HARDWARE_VALIDATION` does **not** mean Stable Release, Hardware support, real flashing approval, RF improvement, or production trust. It means every enumerated software-only construction gate is explicitly `PASS`; a `BLOCKED` software gate produces `EXTERNAL_GATES_BLOCKED`, while separate physical and owner evidence gates remain visible and cannot be invented by software.
 
 ## Current reviewed candidate
 
-- application candidate: `cb645a12d1668ddd5dc00182bafc9b4c86487b94`
+- application candidate: `b05d8e257ff1f5afdde5e501b9493f5413b201e5`
 - branch: `feat/read-only-device-foundation`
-- GitHub Actions CI: run #105 — passed
-- exact-SHA GitHub Pages: run #18 — passed
-- Vitest: 46/46 files, 576/576 tests
+- GitHub Actions CI: run #148 — passed
+- exact-SHA GitHub Pages: run #22 — passed
+- Vitest: 48/48 files, 607/607 tests
 - Hardware validation: `NONE`
 - real device writes: disabled
 - performance claims: disabled
@@ -35,7 +35,7 @@ This document defines the point at which the project has completed the software 
 | WEB_PREVIEW | PASS | Exact reviewed SHA is deployed through the quality-gated GitHub Pages workflow. |
 | CI_QUALITY_GATES | PASS | Formatting, lint, TypeScript, boundaries, security, PWA, tests, build, licenses and high-severity audit pass. |
 
-With all eleven software gates accounted for, the software-only report is `READY_FOR_HARDWARE_VALIDATION` while still returning:
+With all eleven software gates explicitly `PASS`, the software-only report is `READY_FOR_HARDWARE_VALIDATION` while still returning:
 
 - `hardwareValidation: NONE`
 - `realWritesEnabled: false`
@@ -55,9 +55,11 @@ The Web shell now includes the pre-Hardware resilience work that can be proven w
 - production-only Service Worker registration;
 - waiting application updates are reported but never force activation or page reload;
 - current application session cannot be intentionally replaced by a new worker;
+- Local Network permission is assessed without prompting before a read attempt, while transport permissions remain scoped to `self`;
+- the self-hosted Cairo font and FPV-ARBCON technical theme are enforced across Web and PWA chrome;
 - limited-offline state is visible without treating `navigator.onLine` as proof of device reachability.
 
-The Pages build for run #18 generated a reviewed PWA worker identity `e98c77cdd2e0b865` for nine shell files and passed the dedicated Pages artifact checker before publication.
+The Pages build for run #22 generated a reviewed PWA worker identity `18b4187200097cf4` for nine shell files and passed the dedicated Pages artifact checker before publication.
 
 ## Platform and Android boundary
 
@@ -79,7 +81,9 @@ This preserves the shared Core/Workflow architecture and prevents an unnecessary
 - minimum run count;
 - required improvement and allowed regression thresholds;
 - deterministic median summaries;
-- explicit `KEEP`, `MODIFY_OR_RETEST`, and `REJECT` decisions only for Hardware-observed input;
+- explicit `REVIEW_HARDWARE_EVIDENCE`, `MODIFY_OR_RETEST`, and `REJECT` analysis decisions;
+- a plain `HARDWARE_OBSERVED` value is recorded as an unverified caller declaration, never as trusted measurement evidence;
+- `performanceClaimAllowed` remains false for every software-only outcome, including favorable metrics;
 - Synthetic input always returns `SOFTWARE_ONLY_NO_ADMISSION` and cannot permit a claim.
 
 No ExpressLRS RF/timing patch is admitted before controlled measurements. This preserves the Master Plan rule that Range/Stability/Reliability/Latency/Telemetry changes enter the optimized Firmware line only when measurements support them.
