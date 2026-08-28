@@ -68,6 +68,47 @@ describe("discovery provider boundary", () => {
     expect(Object.isFrozen(descriptors[0])).toBe(true);
   });
 
+  it("does not execute accessor-backed descriptor fields", () => {
+    let executed = false;
+    const descriptor = Object.defineProperty({}, "id", {
+      get() {
+        executed = true;
+        return "device-1";
+      },
+    });
+    Object.defineProperties(descriptor, {
+      transport: { value: "synthetic" },
+      connectionState: { value: "CONNECTED" },
+    });
+
+    expect(() => rebuildDiscoveryDescriptors([descriptor])).toThrowError(
+      "DISCOVERY_DESCRIPTOR_ID_INVALID",
+    );
+    expect(executed).toBe(false);
+  });
+
+  it("does not execute accessor-backed descriptor array elements", () => {
+    let executed = false;
+    const values: unknown[] = [];
+    Object.defineProperty(values, "0", {
+      configurable: true,
+      get() {
+        executed = true;
+        return {
+          id: "device-1",
+          transport: "synthetic",
+          connectionState: "CONNECTED",
+        };
+      },
+    });
+    Object.defineProperty(values, "length", { value: 1, writable: true });
+
+    expect(() => rebuildDiscoveryDescriptors(values)).toThrowError(
+      "DISCOVERY_PROVIDER_VALUE_INVALID",
+    );
+    expect(executed).toBe(false);
+  });
+
   it("ignores provider normalization and trust metadata by default", () => {
     const rebuilt = rebuildDiscoveryEvidence({
       value: [rawEvidence()],
@@ -124,6 +165,44 @@ describe("discovery provider boundary", () => {
     expect(trusted?.reliability).toBe("VALIDATED");
     expect(untrusted?.strength).toBe("GENERIC");
     expect(untrusted?.reliability).toBe("UNVALIDATED");
+  });
+
+  it("contains a throwing trust policy as a fixed Core error", () => {
+    const policy: IdentityEvidenceTrustPolicy = {
+      classify() {
+        throw new Error("secret=policy-error");
+      },
+    };
+
+    expect(() =>
+      rebuildDiscoveryEvidence({
+        value: [rawEvidence()],
+        provider,
+        providerId: provider.id,
+        policy,
+      }),
+    ).toThrowError("IDENTITY_POLICY_CLASSIFIER_FAILED");
+  });
+
+  it("does not execute accessor-backed evidence fields", () => {
+    let executed = false;
+    const evidence = rawEvidence();
+    Object.defineProperty(evidence, "rawValue", {
+      configurable: true,
+      get() {
+        executed = true;
+        return "secret=accessor";
+      },
+    });
+
+    expect(() =>
+      rebuildDiscoveryEvidence({
+        value: [evidence],
+        provider,
+        providerId: provider.id,
+      }),
+    ).toThrowError("IDENTITY_EVIDENCE_VALUE_INVALID");
+    expect(executed).toBe(false);
   });
 
   it.each(["serial", "uid", "binding-phrase", "wifi-password"])(
@@ -228,6 +307,34 @@ describe("discovery provider boundary", () => {
     expect(Object.isFrozen(capabilities[0])).toBe(true);
     expect(Object.isFrozen(capabilities[0]?.sourceEvidenceIds)).toBe(true);
     expect(Object.isFrozen(capabilities[0]?.limitations)).toBe(true);
+  });
+
+  it("does not execute accessor-backed capability fields", () => {
+    let executed = false;
+    const rebuilt = rebuildDiscoveryEvidence({
+      value: [rawEvidence()],
+      provider,
+      providerId: provider.id,
+    });
+    const capability = Object.defineProperty({}, "id", {
+      get() {
+        executed = true;
+        return "read-config";
+      },
+    });
+    Object.defineProperties(capability, {
+      available: { value: true },
+      sourceEvidenceIds: { value: ["reported-target-id"] },
+      limitations: { value: ["SYNTHETIC_ONLY"] },
+    });
+
+    expect(() =>
+      rebuildDiscoveryCapabilities({
+        value: [capability],
+        safeIdByReportedId: rebuilt.safeIdByReportedId,
+      }),
+    ).toThrowError("DEVICE_CAPABILITY_ID_INVALID");
+    expect(executed).toBe(false);
   });
 
   it("rejects missing provenance and free-form capability limitations", () => {
