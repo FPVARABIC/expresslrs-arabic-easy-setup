@@ -72,4 +72,50 @@ describe("operation error privacy", () => {
       });
     }
   });
+
+  it("does not execute accessor-backed provider error fields", () => {
+    let executed = false;
+    const error = {};
+    for (const [key, value] of Object.entries({
+      code: "CONNECTION_LOST",
+      reason: "SAFE_REASON",
+      details: {},
+      retryable: true,
+    })) {
+      Object.defineProperty(error, key, {
+        get() {
+          executed = true;
+          return value;
+        },
+      });
+    }
+
+    const sanitized = sanitizeOperationError(error);
+
+    expect(executed).toBe(false);
+    expect(sanitized).toEqual({
+      code: "INTERNAL_ERROR",
+      reason: "UNSAFE_PROVIDER_ERROR_REJECTED",
+      details: {},
+      retryable: false,
+    });
+  });
+
+  it("contains proxy descriptor failures as a fixed internal error", () => {
+    const proxy = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor() {
+          throw new Error("secret=descriptor-trap");
+        },
+      },
+    );
+
+    expect(sanitizeOperationError(proxy)).toEqual({
+      code: "INTERNAL_ERROR",
+      reason: "UNSAFE_PROVIDER_ERROR_REJECTED",
+      details: {},
+      retryable: false,
+    });
+  });
 });
