@@ -10,12 +10,7 @@ import {
 
 type HubLocale = "ar" | "en";
 type DeviceRole = "tx" | "rx";
-type ConnectionMethod =
-  | "wifi"
-  | "serial"
-  | "etx"
-  | "betaflight"
-  | "stlink";
+type ConnectionMethod = "wifi" | "serial" | "etx" | "betaflight" | "stlink";
 
 type SerialPresentationStatus =
   | "IDLE"
@@ -126,6 +121,9 @@ const copy = {
   },
 } as const;
 
+const connectionPortalHost = document.createElement("div");
+connectionPortalHost.className = "device-connection-host";
+
 function localeFromDocument(): HubLocale {
   return document.documentElement.lang.toLowerCase().startsWith("en")
     ? "en"
@@ -149,25 +147,18 @@ function useDocumentLocale(): HubLocale {
   return locale;
 }
 
-function useConnectionPortalHost(): HTMLElement | null {
-  const [host, setHost] = useState<HTMLElement | null>(null);
-
+function useConnectionPortalHost(): void {
   useEffect(() => {
     const page = document.querySelector<HTMLElement>("main.page");
     if (page === null) {
       return;
     }
 
-    const node = document.createElement("div");
-    node.className = "device-connection-host";
     const workspace = page.querySelector(".simple-workspace");
-    page.insertBefore(node, workspace);
-    setHost(node);
+    page.insertBefore(connectionPortalHost, workspace);
 
-    return () => node.remove();
+    return () => connectionPortalHost.remove();
   }, []);
-
-  return host;
 }
 
 function methodsForRole(role: DeviceRole): readonly ConnectionMethod[] {
@@ -213,12 +204,13 @@ function serialStatusText(
 }
 
 export function DeviceConnectionHub() {
-  const host = useConnectionPortalHost();
+  useConnectionPortalHost();
   const locale = useDocumentLocale();
 
-  return host === null
-    ? null
-    : createPortal(<DeviceConnectionHubPanel locale={locale} />, host);
+  return createPortal(
+    <DeviceConnectionHubPanel locale={locale} />,
+    connectionPortalHost,
+  );
 }
 
 export function DeviceConnectionHubPanel({
@@ -326,7 +318,11 @@ export function DeviceConnectionHubPanel({
 
       <div className="connection-role-row">
         <span>{text.roleLabel}</span>
-        <div className="connection-role-switch" role="group" aria-label={text.roleLabel}>
+        <div
+          className="connection-role-switch"
+          role="group"
+          aria-label={text.roleLabel}
+        >
           <button
             type="button"
             className={role === "tx" ? "is-active" : undefined}
@@ -370,11 +366,19 @@ export function DeviceConnectionHubPanel({
           <>
             <p>{text.wifiDescription}</p>
             <div className="connection-link-row">
-              <a href="http://10.0.0.1/" target="_blank" rel="noopener noreferrer">
+              <a
+                href="http://10.0.0.1/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {text.openAp}
               </a>
               <a
-                href={role === "tx" ? "http://elrs_tx.local/" : "http://elrs_rx.local/"}
+                href={
+                  role === "tx"
+                    ? "http://elrs_tx.local/"
+                    : "http://elrs_rx.local/"
+                }
                 target="_blank"
                 rel="noopener noreferrer"
               >
