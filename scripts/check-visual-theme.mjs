@@ -11,7 +11,10 @@ const mainPath = path.join(repositoryRoot, "apps/web/src/main.tsx");
 const themePath = path.join(repositoryRoot, "apps/web/src/reference-theme.css");
 const packagePath = path.join(repositoryRoot, "package.json");
 const indexPath = path.join(repositoryRoot, "apps/web/index.html");
-const manifestPath = path.join(repositoryRoot, "apps/web/public/manifest.webmanifest");
+const manifestPath = path.join(
+  repositoryRoot,
+  "apps/web/public/manifest.webmanifest",
+);
 const iconPath = path.join(repositoryRoot, "apps/web/public/app-icon.svg");
 
 const [
@@ -115,8 +118,10 @@ if (
   fail("installed PWA chrome must use the reviewed dark background");
 }
 
-if (!iconSource.includes('fill="#0e1116"') || !iconSource.includes('#4c8dff')) {
-  fail("the application icon must use the reviewed dark background and blue accent");
+if (!iconSource.includes('fill="#0e1116"') || !iconSource.includes("#4c8dff")) {
+  fail(
+    "the application icon must use the reviewed dark background and blue accent",
+  );
 }
 
 console.log(
