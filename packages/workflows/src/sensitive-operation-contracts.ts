@@ -11,7 +11,16 @@ import type {
   FirmwareUpdateProviderAssurance,
 } from "@elrs-easy/domain";
 
+export type SensitiveOperationProviderAssurance = "SYNTHETIC_ONLY";
+
 export interface IdentityReader {
+  readonly id: string;
+  /**
+   * Until physical admission exists, sensitive workflows accept only lab
+   * providers. A future real provider requires an explicit contract change and
+   * review instead of becoming active through structural typing alone.
+   */
+  readonly assurance: SensitiveOperationProviderAssurance;
   readIdentity(
     session: DeviceSession,
     signal?: CancellationSignal,
@@ -38,7 +47,6 @@ export type BindingVerificationResult =
     };
 
 export interface BindingProvider extends IdentityReader {
-  readonly id: string;
   prepareBinding(
     session: DeviceSession,
     signal?: CancellationSignal,
@@ -76,7 +84,9 @@ export type FirmwareVerificationResult =
       readonly observedTargetId: string | null;
       readonly observedFirmwareVersion: string | null;
       readonly reason:
-        "TARGET_MISMATCH" | "VERSION_MISMATCH" | "ARTIFACT_NOT_VERIFIED";
+        | "TARGET_MISMATCH"
+        | "VERSION_MISMATCH"
+        | "ARTIFACT_NOT_VERIFIED";
     };
 
 /**
@@ -91,7 +101,6 @@ export interface VerifiedFirmwareUpdateArtifact {
 }
 
 export interface FirmwareUpdateProvider extends IdentityReader {
-  readonly id: string;
   /** The current contract intentionally admits Synthetic providers only. */
   readonly assurance: FirmwareUpdateProviderAssurance;
   /** Canonical mechanism; platform-specific provider identity stays separate. */
