@@ -31,7 +31,10 @@ export interface SoftwareReadinessReport {
   readonly schemaVersion: 1;
   readonly type: "SOFTWARE_ONLY_READINESS_REPORT";
   readonly status:
-    "READY_FOR_HARDWARE_VALIDATION" | "SOFTWARE_GAPS_REMAIN" | "INVALID_INPUT";
+    | "READY_FOR_HARDWARE_VALIDATION"
+    | "SOFTWARE_GAPS_REMAIN"
+    | "EXTERNAL_GATES_BLOCKED"
+    | "INVALID_INPUT";
   readonly gateStates: Readonly<
     Record<SoftwareReadinessGateId, SoftwareReadinessGateState>
   >;
@@ -77,9 +80,10 @@ function invalidReport(): SoftwareReadinessReport {
 
 /**
  * Summarizes only the software work that can be closed before physical
- * validation. BLOCKED is reserved for an external/hardware gate and does not
- * masquerade as completed software. Every report keeps Hardware, real writes,
- * and performance claims disabled.
+ * validation. BLOCKED is preserved as an external gate and never counts as a
+ * PASS. READY_FOR_HARDWARE_VALIDATION is emitted only when every software gate
+ * is explicitly PASS. Every report keeps Hardware, real writes, and
+ * performance claims disabled.
  */
 export function createSoftwareReadinessReport(
   input: SoftwareReadinessInput | unknown,
@@ -124,16 +128,17 @@ export function createSoftwareReadinessReport(
   const externallyBlockedGates = Object.freeze(
     softwareReadinessGateIds.filter((id) => states[id] === "BLOCKED"),
   );
-  const allSoftwareAccountedFor = softwareReadinessGateIds.every(
-    (id) => states[id] !== "INCOMPLETE",
-  );
+  const status: SoftwareReadinessReport["status"] =
+    missingSoftwareGates.length > 0
+      ? "SOFTWARE_GAPS_REMAIN"
+      : externallyBlockedGates.length > 0
+        ? "EXTERNAL_GATES_BLOCKED"
+        : "READY_FOR_HARDWARE_VALIDATION";
 
   return Object.freeze({
     schemaVersion: 1,
     type: "SOFTWARE_ONLY_READINESS_REPORT",
-    status: allSoftwareAccountedFor
-      ? "READY_FOR_HARDWARE_VALIDATION"
-      : "SOFTWARE_GAPS_REMAIN",
+    status,
     gateStates: Object.freeze({ ...states }),
     missingSoftwareGates,
     externallyBlockedGates,
