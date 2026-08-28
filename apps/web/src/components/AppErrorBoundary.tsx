@@ -1,5 +1,8 @@
 import { Component, type ReactNode } from "react";
-import { getApplicationFailureCopy, type NetworkModeLocale } from "@elrs-easy/i18n";
+import {
+  getApplicationFailureCopy,
+  type NetworkModeLocale,
+} from "@elrs-easy/i18n";
 
 interface AppErrorBoundaryProps {
   readonly children: ReactNode;

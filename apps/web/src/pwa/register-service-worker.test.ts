@@ -65,19 +65,22 @@ describe("safe Service Worker registration", () => {
   });
 
   it("reports a newly installed waiting worker after updatefound", async () => {
-    let updateFound: (() => void) | null = null;
-    let stateChanged: (() => void) | null = null;
+    let waitingAvailable = false;
     const installing = {
       state: "installing",
       addEventListener(_type: "statechange", listener: () => void) {
-        stateChanged = listener;
+        installing.state = "installed";
+        waitingAvailable = true;
+        listener();
       },
     } satisfies ServiceWorkerStatePort;
     const registration = {
-      waiting: null as ServiceWorkerStatePort | null,
+      get waiting() {
+        return waitingAvailable ? installing : null;
+      },
       installing,
       addEventListener(_type: "updatefound", listener: () => void) {
-        updateFound = listener;
+        listener();
       },
     } satisfies ServiceWorkerRegistrationView;
     const onWaiting = vi.fn();
@@ -88,11 +91,6 @@ describe("safe Service Worker registration", () => {
       documentUrl: "https://example.test/app/",
       onWaiting,
     });
-
-    updateFound?.();
-    installing.state = "installed";
-    registration.waiting = installing;
-    stateChanged?.();
 
     expect(onWaiting).toHaveBeenCalledTimes(1);
   });

@@ -20,7 +20,9 @@ describe("AppErrorBoundary", () => {
 
   it("renders a fixed Arabic fallback without reflecting the thrown error", () => {
     document.documentElement.lang = "ar";
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     render(
       <AppErrorBoundary>
@@ -37,7 +39,9 @@ describe("AppErrorBoundary", () => {
 
   it("uses the fixed English fallback when the document locale is English", () => {
     document.documentElement.lang = "en";
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
 
     render(
       <AppErrorBoundary>

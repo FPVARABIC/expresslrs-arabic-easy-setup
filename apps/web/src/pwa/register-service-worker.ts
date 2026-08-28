@@ -29,7 +29,9 @@ export interface RegisterSafeServiceWorkerInput {
   readonly onWaiting?: () => void;
 }
 
-function adaptWorker(worker: ServiceWorker | null): ServiceWorkerStatePort | null {
+function adaptWorker(
+  worker: ServiceWorker | null,
+): ServiceWorkerStatePort | null {
   if (worker === null) {
     return null;
   }
