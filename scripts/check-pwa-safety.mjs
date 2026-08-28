@@ -29,6 +29,7 @@ const sensitiveFragments = [
   "/update-metadata",
   "/update-manifest",
 ];
+const reviewedPwaChromeColor = "#0e1116";
 
 function fail(message) {
   throw new Error(`PWA safety policy failed: ${message}`);
@@ -55,10 +56,14 @@ function validateManifest(source, label) {
   expectExact(manifest.dir, "rtl", `${label} dir`);
   expectExact(
     manifest.background_color,
-    "#071713",
+    reviewedPwaChromeColor,
     `${label} background_color`,
   );
-  expectExact(manifest.theme_color, "#071713", `${label} theme_color`);
+  expectExact(
+    manifest.theme_color,
+    reviewedPwaChromeColor,
+    `${label} theme_color`,
+  );
   if (!Array.isArray(manifest.icons) || manifest.icons.length !== 1) {
     fail(`${label} must contain exactly one reviewed app icon`);
   }
