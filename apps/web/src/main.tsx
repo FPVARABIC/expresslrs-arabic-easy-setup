@@ -4,11 +4,13 @@ import { createRoot } from "react-dom/client";
 import { defaultLocale, getDirection } from "@elrs-easy/i18n";
 import { App } from "./App";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { DeviceConnectionHub } from "./components/DeviceConnectionHub";
 import { ApplicationUpdateNotice } from "./pwa/ApplicationUpdateNotice";
 import { NetworkModeNotice } from "./pwa/NetworkModeNotice";
 import "./styles.css";
 import "./pwa/pwa.css";
 import "./reference-theme.css";
+import "./connection-hub.css";
 
 document.documentElement.lang = defaultLocale;
 document.documentElement.dir = getDirection(defaultLocale);
@@ -24,6 +26,7 @@ createRoot(root).render(
     <NetworkModeNotice />
     <ApplicationUpdateNotice />
     <AppErrorBoundary>
+      <DeviceConnectionHub />
       <App />
     </AppErrorBoundary>
   </StrictMode>,
