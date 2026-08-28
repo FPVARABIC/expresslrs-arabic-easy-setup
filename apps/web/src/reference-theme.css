@@ -369,7 +369,7 @@ select:focus-visible,
 .primary-button {
   border-color: var(--cyan);
   background: var(--cyan);
-  color: #ffffff;
+  color: var(--page);
 }
 
 .primary-button:hover {

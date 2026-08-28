@@ -107,6 +107,10 @@ if (
   );
 }
 
+if (!/\.primary-button\s*\{[^}]*color:\s*var\(--page\);/su.test(themeSource)) {
+  fail("primary blue actions must retain accessible dark text contrast");
+}
+
 if (!indexSource.includes('<meta name="theme-color" content="#0e1116" />')) {
   fail("browser chrome must use the reviewed dark background");
 }
