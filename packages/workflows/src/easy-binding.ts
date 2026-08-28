@@ -54,10 +54,6 @@ export async function runEasyBinding(input: {
   readonly observer?: OperationObserver<EasyBindingResult>;
   readonly signal?: CancellationSignal;
 }): Promise<OperationRecord<EasyBindingResult>> {
-  // Capture every caller-controlled input before constructing the machine: its
-  // constructor publishes IDLE synchronously, so an observer can run before
-  // the first workflow statement. Data envelopes are rebuilt without accessors;
-  // live services/control ports are captured once from own data properties.
   const operationId = rebuildProviderId(
     readOwnDataProperty(input, "operationId"),
   );
@@ -76,7 +72,15 @@ export async function runEasyBinding(input: {
   const catalog = readOwnDataProperty(input, "catalog") as
     | TargetCatalog
     | undefined;
-  const userConfirmed = readOwnDataProperty(input, "userConfirmed");
+  // User intent is a trusted control value, not a Provider envelope. Capture
+  // it exactly once before constructing the machine so a synchronous observer
+  // cannot change the decision after the operation starts.
+  let userConfirmed: unknown;
+  try {
+    userConfirmed = input.userConfirmed;
+  } catch {
+    throw new TypeError("Binding workflow input is invalid");
+  }
   const clock = readOwnDataProperty(input, "clock") as WorkflowClock | undefined;
   const observer = readOwnDataProperty(input, "observer") as
     | OperationObserver<EasyBindingResult>
@@ -92,27 +96,7 @@ export async function runEasyBinding(input: {
   ) {
     throw new TypeError("Binding workflow input is invalid");
   }
-  const providerId = assertSensitiveProviderAdmitted(provider);
-  const prepareBinding = requireDataMethod(
-    provider,
-    "prepareBinding",
-    "BINDING_PREPARE_METHOD_UNAVAILABLE",
-  );
-  const executeBinding = requireDataMethod(
-    provider,
-    "executeBinding",
-    "BINDING_EXECUTE_METHOD_UNAVAILABLE",
-  );
-  const reconnect = requireDataMethod(
-    provider,
-    "reconnect",
-    "BINDING_RECONNECT_METHOD_UNAVAILABLE",
-  );
-  const verifyBinding = requireDataMethod(
-    provider,
-    "verifyBinding",
-    "BINDING_VERIFY_METHOD_UNAVAILABLE",
-  );
+
   const machine = new VerifiedOperationMachine<EasyBindingResult>({
     id: operationId,
     type: "EASY_BINDING",
@@ -124,11 +108,33 @@ export async function runEasyBinding(input: {
   let commandCompleted = false;
 
   try {
+    const providerId = assertSensitiveProviderAdmitted(provider);
+    const prepareBinding = requireDataMethod(
+      provider,
+      "prepareBinding",
+      "BINDING_PREPARE_METHOD_UNAVAILABLE",
+    );
+    const executeBinding = requireDataMethod(
+      provider,
+      "executeBinding",
+      "BINDING_EXECUTE_METHOD_UNAVAILABLE",
+    );
+    const reconnect = requireDataMethod(
+      provider,
+      "reconnect",
+      "BINDING_RECONNECT_METHOD_UNAVAILABLE",
+    );
+    const verifyBinding = requireDataMethod(
+      provider,
+      "verifyBinding",
+      "BINDING_VERIFY_METHOD_UNAVAILABLE",
+    );
+
     assertNotAborted(signal);
     machine.transition("PREPARING");
-    // Revalidate the immutable provider id after machine construction so later
-    // operation evidence uses the same captured identity.
-    if (rebuildProviderId(readProviderDataProperty(provider, "id")) !== providerId) {
+    if (
+      rebuildProviderId(readProviderDataProperty(provider, "id")) !== providerId
+    ) {
       return machine.fail({
         code: "PROVIDER_UNSUPPORTED",
         reason: "BINDING_PROVIDER_ID_CHANGED",
@@ -179,7 +185,6 @@ export async function runEasyBinding(input: {
     await Reflect.apply(prepareBinding, provider, [session, signal]);
     assertNotAborted(signal);
     sessions.assertHeld(session);
-    assertNotAborted(signal);
     commandStarted = true;
     const receipt = await Reflect.apply(executeBinding, provider, [
       session,
