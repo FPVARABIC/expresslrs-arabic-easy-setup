@@ -55,7 +55,8 @@ export interface PerformanceExperimentAnalysis {
   readonly hypothesisId: string | null;
   readonly evidenceLevel: PerformanceEvidenceLevel | "UNKNOWN";
   readonly hardwareEvidenceDisposition:
-    "NOT_PROVIDED" | "UNVERIFIED_CALLER_DECLARATION";
+    | "NOT_PROVIDED"
+    | "UNVERIFIED_CALLER_DECLARATION";
   readonly status: "VALID" | "INVALID";
   readonly decision: PerformanceExperimentDecision;
   readonly summaries: readonly PerformanceMetricSummary[];
@@ -68,7 +69,9 @@ export interface PerformanceExperimentAnalysis {
     | "TOO_MANY_METRICS"
     | "DUPLICATE_METRIC"
     | "INVALID_METRIC"
-    | "INSUFFICIENT_PAIRED_RUNS";
+    | "INSUFFICIENT_PAIRED_RUNS"
+    | "UNDEFINED_PERCENT_CHANGE"
+    | "NUMERIC_OVERFLOW";
   readonly performanceClaimAllowed: false;
 }
 
@@ -87,7 +90,7 @@ function median(values: readonly number[]): number {
     return value;
   }
   const previous = ordered[middle - 1];
-  return previous === undefined ? Number.NaN : (previous + value) / 2;
+  return previous === undefined ? Number.NaN : previous / 2 + value / 2;
 }
 
 function finiteNonNegative(value: number): boolean {
@@ -98,14 +101,14 @@ function normalizedImprovement(
   baseline: number,
   candidate: number,
   direction: PerformanceMetricDirection,
-): number {
+): number | null {
   if (baseline === 0) {
-    if (candidate === 0) {
-      return 0;
-    }
-    return direction === "LOWER_IS_BETTER" ? -100 : 100;
+    return candidate === 0 ? 0 : null;
   }
-  const raw = ((candidate - baseline) / baseline) * 100;
+  const raw = (candidate / baseline - 1) * 100;
+  if (!Number.isFinite(raw)) {
+    return null;
+  }
   return direction === "HIGHER_IS_BETTER" ? raw : -raw;
 }
 
@@ -199,9 +202,7 @@ function rebuildMetric(value: unknown): PerformanceMetricSeries | null {
     typeof id !== "string" ||
     !safeMachineId.test(id) ||
     typeof direction !== "string" ||
-    !performanceMetricDirections.includes(
-      direction as PerformanceMetricDirection,
-    ) ||
+    !performanceMetricDirections.includes(direction as PerformanceMetricDirection) ||
     typeof requiredImprovementPercent !== "number" ||
     !finiteNonNegative(requiredImprovementPercent) ||
     typeof allowedRegressionPercent !== "number" ||
@@ -265,6 +266,7 @@ export function analyzePerformanceExperiment(
 
   const ids = new Set<string>();
   const rebuiltMetrics: PerformanceMetricSeries[] = [];
+  const improvementsByMetric = new Map<string, readonly number[]>();
   for (const value of metricValues) {
     const metric = rebuildMetric(value);
     if (metric === null) {
@@ -277,23 +279,46 @@ export function analyzePerformanceExperiment(
     if (metric.baseline.length < (minimumPairedRuns as number)) {
       return invalidAnalysis(input, "INSUFFICIENT_PAIRED_RUNS");
     }
+
+    const improvements: number[] = [];
+    for (let index = 0; index < metric.baseline.length; index += 1) {
+      const baseline = metric.baseline[index];
+      const candidate = metric.candidate[index];
+      if (baseline === undefined || candidate === undefined) {
+        return invalidAnalysis(input, "INVALID_METRIC");
+      }
+      const improvement = normalizedImprovement(
+        baseline,
+        candidate,
+        metric.direction,
+      );
+      if (improvement === null) {
+        return invalidAnalysis(
+          input,
+          baseline === 0
+            ? "UNDEFINED_PERCENT_CHANGE"
+            : "NUMERIC_OVERFLOW",
+        );
+      }
+      improvements.push(improvement);
+    }
     rebuiltMetrics.push(metric);
+    improvementsByMetric.set(metric.id, Object.freeze(improvements));
   }
   const metrics = Object.freeze(rebuiltMetrics);
 
   const summaries = Object.freeze(
     metrics.map((metric) => {
-      const improvements = metric.baseline.map((baseline, index) => {
-        const candidate = metric.candidate[index];
-        return candidate === undefined
-          ? Number.NaN
-          : normalizedImprovement(baseline, candidate, metric.direction);
-      });
+      const improvements = improvementsByMetric.get(metric.id);
+      if (improvements === undefined) {
+        throw new Error("Validated performance metric has no improvement series");
+      }
       const medianImprovementPercent = median(improvements);
       const threshold: PerformanceMetricSummary["threshold"] =
         medianImprovementPercent < -metric.allowedRegressionPercent
           ? "REGRESSED"
-          : medianImprovementPercent >= metric.requiredImprovementPercent
+          : medianImprovementPercent > 0 &&
+              medianImprovementPercent >= metric.requiredImprovementPercent
             ? "IMPROVED"
             : "NEUTRAL";
       return Object.freeze({
