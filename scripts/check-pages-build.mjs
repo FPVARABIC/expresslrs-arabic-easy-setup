@@ -20,7 +20,7 @@ const expectedPolicy = [
   "object-src 'none'",
   "script-src 'self'",
   "style-src 'self'",
-  "worker-src 'none'",
+  "worker-src 'self'",
 ].join("; ");
 
 function fail(message) {
