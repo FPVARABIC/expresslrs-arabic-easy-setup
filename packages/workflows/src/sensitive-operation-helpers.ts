@@ -5,6 +5,7 @@ import {
   rebuildProviderId,
   resolveDeviceIdentity,
   type DeviceSessionManager,
+  type DiscoveryProvider,
   type IdentityEvidenceTrustPolicy,
 } from "@elrs-easy/device";
 import {
@@ -204,7 +205,12 @@ function syntheticEvidenceTrust(input: {
 
 const syntheticSensitiveIdentityPolicy: IdentityEvidenceTrustPolicy =
   Object.freeze({
-    classify(input) {
+    classify(input: {
+      readonly provider: DiscoveryProvider;
+      readonly providerId: string;
+      readonly claim: IdentityClaim;
+      readonly reportedSourceKind: string;
+    }) {
       return syntheticEvidenceTrust(input);
     },
   });
@@ -272,7 +278,7 @@ export async function inspectHeldDevice(input: {
   (sessions as DeviceSessionManager).assertHeld(session as DeviceSession);
   const rebuiltEvidence = rebuildDiscoveryEvidence({
     value: rawEvidence,
-    provider: reader as IdentityReader,
+    provider: reader as unknown as DiscoveryProvider,
     providerId,
     policy: syntheticSensitiveIdentityPolicy,
   });
@@ -369,8 +375,6 @@ export function safeOperationError(
     ) {
       return Object.freeze({
         code: code as (typeof operationErrorCodes)[number],
-        // Never forward a provider-controlled reason or detail value. Even an
-        // allowlisted-looking token can contain a Binding Phrase or credential.
         reason: fallbackReason,
         details: Object.freeze({}),
         retryable,
