@@ -8,6 +8,7 @@ import { ApplicationUpdateNotice } from "./pwa/ApplicationUpdateNotice";
 import { NetworkModeNotice } from "./pwa/NetworkModeNotice";
 import "./styles.css";
 import "./pwa/pwa.css";
+import "./reference-theme.css";
 
 document.documentElement.lang = defaultLocale;
 document.documentElement.dir = getDirection(defaultLocale);
