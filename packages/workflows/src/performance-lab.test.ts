@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { analyzePerformanceExperiment } from "./performance-lab.js";
+import {
+  analyzePerformanceExperiment,
+  maximumPerformanceMetrics,
+  maximumPerformancePairedRuns,
+} from "./performance-lab.js";
 
 const improvingMetric = {
   id: "RECOVERY_MS",
@@ -78,6 +82,28 @@ describe("analyzePerformanceExperiment", () => {
     expect(analysis.decision).toBe("MODIFY_OR_RETEST");
   });
 
+  it("does not classify an unchanged zero-threshold metric as improved", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-003B",
+      evidenceLevel: "HARDWARE_OBSERVED",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "PACKET_DELIVERY_RATIO",
+          direction: "HIGHER_IS_BETTER",
+          baseline: [99, 99],
+          candidate: [99, 99],
+          requiredImprovementPercent: 0,
+          allowedRegressionPercent: 0,
+        },
+      ],
+    });
+
+    expect(analysis.summaries[0]?.threshold).toBe("NEUTRAL");
+    expect(analysis.decision).toBe("MODIFY_OR_RETEST");
+    expect(analysis.performanceClaimAllowed).toBe(false);
+  });
+
   it("fails closed on mismatched paired-run counts", () => {
     const analysis = analyzePerformanceExperiment({
       hypothesisId: "HYP-004",
@@ -125,7 +151,7 @@ describe("analyzePerformanceExperiment", () => {
     expect(analysis.invalidReason).toBe("INSUFFICIENT_PAIRED_RUNS");
   });
 
-  it("handles a zero baseline without emitting Infinity", () => {
+  it("handles an unchanged zero baseline without emitting Infinity", () => {
     const analysis = analyzePerformanceExperiment({
       hypothesisId: "HYP-007",
       evidenceLevel: "HARDWARE_OBSERVED",
@@ -146,6 +172,30 @@ describe("analyzePerformanceExperiment", () => {
     expect(
       Number.isFinite(analysis.summaries[0]?.medianImprovementPercent),
     ).toBe(true);
+    expect(analysis.summaries[0]?.threshold).toBe("NEUTRAL");
+    expect(analysis.performanceClaimAllowed).toBe(false);
+  });
+
+  it("rejects a changed zero baseline because percent change is undefined", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-007B",
+      evidenceLevel: "HARDWARE_OBSERVED",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "DEADLINE_MISSES",
+          direction: "LOWER_IS_BETTER",
+          baseline: [0, 0],
+          candidate: [1, 1],
+          requiredImprovementPercent: 0,
+          allowedRegressionPercent: 0,
+        },
+      ],
+    });
+
+    expect(analysis.status).toBe("INVALID");
+    expect(analysis.invalidReason).toBe("UNDEFINED_PERCENT_CHANGE");
+    expect(analysis.performanceClaimAllowed).toBe(false);
   });
 
   it("rejects duplicate metrics instead of silently merging them", () => {
@@ -157,6 +207,75 @@ describe("analyzePerformanceExperiment", () => {
     });
 
     expect(analysis.invalidReason).toBe("DUPLICATE_METRIC");
+  });
+
+  it("rejects an unknown evidence level at runtime", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-010",
+      evidenceLevel: "TRUST_ME" as "SYNTHETIC",
+      minimumPairedRuns: 2,
+      metrics: [improvingMetric],
+    });
+
+    expect(analysis.status).toBe("INVALID");
+    expect(analysis.evidenceLevel).toBe("UNKNOWN");
+    expect(analysis.invalidReason).toBe("INVALID_EVIDENCE_LEVEL");
+  });
+
+  it("bounds the number of metric series", () => {
+    const metrics = Array.from(
+      { length: maximumPerformanceMetrics + 1 },
+      (_, index) => ({
+        ...improvingMetric,
+        id: `METRIC_${index}`,
+      }),
+    );
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-011",
+      evidenceLevel: "SYNTHETIC",
+      minimumPairedRuns: 2,
+      metrics,
+    });
+
+    expect(analysis.invalidReason).toBe("TOO_MANY_METRICS");
+  });
+
+  it("bounds the actual paired-run arrays independently of the minimum", () => {
+    const baseline = Array.from(
+      { length: maximumPerformancePairedRuns + 1 },
+      () => 100,
+    );
+    const candidate = baseline.map(() => 90);
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-012",
+      evidenceLevel: "SYNTHETIC",
+      minimumPairedRuns: 2,
+      metrics: [{ ...improvingMetric, baseline, candidate }],
+    });
+
+    expect(analysis.invalidReason).toBe("TOO_MANY_PAIRED_RUNS");
+  });
+
+  it("rejects arithmetic overflow instead of emitting an infinite summary", () => {
+    const analysis = analyzePerformanceExperiment({
+      hypothesisId: "HYP-013",
+      evidenceLevel: "HARDWARE_OBSERVED",
+      minimumPairedRuns: 2,
+      metrics: [
+        {
+          id: "EXTREME_RATIO",
+          direction: "HIGHER_IS_BETTER",
+          baseline: [Number.MIN_VALUE, Number.MIN_VALUE],
+          candidate: [Number.MAX_VALUE, Number.MAX_VALUE],
+          requiredImprovementPercent: 1,
+          allowedRegressionPercent: 1,
+        },
+      ],
+    });
+
+    expect(analysis.status).toBe("INVALID");
+    expect(analysis.invalidReason).toBe("NUMERIC_OVERFLOW");
+    expect(analysis.performanceClaimAllowed).toBe(false);
   });
 
   it("returns immutable summaries", () => {
