@@ -1,0 +1,296 @@
+name: M2 official-source parity validation
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-parity-repair-v3.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: m2-official-source-parity
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Verify upstream contracts, test all functions, and commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+
+    steps:
+      - name: Check out parity branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install and pin dependencies
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+
+      - name: Correct official regulatory names and integrate Lua download
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Use the exact current upstream names while preserving their numeric values.
+          path = Path('apps/web/src/hardware/regulatory-domain.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('key: "FCC_2400"', 'key: "ISM_2400"')
+          text = text.replace('key: "US_433"', 'key: "FCC_433"')
+          text = text.replace('label: "US 433 MHz"', 'label: "FCC 433 MHz"')
+          text = text.replace('artifactDirectory: "US_433"', 'artifactDirectory: "FCC_433"')
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('apps/web/src/hardware/regulatory-domain.test.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('"FCC_2400"', '"ISM_2400"')
+          text = text.replace('"US_433"', '"FCC_433"')
+          path.write_text(text, encoding='utf-8')
+
+          # TypeScript 6 owned ArrayBuffer compatibility for all byte responses.
+          for relative in [
+              'apps/web/src/hardware/lua-package.test.ts',
+              'apps/web/src/hardware/official-catalog.test.ts',
+              'apps/web/src/hardware/firmware-package.test.ts',
+              'apps/web/src/hardware/recovery-package.test.ts',
+          ]:
+              path = Path(relative)
+              text = path.read_text(encoding='utf-8')
+              text = re.sub(
+                  r'new Response\((\w+),',
+                  r'new Response(\1.slice().buffer,',
+                  text,
+              )
+              path.write_text(text, encoding='utf-8')
+
+          # Add the target-specific Lua download to the real hardware workbench.
+          path = Path('apps/web/src/components/ExpressLrsParityWorkbench.tsx')
+          text = path.read_text(encoding='utf-8')
+          if 'acquireOfficialLuaScript' not in text:
+              marker = 'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";\n'
+              text = text.replace(
+                  marker,
+                  marker + 'import { acquireOfficialLuaScript } from "../hardware/lua-package";\n',
+                  1,
+              )
+
+              handler_marker = '  function downloadRecovery() {\n'
+              handler = '''  async function downloadLuaScript() {
+    if (
+      selectedRelease === null ||
+      selectedTarget === null ||
+      selectedTarget.role !== "tx" ||
+      selectedTarget.config.luaName === null
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus("جارٍ تنزيل ملف Lua الرسمي المطابق لهذا Target…");
+    try {
+      const script = await acquireOfficialLuaScript({
+        release: selectedRelease,
+        target: selectedTarget,
+      });
+      downloadPreparedBytes(script.bytes, script.fileName, "text/plain");
+      setStatus(`تم بدء تنزيل ملف Lua الرسمي: ${script.fileName}.`);
+    } catch (error: unknown) {
+      setStatus(`تعذر تنزيل ملف Lua: ${safeMessage(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+'''
+              if handler_marker not in text:
+                  raise SystemExit('Lua handler insertion marker is missing')
+              text = text.replace(handler_marker, handler + handler_marker, 1)
+
+              button_marker = '''              <button type="button" className="secondary-button" onClick={downloadRecovery}>تنزيل حزمة الاستعادة</button>'''
+              lua_button = button_marker + '''
+              {selectedTarget?.role === "tx" &&
+              selectedTarget.config.luaName !== null ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void downloadLuaScript()}
+                >
+                  تنزيل ملف Lua
+                </button>
+              ) : null}'''
+              if button_marker not in text:
+                  # Match the formatted variant emitted by Prettier.
+                  match = re.search(
+                      r'''\s*<button\n\s*type="button"\n\s*className="secondary-button"\n\s*onClick=\{downloadRecovery\}\n\s*>\n\s*تنزيل حزمة الاستعادة\n\s*</button>''',
+                      text,
+                  )
+                  if match is None:
+                      raise SystemExit('Recovery download button marker is missing')
+                  text = text[:match.end()] + '''
+              {selectedTarget?.role === "tx" &&
+              selectedTarget.config.luaName !== null ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void downloadLuaScript()}
+                >
+                  تنزيل ملف Lua
+                </button>
+              ) : null}''' + text[match.end():]
+              else:
+                  text = text.replace(button_marker, lua_button, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify official artifact browser access and release layout
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+          import zipfile
+          import io
+          from pathlib import Path
+
+          origin = 'https://fpvarabic.github.io'
+          candidates = [
+              'https://artifactory.expresslrs.org/ExpressLRS',
+              'https://expresslrs.github.io/web-flasher/assets',
+          ]
+
+          def request(url, maximum, headers=None):
+              req_headers = {'Origin': origin, 'User-Agent': 'ELRS-Easy-Parity-CI/1'}
+              if headers:
+                  req_headers.update(headers)
+              request = urllib.request.Request(url, headers=req_headers)
+              with urllib.request.urlopen(request, timeout=45) as response:
+                  allow = response.headers.get('Access-Control-Allow-Origin', '')
+                  if allow not in {'*', origin}:
+                      raise RuntimeError(f'{url} does not grant browser CORS access: {allow!r}')
+                  declared = response.headers.get('Content-Length')
+                  if declared and int(declared) > maximum:
+                      raise RuntimeError(f'{url} exceeds the bounded size')
+                  data = response.read(maximum + 1)
+                  if len(data) > maximum:
+                      raise RuntimeError(f'{url} crossed the bounded size')
+                  return data
+
+          selected = None
+          selected_index = None
+          selected_hardware = None
+          failures = []
+          for base in candidates:
+              try:
+                  index_bytes = request(f'{base}/index.json', 512 * 1024)
+                  index = json.loads(index_bytes.decode('utf-8'))
+                  tags = index.get('tags', {})
+                  if not isinstance(tags, dict) or not tags:
+                      raise RuntimeError('index has no release tags')
+                  hardware_bytes = request(f'{base}/hardware.zip', 24 * 1024 * 1024)
+                  with zipfile.ZipFile(io.BytesIO(hardware_bytes)) as archive:
+                      names = [name for name in archive.namelist() if name.endswith('/targets.json') or name == 'targets.json']
+                      if len(names) != 1:
+                          raise RuntimeError('hardware archive lacks one targets.json')
+                  selected = base
+                  selected_index = index
+                  selected_hardware = hardware_bytes
+                  break
+              except Exception as error:
+                  failures.append(f'{base}: {error}')
+
+          if selected is None:
+              raise SystemExit('No official browser-accessible artifact base:\n' + '\n'.join(failures))
+
+          source = Path('apps/web/src/hardware/official-catalog.ts')
+          text = source.read_text(encoding='utf-8')
+          text = text.replace(
+              '"https://artifactory.expresslrs.org/ExpressLRS" as const',
+              json.dumps(selected) + ' as const',
+          )
+          source.write_text(text, encoding='utf-8')
+          print(f'Using official browser-accessible artifact base: {selected}')
+          PY
+
+      - name: Verify domain enumeration against ExpressLRS 4.1.0
+        shell: bash
+        run: |
+          git clone --quiet --depth 1 --branch 4.1.0 https://github.com/ExpressLRS/ExpressLRS.git /tmp/expresslrs-upstream
+          python - <<'PY'
+          from pathlib import Path
+
+          expected = [
+              'Regulatory_Domain_AU_915',
+              'Regulatory_Domain_FCC_915',
+              'Regulatory_Domain_EU_868',
+              'Regulatory_Domain_IN_866',
+              'Regulatory_Domain_AU_433',
+              'Regulatory_Domain_EU_433',
+              'Regulatory_Domain_FCC_433',
+              'Regulatory_Domain_ISM_2400',
+              'Regulatory_Domain_EU_CE_2400',
+          ]
+          matches = []
+          for path in Path('/tmp/expresslrs-upstream').rglob('*'):
+              if not path.is_file() or path.suffix.lower() not in {'.h', '.hpp', '.c', '.cpp', '.py'}:
+                  continue
+              text = path.read_text(encoding='utf-8', errors='ignore')
+              if all(name in text for name in expected):
+                  positions = [text.find(name) for name in expected]
+                  if positions == sorted(positions):
+                      matches.append(path)
+          if not matches:
+              raise SystemExit('ExpressLRS 4.1.0 regulatory enumeration order does not match the local map')
+          print(f'Validated domain order in {matches[0]}')
+          PY
+
+      - name: Apply formatting and run all gates
+        run: |
+          pnpm format
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm test
+          pnpm build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit the validated official-source candidate
+        shell: bash
+        run: |
+          rm -f .github/workflows/m2-parity-repair-v3.yml
+          rm -f .github/workflows/m2-parity-repair-v2.yml
+          rm -f .github/workflows/m2-parity-finalize.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(parity): validate official ExpressLRS source parity'
+          git push origin HEAD:feat/m2-real-hardware-first-test
