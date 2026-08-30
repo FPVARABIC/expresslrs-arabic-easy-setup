@@ -1,0 +1,62 @@
+name: M2 hardware audit formatter export
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-audit-format-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: Export exact Prettier result
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out audit candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply the repository formatter
+        run: pnpm format
+
+      - name: Assemble formatted audit files
+        run: |
+          mkdir -p /tmp/hardware-audit-export/apps/web/src/components
+          mkdir -p /tmp/hardware-audit-export/apps/web/src/hardware
+          cp apps/web/src/components/DeviceConnectionHub.tsx /tmp/hardware-audit-export/apps/web/src/components/
+          cp apps/web/src/components/DeviceConnectionHub.test.tsx /tmp/hardware-audit-export/apps/web/src/components/
+          cp apps/web/src/connection-hub.css /tmp/hardware-audit-export/apps/web/src/
+          cp apps/web/src/hardware/crsf.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          cp apps/web/src/hardware/crsf.test.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          cp apps/web/src/hardware/serial.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          cp apps/web/src/hardware/session.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          cp apps/web/src/hardware/session.test.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          cp apps/web/src/hardware/userSession.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          cp apps/web/src/hardware/userSession.test.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+
+      - name: Upload exact formatted files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hardware-audit-formatted
+          path: /tmp/hardware-audit-export
+          if-no-files-found: error
+          retention-days: 3
