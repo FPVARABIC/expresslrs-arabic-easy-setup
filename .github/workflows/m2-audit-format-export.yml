@@ -1,4 +1,4 @@
-name: M2 hardware audit formatter export
+name: M2 hardware audit source export
 
 on:
   push:
@@ -6,19 +6,15 @@ on:
       - feat/m2-real-hardware-first-test
     paths:
       - .github/workflows/m2-audit-format-export.yml
-      - apps/web/src/components/DeviceConnectionHub.tsx
-      - apps/web/src/components/DeviceConnectionHub.test.tsx
-      - apps/web/src/connection-hub.css
-      - apps/web/src/hardware/**
 
 permissions:
   contents: read
 
 jobs:
   export:
-    name: Export exact Prettier result
+    name: Export full formatted source
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Check out audit candidate
@@ -42,25 +38,23 @@ jobs:
       - name: Apply the repository formatter
         run: pnpm format
 
-      - name: Assemble formatted audit files
+      - name: Assemble full formatted source
         run: |
-          mkdir -p /tmp/hardware-audit-export/apps/web/src/components
-          mkdir -p /tmp/hardware-audit-export/apps/web/src/hardware
-          cp apps/web/src/components/DeviceConnectionHub.tsx /tmp/hardware-audit-export/apps/web/src/components/
-          cp apps/web/src/components/DeviceConnectionHub.test.tsx /tmp/hardware-audit-export/apps/web/src/components/
-          cp apps/web/src/connection-hub.css /tmp/hardware-audit-export/apps/web/src/
-          cp apps/web/src/hardware/crsf.ts /tmp/hardware-audit-export/apps/web/src/hardware/
-          cp apps/web/src/hardware/crsf.test.ts /tmp/hardware-audit-export/apps/web/src/hardware/
-          cp apps/web/src/hardware/serial.ts /tmp/hardware-audit-export/apps/web/src/hardware/
-          cp apps/web/src/hardware/session.ts /tmp/hardware-audit-export/apps/web/src/hardware/
-          cp apps/web/src/hardware/session.test.ts /tmp/hardware-audit-export/apps/web/src/hardware/
-          cp apps/web/src/hardware/userSession.ts /tmp/hardware-audit-export/apps/web/src/hardware/
-          cp apps/web/src/hardware/userSession.test.ts /tmp/hardware-audit-export/apps/web/src/hardware/
+          mkdir -p /tmp/elrs-easy-source
+          rsync -a \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '**/node_modules' \
+            --exclude 'dist' \
+            --exclude '**/dist' \
+            --exclude 'coverage' \
+            --exclude '**/coverage' \
+            ./ /tmp/elrs-easy-source/
 
-      - name: Upload exact formatted files
+      - name: Upload full formatted source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: hardware-audit-formatted
-          path: /tmp/hardware-audit-export
+          name: elrs-easy-full-formatted-source
+          path: /tmp/elrs-easy-source
           if-no-files-found: error
           retention-days: 3
