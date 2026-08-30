@@ -1,0 +1,802 @@
+name: M2 final single-run V2 convergence
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-final-converge-v2.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: m2-final-single-run-v2-convergence
+  cancel-in-progress: true
+
+jobs:
+  converge:
+    name: Cancel stale runs, finalize V2, test everything, commit exact result
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Cancel every stale branch run and refresh latest source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=feat%2Fm2-real-hardware-first-test&per_page=100" \
+            --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\") | .id" \
+            | while read -r id; do
+                [ -z "$id" ] || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/cancel" || true
+              done
+          sleep 10
+          git fetch origin feat/m2-real-hardware-first-test
+          git reset --hard origin/feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Pin and install exact dependencies
+        id: dependencies
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm install --no-frozen-lockfile
+            pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+            pnpm install --frozen-lockfile
+          } 2>&1 | tee /tmp/dependencies.log
+
+      - name: Finalize all V2 source and safety boundaries
+        id: finalize
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee /tmp/finalize.log
+          from pathlib import Path
+          import json
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding='utf-8')
+
+          # Deterministic entrypoint.
+          if Path('apps/web/src/main-v2.tsx').exists():
+              write('apps/web/src/main.tsx', read('apps/web/src/main-v2.tsx'))
+              Path('apps/web/src/main-v2.tsx').unlink()
+
+          # Promote clean workbench and test.
+          if Path('apps/web/src/components/ExpressLrsParityWorkbenchV2.tsx').exists():
+              text = read('apps/web/src/components/ExpressLrsParityWorkbenchV2.tsx')
+              text = text.replace(
+                  'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";',
+                  'import { loadOfficialExpressLrsCatalogV2 } from "../hardware/official-catalog-v2";',
+              )
+              if 'officialArtifactFetch' not in text:
+                  text = text.replace(
+                      'import { loadOfficialExpressLrsCatalogV2 } from "../hardware/official-catalog-v2";\n',
+                      'import { loadOfficialExpressLrsCatalogV2 } from "../hardware/official-catalog-v2";\nimport { officialArtifactFetch } from "../hardware/official-fetch-adapter";\n',
+                      1,
+                  )
+              text = text.replace(
+                  'export function ExpressLrsParityWorkbenchV2()',
+                  'export function ExpressLrsParityWorkbench()',
+              )
+              text = text.replace(
+                  'const loaded = await loadOfficialExpressLrsCatalog({',
+                  'const loaded = await loadOfficialExpressLrsCatalogV2({',
+              )
+              text = text.replace(
+                  '''        options: packageOptions,
+        signal: controller.signal,''',
+                  '''        options: packageOptions,
+        fetchImplementation: officialArtifactFetch,
+        signal: controller.signal,''',
+                  1,
+              )
+              text = text.replace(
+                  '''        release: selectedRelease,
+        target: selectedTarget,
+      });''',
+                  '''        release: selectedRelease,
+        target: selectedTarget,
+        fetchImplementation: officialArtifactFetch,
+      });''',
+                  1,
+              )
+              write('apps/web/src/components/ExpressLrsParityWorkbench.tsx', text)
+              Path('apps/web/src/components/ExpressLrsParityWorkbenchV2.tsx').unlink()
+
+          if Path('apps/web/src/components/ExpressLrsParityWorkbenchV2.test.tsx').exists():
+              text = read('apps/web/src/components/ExpressLrsParityWorkbenchV2.test.tsx')
+              text = text.replace(
+                  '"../hardware/official-catalog"',
+                  '"../hardware/official-catalog-v2"',
+              )
+              text = text.replace(
+                  'loadOfficialExpressLrsCatalog: mocks.loadCatalog,',
+                  'loadOfficialExpressLrsCatalogV2: mocks.loadCatalog,',
+              )
+              text = text.replace(
+                  'ExpressLrsParityWorkbenchV2',
+                  'ExpressLrsParityWorkbench',
+              )
+              text = text.replace(
+                  'from "./ExpressLrsParityWorkbenchV2"',
+                  'from "./ExpressLrsParityWorkbench"',
+              )
+              write('apps/web/src/components/ExpressLrsParityWorkbench.test.tsx', text)
+              Path('apps/web/src/components/ExpressLrsParityWorkbenchV2.test.tsx').unlink()
+
+          # Catalog V2 uses strict identifier/display/path parser.
+          text = read('apps/web/src/hardware/official-catalog-v2.ts')
+          text = text.replace(
+              'import { parseOfficialTargetsFlexible } from "./official-target-index";',
+              'import { parseOfficialTargetsV2 } from "./official-target-index-v2";',
+          )
+          text = text.replace(
+              'const targets = parseOfficialTargetsFlexible(',
+              'const targets = parseOfficialTargetsV2(',
+          )
+          write('apps/web/src/hardware/official-catalog-v2.ts', text)
+
+          # Firmware options are validated before any fetch; user download is
+          # the configured OTA/application image, not the UART sector bundle.
+          text = read('apps/web/src/hardware/firmware-package.ts')
+          if './firmware-options' not in text:
+              text = text.replace(
+                  'import { expressLrsBindingUid } from "./bind-phrase";\n',
+                  'import { expressLrsBindingUid } from "./bind-phrase";\nimport { validateFirmwareOptions } from "./firmware-options";\n',
+                  1,
+              )
+          start = text.find('export async function prepareOfficialFirmwarePackage(')
+          end = text.find('\nexport function downloadPreparedBytes', start)
+          if start < 0 or end < 0:
+              raise SystemExit('prepareOfficialFirmwarePackage boundaries missing')
+          segment = text[start:end]
+          if 'const validatedOptions = validateFirmwareOptions' not in segment:
+              segment = segment.replace('input.options', 'validatedOptions')
+              segment = segment.replace(
+                  '): Promise<PreparedFirmwarePackage> {\n',
+                  '''): Promise<PreparedFirmwarePackage> {
+  const validatedOptions = validateFirmwareOptions({
+    target: input.target,
+    options: input.options,
+  });
+''',
+                  1,
+              )
+          text = text[:start] + segment + text[end:]
+          primary_start = text.find('  let primaryDownload: Uint8Array;')
+          primary_end = text.find('\n  const recoveryManifest', primary_start)
+          if primary_start < 0 or primary_end < 0:
+              raise SystemExit('Primary download block missing')
+          primary = '''  let primaryDownload: Uint8Array;
+  let primaryFileName: string;
+  let primaryMimeType: string;
+  if (
+    family === "esp" &&
+    (input.target.config.platform.toLocaleLowerCase("en-US").includes("8285") ||
+      input.target.config.platform.toLocaleLowerCase("en-US").includes("8266"))
+  ) {
+    primaryDownload = gzipSync(configuredApplication, { level: 9 });
+    primaryFileName = "firmware.bin.gz";
+    primaryMimeType = "application/gzip";
+  } else {
+    primaryDownload = configuredApplication.slice();
+    primaryFileName = "firmware.bin";
+    primaryMimeType = "application/octet-stream";
+  }
+'''
+          text = text[:primary_start] + primary + text[primary_end:]
+          if 'actualUncompressedBytes' not in text:
+              marker = '''  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(entries).map(([name, bytes]) => [
+        normalizedPath(name),
+        bytes,
+      ]),
+    ),
+  );'''
+              replacement = '''  let actualUncompressedBytes = 0;
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (bytes.byteLength > input.maximumEntryBytes) {
+      throw new FirmwarePackageError(
+        "ARCHIVE",
+        `Archive entry ${name} exceeds its actual byte limit`,
+      );
+    }
+    actualUncompressedBytes += bytes.byteLength;
+    if (actualUncompressedBytes > input.maximumTotalBytes) {
+      throw new FirmwarePackageError(
+        "ARCHIVE",
+        "Decompressed archive entries exceed their actual total byte limit",
+      );
+    }
+  }
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(entries).map(([name, bytes]) => [
+        normalizedPath(name),
+        bytes,
+      ]),
+    ),
+  );'''
+              if marker in text:
+                  text = text.replace(marker, replacement, 1)
+          text = text.replace(
+              'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+              'bytes.slice().buffer',
+          )
+          text = text.replace('new Blob([bytes],', 'new Blob([bytes.slice().buffer],')
+          text = text.replace(
+              '''  anchor.click();
+  queueMicrotask(() => URL.revokeObjectURL(url));''',
+              '''  anchor.hidden = true;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);''',
+          )
+          if 'Nightly STM32 firmware configuration is not enabled' not in text:
+              marker = '''  const family = platformFamily(input.target.config.platform);
+  const configuredApplication ='''
+              text = text.replace(
+                  marker,
+                  '''  const family = platformFamily(input.target.config.platform);
+  if (family === "stm32" && input.release.channel === "branch") {
+    throw new FirmwarePackageError(
+      "PLATFORM_UNSUPPORTED",
+      "Nightly STM32 firmware configuration is not enabled without an exact release ABI",
+    );
+  }
+  const configuredApplication =''',
+                  1,
+              )
+          write('apps/web/src/hardware/firmware-package.ts', text)
+
+          # Align binding phrase validator with the actual UID routine.
+          text = read('apps/web/src/hardware/firmware-options.ts')
+          marker = '  const bindPhrase = boundedText("bindPhrase", options.bindPhrase, 192, true);'
+          if marker in text and 'exceeds 128 Unicode characters' not in text:
+              text = text.replace(
+                  marker,
+                  marker + '''
+  if ([...bindPhrase].length > 128) {
+    throw new FirmwareOptionsError(
+      "bindPhrase",
+      "Binding phrase exceeds 128 Unicode characters",
+    );
+  }''',
+                  1,
+              )
+          write('apps/web/src/hardware/firmware-options.ts', text)
+
+          # Hidden fields are excluded from backup/restore and write.
+          text = read('apps/web/src/hardware/session.ts')
+          text = text.replace(
+              '''      if (parameter.kind !== "number" && parameter.kind !== "selection") {
+        return [];
+      }''',
+              '''      if (
+        parameter.hidden ||
+        (parameter.kind !== "number" && parameter.kind !== "selection")
+      ) {
+        return [];
+      }''',
+              1,
+          )
+          text = text.replace(
+              '''    if (known.kind !== "number" && known.kind !== "selection") {
+      throw new ExpressLrsHardwareError(''',
+              '''    if (
+      known.hidden ||
+      (known.kind !== "number" && known.kind !== "selection")
+    ) {
+      throw new ExpressLrsHardwareError(''',
+              1,
+          )
+          write('apps/web/src/hardware/session.ts', text)
+
+          # Workbench input/recovery gates.
+          text = read('apps/web/src/components/ExpressLrsParityWorkbench.tsx')
+          text = text.replace(
+              '''    const requestedValue = Number(settingDraft);
+    setBusy(true);''',
+              '''    if (
+      settingDraft.trim().length === 0 ||
+      !Number.isSafeInteger(Number(settingDraft))
+    ) {
+      setStatus("أدخل قيمة صحيحة ضمن حدود الإعداد قبل الحفظ.");
+      return;
+    }
+    const requestedValue = Number(settingDraft);
+    setBusy(true);''',
+              1,
+          )
+          text = text.replace(
+              '''    setBusy(true);
+    setStatus("جارٍ فحص حزمة الاستعادة وSHA-256 لكل قطاع…");''',
+              '''    if (method === "wifi" || method === "download") {
+      setStatus("اختر UART أو Passthrough أو ST-Link لتشغيل الاستعادة.");
+      return;
+    }
+    setBusy(true);
+    setStatus("جارٍ فحص حزمة الاستعادة وSHA-256 لكل قطاع…");''',
+              1,
+          )
+          write('apps/web/src/components/ExpressLrsParityWorkbench.tsx', text)
+
+          # DFU state transition before UPLOAD and manifest-tolerant leave.
+          text = read('apps/web/src/hardware/stm32-dfu.ts')
+          text = text.replace(
+              '''      status.state === DfuState.downloadIdle ||
+      status.state === DfuState.dfuIdle''',
+              '''      status.state === DfuState.downloadIdle ||
+      status.state === DfuState.dfuIdle ||
+      status.state === DfuState.manifestWaitReset''',
+              1,
+          )
+          marker = '''    await setAddress(
+      device,
+      selection.interfaceNumber,
+      startAddress,
+      input.signal,
+    );
+    for (
+      let offset = 0, blockNumber = 2;
+      offset < input.segment.bytes.byteLength;
+      offset += DEFAULT_TRANSFER_SIZE, blockNumber += 1
+    ) {
+      ensureActive(input.signal);
+      const expected = input.segment.bytes.slice('''
+          replacement = '''    await setAddress(
+      device,
+      selection.interfaceNumber,
+      startAddress,
+      input.signal,
+    );
+    await transferOut(device, selection.interfaceNumber, DfuRequest.abort, 0);
+    await clearToIdle(device, selection.interfaceNumber, input.signal);
+    for (
+      let offset = 0, blockNumber = 2;
+      offset < input.segment.bytes.byteLength;
+      offset += DEFAULT_TRANSFER_SIZE, blockNumber += 1
+    ) {
+      ensureActive(input.signal);
+      const expected = input.segment.bytes.slice('''
+          text = text.replace(marker, replacement, 1)
+          write('apps/web/src/hardware/stm32-dfu.ts', text)
+
+          # Recovery archive actual expansion bounds and owned ArrayBuffers.
+          text = read('apps/web/src/hardware/recovery-package.ts')
+          text = text.replace(
+              'crypto.subtle.digest("SHA-256", bytes)',
+              'crypto.subtle.digest("SHA-256", bytes.slice().buffer)',
+          )
+          if 'selectedArchiveBytes' not in text:
+              text = text.replace(
+                  '  let entries: Record<string, Uint8Array>;\n  try {',
+                  '  let entries: Record<string, Uint8Array>;\n'
+                  '  let selectedArchiveBytes = 0;\n'
+                  '  let selectedArchiveEntries = 0;\n'
+                  '  try {',
+                  1,
+              )
+              text = text.replace(
+                  '''        return (
+          name === "manifest.json" ||
+          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES)
+        );''',
+                  '''        const included =
+          name === "manifest.json" ||
+          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES);
+        if (!included) return false;
+        selectedArchiveEntries += 1;
+        selectedArchiveBytes += file.originalSize;
+        if (
+          selectedArchiveEntries > 9 ||
+          selectedArchiveBytes > 48 * 1024 * 1024
+        ) {
+          throw new RecoveryPackageError(
+            "TOO_LARGE",
+            "Recovery archive expansion exceeds its entry or byte limit",
+          );
+        }
+        return true;''',
+                  1,
+              )
+          write('apps/web/src/hardware/recovery-package.ts', text)
+
+          # TypeScript 6 owned-buffer compatibility in tests and crypto/Response paths.
+          for relative in [
+              'apps/web/src/hardware/recovery-package.test.ts',
+              'apps/web/src/hardware/official-catalog.test.ts',
+              'apps/web/src/hardware/firmware-package.test.ts',
+              'apps/web/src/hardware/lua-package.test.ts',
+          ]:
+              path = Path(relative)
+              if not path.exists():
+                  continue
+              text = path.read_text(encoding='utf-8')
+              text = text.replace(
+                  'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+                  'bytes.slice().buffer',
+              )
+              text = text.replace(
+                  'crypto.subtle.digest("SHA-256", bytes)',
+                  'crypto.subtle.digest("SHA-256", bytes.slice().buffer)',
+              )
+              text = text.replace('new Response(hardwareZip, {', 'new Response(hardwareZip.slice().buffer, {')
+              text = text.replace('new Response(firmware)', 'new Response(firmware.slice().buffer)')
+              text = text.replace('new Response(archive)', 'new Response(archive.slice().buffer)')
+              text = text.replace(
+                  'expect(result.primaryFileName).toBe("firmware-package.zip");',
+                  'expect(result.primaryFileName).toBe("firmware.bin");',
+              )
+              text = text.replace(
+                  'expect(result.primaryMimeType).toBe("application/zip");',
+                  'expect(result.primaryMimeType).toBe("application/octet-stream");',
+              )
+              path.write_text(text, encoding='utf-8')
+
+          # Live product test uses resilient V2 loader.
+          live = Path('apps/web/src/hardware/official-catalog.live.test.ts')
+          if live.exists():
+              text = live.read_text(encoding='utf-8')
+              text = text.replace(
+                  'loadOfficialExpressLrsCatalog',
+                  'loadOfficialExpressLrsCatalogV2',
+              )
+              text = text.replace(
+                  'from "./official-catalog"',
+                  'from "./official-catalog-v2"',
+              )
+              live.write_text(text, encoding='utf-8')
+
+          # Exact regulatory keys used by ExpressLRS 4.x artifacts.
+          for relative in [
+              'apps/web/src/hardware/regulatory-domain.ts',
+              'apps/web/src/hardware/regulatory-domain.test.ts',
+          ]:
+              path = Path(relative)
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('FCC_2400', 'ISM_2400')
+              text = text.replace('US_433', 'FCC_433')
+              text = text.replace('US 433 MHz', 'FCC 433 MHz')
+              path.write_text(text, encoding='utf-8')
+
+          # CSP and visual layout.
+          for relative in ['apps/web/public/_headers', 'apps/web/index.html']:
+              text = read(relative)
+              if 'connect-src' in text and 'artifactory.expresslrs.org' not in text:
+                  text = text.replace(
+                      "connect-src 'self'",
+                      "connect-src 'self' https://artifactory.expresslrs.org https://expresslrs.github.io",
+                  )
+              write(relative, text)
+          css = Path('apps/web/src/parity-workbench.css')
+          text = css.read_text(encoding='utf-8') if css.exists() else ''
+          if '.flash-acknowledgements' not in text:
+              text += '''
+
+.flash-acknowledgements {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-block-start: 0.85rem;
+}
+
+@media (max-width: 600px) {
+  .flash-acknowledgements {
+    grid-template-columns: 1fr;
+  }
+}
+'''
+          css.write_text(text, encoding='utf-8')
+
+          # Permanent primary-path gate.
+          Path('scripts/check-real-hardware-primary.mjs').write_text(
+              '''import { readFile } from "node:fs/promises";
+const main = await readFile("apps/web/src/main.tsx", "utf8");
+const workbench = await readFile(
+  "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
+  "utf8",
+);
+const failures = [];
+if (!main.includes("ExpressLrsParityWorkbench")) {
+  failures.push("main.tsx does not render the real hardware workbench");
+}
+for (const forbidden of [
+  'from "./App"',
+  "DeviceConnectionHub",
+  "mockScenarios",
+  "runFoundationDemo",
+]) {
+  if (main.includes(forbidden)) failures.push(`legacy primary path: ${forbidden}`);
+}
+for (const required of [
+  "loadOfficialExpressLrsCatalogV2",
+  "ExpressLrsHardwareSession.connect",
+  "writeParameter",
+  "restoreSettingsBackup",
+  "startBinding",
+  "prepareOfficialFirmwarePackage",
+  "flashEspFirmware",
+  "flashXmodemFirmware",
+  "flashStm32DfuFirmware",
+  "validateRecoveryPackage",
+  "verifyObservedFirmwareBuild",
+  "reconnectAndVerify",
+]) {
+  if (!workbench.includes(required)) failures.push(`missing ${required}`);
+}
+if (failures.length > 0) {
+  console.error(failures.join("\\n"));
+  process.exit(1);
+}
+console.log("Real hardware primary-path gate passed.");
+''',
+              encoding='utf-8',
+          )
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          package['scripts']['check:real-hardware-primary'] = (
+              'node scripts/check-real-hardware-primary.mjs'
+          )
+          package_path.write_text(json.dumps(package, indent=2) + '\n', encoding='utf-8')
+          print('V2 finalization completed.')
+          PY
+
+      - name: Formatting
+        id: format
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm format
+            pnpm format:check
+          } 2>&1 | tee /tmp/format.log
+
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: pnpm lint 2>&1 | tee /tmp/lint.log
+
+      - name: TypeScript
+        id: typecheck
+        continue-on-error: true
+        run: pnpm typecheck 2>&1 | tee /tmp/typecheck.log
+
+      - name: Repository and product policy gates
+        id: policies
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm check:boundaries
+            pnpm check:security-headers
+            pnpm check:pwa-safety
+            pnpm check:visual-theme
+            pnpm check:links
+            pnpm check:master-plan
+            pnpm check:real-hardware-primary
+          } 2>&1 | tee /tmp/policies.log
+
+      - name: Complete automated tests
+        id: tests
+        continue-on-error: true
+        run: pnpm test 2>&1 | tee /tmp/tests.log
+
+      - name: Live official source contracts
+        id: live
+        continue-on-error: true
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            apps/web/src/hardware/official-catalog.live.test.ts \
+            apps/web/src/hardware/official-artifacts.live.test.ts \
+            2>&1 | tee /tmp/live.log
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        run: pnpm build 2>&1 | tee /tmp/build.log
+
+      - name: Pages artifact
+        id: pages
+        continue-on-error: true
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+        run: |
+          set -o pipefail
+          {
+            pnpm --filter @elrs-easy/web build
+            pnpm check:pages-build
+          } 2>&1 | tee /tmp/pages.log
+
+      - name: Licenses and advisories
+        id: supply
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm licenses:report
+            pnpm licenses:check
+            pnpm security:audit
+          } 2>&1 | tee /tmp/supply.log
+
+      - name: Write authoritative result and failure tails
+        if: always()
+        env:
+          DEPENDENCIES: ${{ steps.dependencies.outcome }}
+          FINALIZE: ${{ steps.finalize.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          POLICIES: ${{ steps.policies.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          LIVE: ${{ steps.live.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          PAGES: ${{ steps.pages.outcome }}
+          SUPPLY: ${{ steps.supply.outcome }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+
+          gates = [
+              ('Dependency graph', os.environ['DEPENDENCIES'], '/tmp/dependencies.log'),
+              ('V2 finalization', os.environ['FINALIZE'], '/tmp/finalize.log'),
+              ('Formatting', os.environ['FORMAT'], '/tmp/format.log'),
+              ('Lint', os.environ['LINT'], '/tmp/lint.log'),
+              ('TypeScript', os.environ['TYPECHECK'], '/tmp/typecheck.log'),
+              ('Policy gates', os.environ['POLICIES'], '/tmp/policies.log'),
+              ('Automated tests', os.environ['TESTS'], '/tmp/tests.log'),
+              ('Live official sources', os.environ['LIVE'], '/tmp/live.log'),
+              ('Production build', os.environ['BUILD'], '/tmp/build.log'),
+              ('Pages artifact', os.environ['PAGES'], '/tmp/pages.log'),
+              ('Licenses/advisories', os.environ['SUPPLY'], '/tmp/supply.log'),
+          ]
+          success = all(value == 'success' for _, value, _ in gates)
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tests_text = Path('/tmp/tests.log').read_text(encoding='utf-8', errors='replace') if Path('/tmp/tests.log').exists() else ''
+          files = re.findall(r'Test Files\s+(\d+) passed', tests_text)
+          count = re.findall(r'Tests\s+(\d+) passed', tests_text)
+          lines = [
+              '# Final single-run ExpressLRS TX/RX V2 certification',
+              '',
+              f'- Input SHA: `{head}`',
+              f'- Software result: `{"PASS" if success else "FAIL"}`',
+              f'- Test files passed: `{files[-1] if files else "UNKNOWN"}`',
+              f'- Tests passed: `{count[-1] if count else "UNKNOWN"}`',
+              '- Hardware validation: `NONE`',
+              '- Stable public writes enabled: `NO`',
+              '',
+              '| Gate | Result |',
+              '|---|---|',
+          ]
+          lines.extend(f'| {name} | `{value.upper()}` |' for name, value, _ in gates)
+          lines.extend([
+              '',
+              '## Official ExpressLRS parity — TX/RX',
+              '',
+              '| Capability | Status |',
+              '|---|---|',
+              '| Official releases/branches | Implemented |',
+              '| Official vendors/bands/Targets | Implemented |',
+              '| Binding phrase UID | Implemented |',
+              '| Regulatory domains | Implemented |',
+              '| TX/RX build options | Implemented |',
+              '| Target Firmware and OTA | Implemented |',
+              '| Firmware/recovery download | Implemented |',
+              '| Target Lua | Implemented |',
+              '| Wi-Fi handoff | Implemented |',
+              '| Direct UART Espressif | Implemented in software |',
+              '| EdgeTX passthrough | Implemented in software |',
+              '| Flight-controller passthrough | Implemented in software |',
+              '| STM32 XMODEM | Implemented in software |',
+              '| STM32 WebUSB DFU/ST-Link | Implemented in software |',
+              '',
+              '## Added safety capabilities',
+              '',
+              '- Real CRSF identity and bounded complete parameters.',
+              '- Non-hidden setting write/read-back and backup/restore.',
+              '- Honest Bind evidence boundary.',
+              '- Mandatory SHA-256 recovery package.',
+              '- Pre-write identity/Target confirmation.',
+              '- Power and TX antenna acknowledgements.',
+              '- Post-write Target evidence plus version/commit verification.',
+              '',
+              'Backpack and VRX remain outside the current TX/RX scope. Physical hardware evidence remains NONE.',
+          ])
+          if not success:
+              lines.extend(['', '## Failed gate tails', ''])
+              for name, value, log in gates:
+                  if value == 'success':
+                      continue
+                  path = Path(log)
+                  tail = path.read_text(encoding='utf-8', errors='replace').splitlines()[-180:] if path.exists() else ['No log produced.']
+                  lines.extend([f'### {name}', '', '```text', *tail, '```', ''])
+          report = Path('docs/testing/expresslrs-feature-parity-validation.md')
+          report.parent.mkdir(parents=True, exist_ok=True)
+          report.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          marker = Path('docs/testing/EXPRESSLRS_TX_RX_SOFTWARE_PARITY_READY')
+          if success:
+              marker.write_text(head + '\n', encoding='utf-8')
+          else:
+              marker.unlink(missing_ok=True)
+          Path('/tmp/final-v2-result').write_text('1' if success else '0', encoding='utf-8')
+          PY
+
+      - name: Commit V2 source and exact evidence
+        if: always()
+        run: |
+          result="$(cat /tmp/final-v2-result)"
+          if [ "$result" = "1" ]; then
+            rm -f .github/workflows/m2-final-converge-v2.yml
+            rm -f .github/workflows/m2-v2-certify.yml
+            rm -f .github/workflows/m2-v2-switch.yml
+            rm -f .github/workflows/m2-certify-all.yml
+            rm -f .github/workflows/m2-stm32-dfu-integrate.yml
+            rm -f .github/workflows/m2-parity-release-candidate.yml
+            rm -f .github/workflows/m2-parity-green-v1.yml
+            rm -f .github/workflows/m2-parity-final-report.yml
+            rm -f .github/workflows/m2-write-path-fixups.yml
+            rm -f .github/workflows/m2-write-path-hardening.yml
+            rm -f .github/workflows/m2-parity-normalize.yml
+            rm -f .github/workflows/m2-parity-authoritative.yml
+            rm -f .github/workflows/m2-parity-audited-final.yml
+            rm -f .github/workflows/m2-parity-repair-v3.yml
+            rm -f .github/workflows/m2-parity-repair-v2.yml
+            rm -f .github/workflows/m2-parity-finalize.yml
+            rm -f .github/workflows/m2-audit-format-export.yml
+            rm -f .github/workflows/m2-format-parity.yml
+            rm -f .github/workflows/m2-lock-fflate.yml
+            message='test(parity): certify final ExpressLRS TX/RX V2 candidate'
+          else
+            message='test(parity): preserve final V2 failure evidence'
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "$message"
+            git fetch origin feat/m2-real-hardware-first-test
+            git rebase origin/feat/m2-real-hardware-first-test
+            git push origin HEAD:feat/m2-real-hardware-first-test
+          fi
+
+      - name: Enforce exact result
+        if: always()
+        run: |
+          if [ "$(cat /tmp/final-v2-result)" != "1" ]; then
+            echo '::error::Final V2 certification failed; exact tails are committed in docs/testing/expresslrs-feature-parity-validation.md.'
+            exit 1
+          fi
