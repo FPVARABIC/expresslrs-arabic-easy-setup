@@ -1,5 +1,6 @@
 export const CRSF_MAX_FRAME_SIZE = 64 as const;
 export const CRSF_CRC_POLY = 0xd5 as const;
+const CRSF_STREAM_INPUT_SLICE_SIZE = 1_024 as const;
 
 export const CrsfAddress = Object.freeze({
   broadcast: 0x00,
@@ -114,7 +115,12 @@ export interface CrsfSelectionParameter extends CrsfParameterBase {
 }
 
 export interface CrsfStringParameter extends CrsfParameterBase {
-  readonly kind: "string" | "info";
+  readonly kind: "string";
+  readonly value: string;
+}
+
+export interface CrsfInfoParameter extends CrsfParameterBase {
+  readonly kind: "info";
   readonly value: string;
 }
 
@@ -138,6 +144,7 @@ export type CrsfParameter =
   | CrsfNumericParameter
   | CrsfSelectionParameter
   | CrsfStringParameter
+  | CrsfInfoParameter
   | CrsfFolderParameter
   | CrsfCommandParameter
   | CrsfUnsupportedParameter;
@@ -231,16 +238,66 @@ function isPlausibleAddress(value: number): boolean {
   );
 }
 
+function isCompleteValidFrameAt(bytes: Uint8Array, offset: number): boolean {
+  if (offset < 0 || offset + 4 > bytes.byteLength) {
+    return false;
+  }
+  const address = bytes[offset];
+  const frameSize = bytes[offset + 1];
+  if (
+    address === undefined ||
+    frameSize === undefined ||
+    !isPlausibleAddress(address)
+  ) {
+    return false;
+  }
+  const totalSize = frameSize + 2;
+  if (
+    frameSize < 2 ||
+    totalSize > CRSF_MAX_FRAME_SIZE ||
+    offset + totalSize > bytes.byteLength
+  ) {
+    return false;
+  }
+  const typeAndPayload = bytes.slice(offset + 2, offset + totalSize - 1);
+  const expectedCrc = bytes[offset + totalSize - 1];
+  return expectedCrc !== undefined && crc8DvbS2(typeAndPayload) === expectedCrc;
+}
+
+function findNextCompleteValidFrameOffset(bytes: Uint8Array): number {
+  for (let offset = 1; offset + 4 <= bytes.byteLength; offset += 1) {
+    if (isCompleteValidFrameAt(bytes, offset)) {
+      return offset;
+    }
+  }
+  return -1;
+}
+
 export class CrsfStreamParser {
-  #buffer = new Uint8Array();
+  #buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
   public push(chunk: Uint8Array): readonly CrsfFrame[] {
     if (chunk.byteLength === 0) {
       return Object.freeze([]);
     }
-    this.#buffer = concatBytes(this.#buffer, chunk);
     const frames: CrsfFrame[] = [];
 
+    for (
+      let chunkOffset = 0;
+      chunkOffset < chunk.byteLength;
+      chunkOffset += CRSF_STREAM_INPUT_SLICE_SIZE
+    ) {
+      this.#buffer = concatBytes(
+        this.#buffer,
+        chunk.slice(chunkOffset, chunkOffset + CRSF_STREAM_INPUT_SLICE_SIZE),
+      );
+      this.#drain(frames);
+    }
+
+    return Object.freeze(frames);
+  }
+
+  #drain(frames: CrsfFrame[]): void {
     while (this.#buffer.byteLength >= 4) {
       if (!isPlausibleAddress(this.#buffer[0] ?? -1)) {
         this.#buffer = this.#buffer.slice(1);
@@ -253,6 +310,11 @@ export class CrsfStreamParser {
         continue;
       }
       if (this.#buffer.byteLength < totalSize) {
+        const nextValidOffset = findNextCompleteValidFrameOffset(this.#buffer);
+        if (nextValidOffset >= 0) {
+          this.#buffer = this.#buffer.slice(nextValidOffset);
+          continue;
+        }
         break;
       }
 
@@ -284,8 +346,6 @@ export class CrsfStreamParser {
       );
       this.#buffer = this.#buffer.slice(totalSize);
     }
-
-    return Object.freeze(frames);
   }
 
   public reset(): void {
@@ -362,9 +422,7 @@ function nullTerminated(
   });
 }
 
-export function parseCrsfDeviceInfo(
-  frame: CrsfFrame,
-): CrsfDeviceInfo | null {
+export function parseCrsfDeviceInfo(frame: CrsfFrame): CrsfDeviceInfo | null {
   if (frame.type !== CrsfFrameType.deviceInfo) {
     return null;
   }
@@ -407,9 +465,7 @@ export function parseCrsfDeviceInfo(
   });
 }
 
-export function createDevicePing(
-  origin: number = CrsfAddress.usb,
-): Uint8Array {
+export function createDevicePing(origin: number = CrsfAddress.usb): Uint8Array {
   return encodeCrsfExtendedFrame({
     type: CrsfFrameType.devicePing,
     destination: CrsfAddress.broadcast,
@@ -441,10 +497,7 @@ export function createParameterWrite(input: {
     type: CrsfFrameType.parameterWrite,
     destination: input.destination,
     origin: input.origin ?? CrsfAddress.usb,
-    data: concatBytes(
-      new Uint8Array([input.parameterId & 0xff]),
-      input.value,
-    ),
+    data: concatBytes(new Uint8Array([input.parameterId & 0xff]), input.value),
   });
 }
 
@@ -517,11 +570,7 @@ export function parseParameterChunk(
   });
 }
 
-function requireBytes(
-  bytes: Uint8Array,
-  offset: number,
-  count: number,
-): void {
+function requireBytes(bytes: Uint8Array, offset: number, count: number): void {
   if (offset < 0 || count < 0 || offset + count > bytes.byteLength) {
     throw new TypeError("CRSF parameter payload is truncated");
   }
@@ -543,9 +592,7 @@ function readInteger(
       ? view.getInt16(offset, false)
       : view.getUint16(offset, false);
   }
-  return signed
-    ? view.getInt32(offset, false)
-    : view.getUint32(offset, false);
+  return signed ? view.getInt32(offset, false) : view.getUint32(offset, false);
 }
 
 function parseNumericParameter(

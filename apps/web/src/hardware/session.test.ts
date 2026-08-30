@@ -22,8 +22,8 @@ import type {
 class ByteQueue {
   readonly #values: Uint8Array[] = [];
   #waiting:
-    | ((value: Readonly<{ done: boolean; value?: Uint8Array }>) => void)
-    | null = null;
+    ((value: Readonly<{ done: boolean; value?: Uint8Array }>) => void) | null =
+    null;
   #closed = false;
 
   public push(value: Uint8Array): void {
@@ -113,22 +113,7 @@ function deviceInfo(): Uint8Array {
     origin: CrsfAddress.transmitter,
     data: concatBytes(
       terminated("Example TX 2.4GHz"),
-      new Uint8Array([
-        0x45,
-        0x4c,
-        0x52,
-        0x53,
-        0,
-        0,
-        0,
-        0,
-        0,
-        4,
-        1,
-        0,
-        3,
-        0,
-      ]),
+      new Uint8Array([0x45, 0x4c, 0x52, 0x53, 0, 0, 0, 0, 0, 4, 1, 0, 3, 0]),
     ),
   });
 }

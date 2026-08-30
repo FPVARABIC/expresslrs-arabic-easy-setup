@@ -2,10 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  CrsfAddress,
-  type CrsfParameter,
-} from "../hardware/crsf";
+import { CrsfAddress, type CrsfParameter } from "../hardware/crsf";
 import type {
   ExpressLrsIdentity,
   ParameterWriteResult,
@@ -35,10 +32,9 @@ function identity(role: "tx" | "rx" = "tx"): ExpressLrsIdentity {
   };
 }
 
-function selection(value: number): Extract<
-  CrsfParameter,
-  { readonly kind: "selection" }
-> {
+function selection(
+  value: number,
+): Extract<CrsfParameter, { readonly kind: "selection" }> {
   return {
     id: 1,
     parentId: 0,
@@ -107,7 +103,10 @@ function fakeHardware(role: "tx" | "rx" = "tx"): {
     ondisconnect: null,
   };
   const writeParameter = vi.fn(
-    async (parameterId: number, value: number): Promise<ParameterWriteResult> => {
+    async (
+      parameterId: number,
+      value: number,
+    ): Promise<ParameterWriteResult> => {
       const current = parameters.find((item) => item.id === parameterId);
       if (current === undefined || current.kind !== "selection") {
         throw new Error("unexpected setting");
@@ -148,14 +147,12 @@ function fakeHardware(role: "tx" | "rx" = "tx"): {
     }),
     close,
   };
-  const connector = vi.fn(
-    async (): Promise<HardwareDriverConnectOutcome> => ({
-      status: "CONNECTED",
-      driver,
-      identity: deviceIdentity,
-      parameters,
-    }),
-  );
+  const connector = vi.fn(async (): Promise<HardwareDriverConnectOutcome> => ({
+    status: "CONNECTED",
+    driver,
+    identity: deviceIdentity,
+    parameters,
+  }));
   return { connector, driver, writeParameter, startBinding, close };
 }
 
@@ -170,9 +167,7 @@ async function connectThroughUi(
       connectTimeoutMs={2_000}
     />,
   );
-  await user.click(
-    screen.getByRole("tab", { name: "USB مباشر / CRSF" }),
-  );
+  await user.click(screen.getByRole("tab", { name: "USB مباشر / CRSF" }));
   await user.click(
     screen.getByRole("button", {
       name: "اختيار المنفذ والتعرف على الجهاز",
@@ -223,9 +218,7 @@ describe("device connection acceptance journey", () => {
     await connectThroughUi(user, hardware.connector);
 
     await user.selectOptions(screen.getByLabelText("القيمة الجديدة"), "2");
-    await user.click(
-      screen.getByRole("button", { name: "حفظ والتحقق" }),
-    );
+    await user.click(screen.getByRole("button", { name: "حفظ والتحقق" }));
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -295,9 +288,7 @@ describe("device connection acceptance journey", () => {
       />,
     );
 
-    await user.click(
-      screen.getByRole("tab", { name: "USB مباشر / CRSF" }),
-    );
+    await user.click(screen.getByRole("tab", { name: "USB مباشر / CRSF" }));
     await user.click(
       screen.getByRole("button", {
         name: "اختيار المنفذ والتعرف على الجهاز",
@@ -319,9 +310,7 @@ describe("device connection acceptance journey", () => {
       <DeviceConnectionHubPanel locale="ar" connectHardware={connector} />,
     );
 
-    await user.click(
-      screen.getByRole("tab", { name: "USB مباشر / CRSF" }),
-    );
+    await user.click(screen.getByRole("tab", { name: "USB مباشر / CRSF" }));
     await user.click(
       screen.getByRole("button", {
         name: "اختيار المنفذ والتعرف على الجهاز",

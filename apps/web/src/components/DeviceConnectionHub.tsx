@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 
 import type { CrsfRole } from "../hardware/crsf";
@@ -38,6 +32,7 @@ interface Feedback {
 }
 
 const officialWebFlasher = "https://expresslrs.github.io/web-flasher/";
+const systemNow = () => Date.now();
 
 const copy = {
   ar: {
@@ -98,14 +93,12 @@ const copy = {
     noWritableSettings: "لم يعلن الجهاز عن إعدادات آمنة قابلة للكتابة.",
     settingSaved: "تمت الكتابة وتطابقت القراءة الرجعية.",
     bindTitle: "الربط",
-    bindReady:
-      "الطرف الآخر في وضع الربط، والهوائيات والطاقة في حالة آمنة.",
+    bindReady: "الطرف الآخر في وضع الربط، والهوائيات والطاقة في حالة آمنة.",
     bindAction: "إرسال أمر الربط",
     bindCompleted:
       "اكتمل أمر الربط على النقل، لكن نجاح رابط RF لم يُثبت بعد. تحقق من اتصال TX وRX فعليًا.",
     restoreTitle: "استعادة إعدادات بداية الجلسة",
-    restoreReady:
-      "أوافق على إعادة القيم الآمنة المحفوظة في بداية هذه الجلسة.",
+    restoreReady: "أوافق على إعادة القيم الآمنة المحفوظة في بداية هذه الجلسة.",
     restoreAction: "استعادة والتحقق",
     restoreCompleted: "عادت القيم المحفوظة واجتازت القراءة الرجعية.",
     rebootTitle: "إعادة التشغيل",
@@ -230,7 +223,9 @@ function useDocumentLocale(): HubLocale {
   const [locale, setLocale] = useState<HubLocale>(localeFromDocument);
 
   useEffect(() => {
-    const observer = new MutationObserver(() => setLocale(localeFromDocument()));
+    const observer = new MutationObserver(() =>
+      setLocale(localeFromDocument()),
+    );
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["lang"],
@@ -297,16 +292,13 @@ function selectionValues(
   parameter: Extract<WritableCrsfParameter, { readonly kind: "selection" }>,
 ): readonly Readonly<{ value: number; label: string }>[] {
   return Object.freeze(
-    Array.from(
-      { length: parameter.max - parameter.min + 1 },
-      (_, offset) => {
-        const value = parameter.min + offset;
-        return Object.freeze({
-          value,
-          label: parameter.options[offset] ?? String(value),
-        });
-      },
-    ),
+    Array.from({ length: parameter.max - parameter.min + 1 }, (_, offset) => {
+      const value = parameter.min + offset;
+      return Object.freeze({
+        value,
+        label: parameter.options[offset] ?? String(value),
+      });
+    }),
   );
 }
 
@@ -363,12 +355,14 @@ export function DeviceConnectionHubPanel({
   secureContext,
   connectHardware,
   connectTimeoutMs,
+  now = systemNow,
 }: {
   readonly locale: HubLocale;
   readonly navigatorObject?: unknown;
   readonly secureContext?: boolean;
   readonly connectHardware?: HardwareDriverConnector;
   readonly connectTimeoutMs?: number;
+  readonly now?: () => number;
 }) {
   const text = copy[locale];
   const [role, setRole] = useState<CrsfRole>("tx");
@@ -379,8 +373,12 @@ export function DeviceConnectionHubPanel({
   const [operation, setOperation] = useState<Operation | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [parameterRevision, setParameterRevision] = useState(0);
-  const [selectedSettingId, setSelectedSettingId] = useState<number | null>(null);
+  const [writableParameters, setWritableParameters] = useState<
+    readonly WritableCrsfParameter[]
+  >([]);
+  const [selectedSettingId, setSelectedSettingId] = useState<number | null>(
+    null,
+  );
   const [settingDraft, setSettingDraft] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
   const [bindReady, setBindReady] = useState(false);
@@ -392,10 +390,6 @@ export function DeviceConnectionHubPanel({
   const requestSequence = useRef(0);
   const connectStartedAt = useRef(0);
   const methods = methodsForRole(role);
-  const writableParameters = useMemo(
-    () => session?.writableParameters ?? [],
-    [parameterRevision, session],
-  );
   const selectedSetting = writableParameters.find(
     (parameter) => parameter.id === selectedSettingId,
   );
@@ -404,29 +398,13 @@ export function DeviceConnectionHubPanel({
     if (operation !== "connect") return;
     const update = () => {
       setElapsedSeconds(
-        Math.max(0, Math.floor((Date.now() - connectStartedAt.current) / 1_000)),
+        Math.max(0, Math.floor((now() - connectStartedAt.current) / 1_000)),
       );
     };
     update();
     const timer = setInterval(update, 250);
     return () => clearInterval(timer);
-  }, [operation]);
-
-  useEffect(() => {
-    if (writableParameters.length === 0) {
-      setSelectedSettingId(null);
-      setSettingDraft("");
-      return;
-    }
-    const current = writableParameters.find(
-      (parameter) => parameter.id === selectedSettingId,
-    );
-    const next = current ?? writableParameters[0];
-    if (next !== undefined) {
-      setSelectedSettingId(next.id);
-      setSettingDraft(String(next.value));
-    }
-  }, [parameterRevision, selectedSettingId, writableParameters]);
+  }, [now, operation]);
 
   useEffect(
     () => () => {
@@ -457,6 +435,7 @@ export function DeviceConnectionHubPanel({
     setStatus(nextStatus);
     setFeedback(null);
     setElapsedSeconds(0);
+    setWritableParameters([]);
     setSelectedSettingId(null);
     setSettingDraft("");
     setHasChanges(false);
@@ -484,7 +463,7 @@ export function DeviceConnectionHubPanel({
     const requestId = ++requestSequence.current;
     const controller = new AbortController();
     connectAbort.current = controller;
-    connectStartedAt.current = Date.now();
+    connectStartedAt.current = now();
     setElapsedSeconds(0);
     setOperation("connect");
     setStatus("CONNECTING");
@@ -495,7 +474,9 @@ export function DeviceConnectionHubPanel({
       ...(navigatorObject === undefined ? {} : { navigatorObject }),
       ...(secureContext === undefined ? {} : { secureContext }),
       ...(connectHardware === undefined ? {} : { connector: connectHardware }),
-      ...(connectTimeoutMs === undefined ? {} : { timeoutMs: connectTimeoutMs }),
+      ...(connectTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: connectTimeoutMs }),
       signal: controller.signal,
     });
     if (requestSequence.current !== requestId) return;
@@ -511,16 +492,24 @@ export function DeviceConnectionHubPanel({
     sessionRef.current = outcome.session;
     setSession(outcome.session);
     setBackup(outcome.backup);
-    setParameterRevision((value) => value + 1);
+    const nextWritableParameters = outcome.session.writableParameters;
+    const firstWritableParameter = nextWritableParameters[0];
+    setWritableParameters(nextWritableParameters);
+    setSelectedSettingId(firstWritableParameter?.id ?? null);
+    setSettingDraft(
+      firstWritableParameter === undefined
+        ? ""
+        : String(firstWritableParameter.value),
+    );
     setStatus("CONNECTED");
-    setFeedback({
-      tone: "warning",
-      message: text.targetUnverified,
-    });
+    setFeedback(null);
     disconnectUnsubscribe.current = outcome.session.onDisconnected(() => {
       sessionRef.current = null;
       setSession(null);
       setBackup(null);
+      setWritableParameters([]);
+      setSelectedSettingId(null);
+      setSettingDraft("");
       setOperation(null);
       setStatus("DISCONNECTED");
       setFeedback({ tone: "error", message: text.statusDisconnected });
@@ -564,8 +553,17 @@ export function DeviceConnectionHubPanel({
         (signal) => session.writeParameter(selectedSetting.id, value, signal),
         10_000,
       );
-      setParameterRevision((revision) => revision + 1);
-      setSettingDraft(String(result.requestedValue));
+      const nextWritableParameters = session.writableParameters;
+      const nextSelectedSetting = nextWritableParameters.find(
+        (parameter) => parameter.id === selectedSetting.id,
+      );
+      setWritableParameters(nextWritableParameters);
+      setSelectedSettingId(nextSelectedSetting?.id ?? null);
+      setSettingDraft(
+        nextSelectedSetting === undefined
+          ? String(result.requestedValue)
+          : String(nextSelectedSetting.value),
+      );
       setHasChanges(true);
       setFeedback({ tone: "success", message: text.settingSaved });
     } catch {
@@ -581,8 +579,7 @@ export function DeviceConnectionHubPanel({
     setFeedback(null);
     try {
       await withTimeout(
-        (signal) =>
-          session.startBinding({ confirmedByUser: true, signal }),
+        (signal) => session.startBinding({ confirmedByUser: true, signal }),
         12_000,
       );
       setFeedback({ tone: "warning", message: text.bindCompleted });
@@ -607,7 +604,18 @@ export function DeviceConnectionHubPanel({
           }),
         30_000,
       );
-      setParameterRevision((revision) => revision + 1);
+      const nextWritableParameters = session.writableParameters;
+      const nextSelectedSetting =
+        nextWritableParameters.find(
+          (parameter) => parameter.id === selectedSettingId,
+        ) ?? nextWritableParameters[0];
+      setWritableParameters(nextWritableParameters);
+      setSelectedSettingId(nextSelectedSetting?.id ?? null);
+      setSettingDraft(
+        nextSelectedSetting === undefined
+          ? ""
+          : String(nextSelectedSetting.value),
+      );
       setHasChanges(false);
       setRestoreReady(false);
       setFeedback({ tone: "success", message: text.restoreCompleted });
@@ -717,7 +725,11 @@ export function DeviceConnectionHubPanel({
           <>
             <p>{text.wifiDescription}</p>
             <div className="connection-link-row">
-              <a href="http://10.0.0.1/" target="_blank" rel="noopener noreferrer">
+              <a
+                href="http://10.0.0.1/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {text.openAp}
               </a>
               <a
@@ -785,7 +797,9 @@ export function DeviceConnectionHubPanel({
                     <div>
                       <dt>{text.role}</dt>
                       <dd>
-                        {session.identity.role === "tx" ? text.roleTx : text.roleRx}
+                        {session.identity.role === "tx"
+                          ? text.roleTx
+                          : text.roleRx}
                       </dd>
                     </div>
                     <div>
@@ -795,14 +809,24 @@ export function DeviceConnectionHubPanel({
                     <div>
                       <dt>{text.hardware}</dt>
                       <dd dir="ltr">
-                        {formatHardwareVersion(session.identity.hardwareVersion)}
+                        {formatHardwareVersion(
+                          session.identity.hardwareVersion,
+                        )}
                       </dd>
                     </div>
                     <div>
                       <dt>{text.usb}</dt>
                       <dd dir="ltr">
-                        VID {formatUsbId(session.identity.usb.usbVendorId, text.unavailable)} · PID{" "}
-                        {formatUsbId(session.identity.usb.usbProductId, text.unavailable)}
+                        VID{" "}
+                        {formatUsbId(
+                          session.identity.usb.usbVendorId,
+                          text.unavailable,
+                        )}{" "}
+                        · PID{" "}
+                        {formatUsbId(
+                          session.identity.usb.usbProductId,
+                          text.unavailable,
+                        )}
                       </dd>
                     </div>
                     <div>
@@ -835,7 +859,8 @@ export function DeviceConnectionHubPanel({
                 <section className="hardware-operation-card">
                   <h3>{text.settingsTitle}</h3>
                   <p>{text.settingsDescription}</p>
-                  {writableParameters.length === 0 || selectedSetting === undefined ? (
+                  {writableParameters.length === 0 ||
+                  selectedSetting === undefined ? (
                     <p className="connection-empty-state">
                       {text.noWritableSettings}
                     </p>
@@ -861,7 +886,9 @@ export function DeviceConnectionHubPanel({
                           <select
                             value={settingDraft}
                             disabled={busy}
-                            onChange={(event) => setSettingDraft(event.target.value)}
+                            onChange={(event) =>
+                              setSettingDraft(event.target.value)
+                            }
                           >
                             {selectionValues(selectedSetting).map((option) => (
                               <option key={option.value} value={option.value}>
@@ -877,7 +904,9 @@ export function DeviceConnectionHubPanel({
                             step={1}
                             value={settingDraft}
                             disabled={busy}
-                            onChange={(event) => setSettingDraft(event.target.value)}
+                            onChange={(event) =>
+                              setSettingDraft(event.target.value)
+                            }
                           />
                         )}
                       </label>
@@ -926,7 +955,9 @@ export function DeviceConnectionHubPanel({
                         type="checkbox"
                         checked={restoreReady}
                         disabled={busy}
-                        onChange={(event) => setRestoreReady(event.target.checked)}
+                        onChange={(event) =>
+                          setRestoreReady(event.target.checked)
+                        }
                       />
                       <span>{text.restoreReady}</span>
                     </label>
@@ -948,7 +979,9 @@ export function DeviceConnectionHubPanel({
                         type="checkbox"
                         checked={rebootReady}
                         disabled={busy}
-                        onChange={(event) => setRebootReady(event.target.checked)}
+                        onChange={(event) =>
+                          setRebootReady(event.target.checked)
+                        }
                       />
                       <span>{text.rebootReady}</span>
                     </label>

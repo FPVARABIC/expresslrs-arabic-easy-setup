@@ -299,7 +299,11 @@ export class ExpressLrsHardwareSession {
       });
     }
 
-    const identity = identityFromDeviceInfo(deviceInfo, input.role, opened.info);
+    const identity = identityFromDeviceInfo(
+      deviceInfo,
+      input.role,
+      opened.info,
+    );
     const session = new ExpressLrsHardwareSession({
       link,
       port: opened.port,

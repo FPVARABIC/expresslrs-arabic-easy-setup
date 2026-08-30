@@ -195,11 +195,7 @@ export async function requestAndOpenHardwareSerial(
 export class HardwareSerialError extends Error {
   public constructor(
     public readonly code:
-      | "CLOSED"
-      | "READ_FAILED"
-      | "WRITE_FAILED"
-      | "TIMEOUT"
-      | "ABORTED",
+      "CLOSED" | "READ_FAILED" | "WRITE_FAILED" | "TIMEOUT" | "ABORTED",
     message: string,
   ) {
     super(message);
@@ -317,10 +313,7 @@ export class CrsfSerialLink {
         cancel: () => undefined,
       });
     }
-    const timeoutMs = Math.min(
-      Math.max(input.timeoutMs ?? 1_500, 50),
-      30_000,
-    );
+    const timeoutMs = Math.min(Math.max(input.timeoutMs ?? 1_500, 50), 30_000);
     let pending: PendingFrame;
     const promise = new Promise<CrsfFrame>((resolve, reject) => {
       const timer = setTimeout(() => {

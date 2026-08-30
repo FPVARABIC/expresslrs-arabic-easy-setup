@@ -8,10 +8,7 @@ import {
   type HardwareConnectOutcome,
   type ParameterWriteResult,
 } from "./session";
-import {
-  HardwareSerialError,
-  type HardwareSerialPort,
-} from "./serial";
+import { HardwareSerialError, type HardwareSerialPort } from "./serial";
 
 export const MAX_EXPRESSLRS_CRSF_PARAMETERS = 64 as const;
 export const DEFAULT_HARDWARE_CONNECT_TIMEOUT_MS = 15_000 as const;
@@ -148,10 +145,7 @@ function parameterValue(parameter: CrsfParameter): number | null {
   return isWritableParameter(parameter) ? parameter.value : null;
 }
 
-function safeUsbMatch(
-  expected: number | null,
-  actual: number | null,
-): boolean {
+function safeUsbMatch(expected: number | null, actual: number | null): boolean {
   return expected === null || actual === null || expected === actual;
 }
 
@@ -162,7 +156,8 @@ function compatibleBackupIdentity(
   return (
     expected.role === actual.role &&
     expected.address === actual.address &&
-    normalizedName(expected.productName) === normalizedName(actual.productName) &&
+    normalizedName(expected.productName) ===
+      normalizedName(actual.productName) &&
     expected.hardwareVersion === actual.hardwareVersion &&
     safeUsbMatch(expected.usb.usbVendorId, actual.usb.usbVendorId) &&
     safeUsbMatch(expected.usb.usbProductId, actual.usb.usbProductId)
@@ -209,7 +204,10 @@ function validateParameterTable(
   identity: ExpressLrsIdentity,
   parameters: readonly CrsfParameter[],
 ): string | null {
-  if (identity.productName.trim().length === 0 || identity.productName.length > 96) {
+  if (
+    identity.productName.trim().length === 0 ||
+    identity.productName.length > 96
+  ) {
     return "The CRSF device identity contains an invalid product name";
   }
   if (parameters.length !== identity.parameterCount) {
@@ -263,7 +261,9 @@ export async function connectUserHardwareSession(
   input.signal?.addEventListener("abort", onExternalAbort, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
-    controller.abort(new DOMException("Hardware connection timed out", "TimeoutError"));
+    controller.abort(
+      new DOMException("Hardware connection timed out", "TimeoutError"),
+    );
   }, timeoutMs);
 
   const connectorPromise = connector({
@@ -339,7 +339,9 @@ export async function connectUserHardwareSession(
       return createAbortOutcome(input.signal, timedOut);
     }
     const message =
-      error instanceof Error ? error.message : "Unexpected hardware connection failure";
+      error instanceof Error
+        ? error.message
+        : "Unexpected hardware connection failure";
     return connectFailure("CONNECT_FAILED", message);
   } finally {
     clearTimeout(timer);
@@ -384,10 +386,15 @@ export class UserHardwareSession {
       identity.parameterCount < 0 ||
       identity.parameterCount > MAX_EXPRESSLRS_CRSF_PARAMETERS
     ) {
-      throw new RangeError("The CRSF parameter count is outside the safe bound");
+      throw new RangeError(
+        "The CRSF parameter count is outside the safe bound",
+      );
     }
     this.#driver = driver;
-    this.#identity = Object.freeze({ ...identity, usb: Object.freeze({ ...identity.usb }) });
+    this.#identity = Object.freeze({
+      ...identity,
+      usb: Object.freeze({ ...identity.usb }),
+    });
     this.#parameters = Object.freeze([...parameters]);
     this.#backup = this.#createBackup(new Date());
 
@@ -473,7 +480,11 @@ export class UserHardwareSession {
     }
 
     try {
-      const result = await this.#driver.writeParameter(parameterId, value, signal);
+      const result = await this.#driver.writeParameter(
+        parameterId,
+        value,
+        signal,
+      );
       this.#replaceParameter(result.parameter);
       return result;
     } catch (error: unknown) {
@@ -494,7 +505,10 @@ export class UserHardwareSession {
         }
         await sleep(delay);
         try {
-          const readback = await this.#driver.readParameter(parameterId, signal);
+          const readback = await this.#driver.readParameter(
+            parameterId,
+            signal,
+          );
           this.#replaceParameter(readback);
           if (parameterValue(readback) === value) {
             return Object.freeze({
@@ -612,12 +626,16 @@ export class UserHardwareSession {
         "The connected device does not expose a Reboot or Restart command",
       );
     }
-    const result = await this.#driver.executeCommand(command.name, input.signal);
+    const result = await this.#driver.executeCommand(
+      command.name,
+      input.signal,
+    );
     return Object.freeze({
       commandName: command.name,
       commandCompleted: result.acknowledged,
       information:
-        result.information || `${command.name} completed on the connected device`,
+        result.information ||
+        `${command.name} completed on the connected device`,
     });
   }
 

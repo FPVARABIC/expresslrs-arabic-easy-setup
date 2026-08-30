@@ -27,10 +27,7 @@ describe("CRSF hardware protocol", () => {
       expect.objectContaining({
         address: CrsfAddress.flightController,
         type: CrsfFrameType.devicePing,
-        payload: new Uint8Array([
-          CrsfAddress.broadcast,
-          CrsfAddress.core,
-        ]),
+        payload: new Uint8Array([CrsfAddress.broadcast, CrsfAddress.core]),
       }),
     ]);
   });
@@ -51,22 +48,7 @@ describe("CRSF hardware protocol", () => {
   it("decodes DEVICE_INFO and requires the ELRS marker", () => {
     const data = concatBytes(
       new TextEncoder().encode("Example TX\0"),
-      new Uint8Array([
-        0x45,
-        0x4c,
-        0x52,
-        0x53,
-        0,
-        0,
-        0,
-        0,
-        0,
-        4,
-        1,
-        0,
-        3,
-        0,
-      ]),
+      new Uint8Array([0x45, 0x4c, 0x52, 0x53, 0, 0, 0, 0, 0, 4, 1, 0, 3, 0]),
     );
     const raw = encodeCrsfExtendedFrame({
       address: CrsfAddress.radio,
@@ -106,16 +88,7 @@ describe("CRSF hardware protocol", () => {
       concatBytes(
         new Uint8Array([0, 2]),
         new TextEncoder().encode("Power\0"),
-        new Uint8Array([
-          0x00,
-          0x64,
-          0x00,
-          0x0a,
-          0x03,
-          0xe8,
-          0x00,
-          0x64,
-        ]),
+        new Uint8Array([0x00, 0x64, 0x00, 0x0a, 0x03, 0xe8, 0x00, 0x64]),
         new TextEncoder().encode("mW\0"),
       ),
     );
@@ -145,21 +118,9 @@ describe("CRSF hardware protocol", () => {
     const bind = createLegacyBindCommand();
     const bootloader = createLegacyBootloaderCommand("ESP82");
 
-    expect([...bind.slice(0, 5)]).toEqual([
-      0xec,
-      0x04,
-      0x32,
-      0x62,
-      0x64,
-    ]);
+    expect([...bind.slice(0, 5)]).toEqual([0xec, 0x04, 0x32, 0x62, 0x64]);
     expect(bind.at(-1)).toBe(crc8DvbS2(bind.slice(2, -1)));
-    expect([...bootloader.slice(0, 5)]).toEqual([
-      0xec,
-      0x09,
-      0x32,
-      0x62,
-      0x6c,
-    ]);
+    expect([...bootloader.slice(0, 5)]).toEqual([0xec, 0x09, 0x32, 0x62, 0x6c]);
     expect(new TextDecoder().decode(bootloader.slice(5, -1))).toBe("ESP82");
     expect(bootloader.at(-1)).toBe(crc8DvbS2(bootloader.slice(2, -1)));
   });

@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  CrsfAddress,
-  type CrsfParameter,
-} from "./crsf";
+import { CrsfAddress, type CrsfParameter } from "./crsf";
 import {
   ExpressLrsHardwareError,
   type ExpressLrsIdentity,
@@ -95,11 +92,13 @@ function info(id: number): Extract<CrsfParameter, { readonly kind: "info" }> {
   };
 }
 
-function fakeDriver(input: {
-  readonly deviceIdentity?: ExpressLrsIdentity;
-  readonly initialParameters?: readonly CrsfParameter[];
-  readonly writeFailure?: Error;
-} = {}): {
+function fakeDriver(
+  input: {
+    readonly deviceIdentity?: ExpressLrsIdentity;
+    readonly initialParameters?: readonly CrsfParameter[];
+    readonly writeFailure?: Error;
+  } = {},
+): {
   readonly driver: HardwareSessionDriver;
   readonly close: ReturnType<typeof vi.fn>;
   readonly writeParameter: ReturnType<typeof vi.fn>;
@@ -126,7 +125,10 @@ function fakeDriver(input: {
     ondisconnect: null,
   };
   const writeParameter = vi.fn(
-    async (parameterId: number, value: number): Promise<ParameterWriteResult> => {
+    async (
+      parameterId: number,
+      value: number,
+    ): Promise<ParameterWriteResult> => {
       if (input.writeFailure !== undefined) throw input.writeFailure;
       const current = parameters.find((item) => item.id === parameterId);
       if (current === undefined || current.kind !== "selection") {
@@ -204,7 +206,11 @@ describe("user-facing hardware safety facade", () => {
       "Packet Rate",
     ]);
     expect(session.backup.values).toEqual([
-      expect.objectContaining({ parameterId: 1, name: "Packet Rate", value: 1 }),
+      expect.objectContaining({
+        parameterId: 1,
+        name: "Packet Rate",
+        value: 1,
+      }),
     ]);
   });
 
@@ -227,8 +233,7 @@ describe("user-facing hardware safety facade", () => {
     vi.useFakeTimers();
     const hardware = fakeDriver();
     let resolveConnector:
-      | ((value: HardwareDriverConnectOutcome) => void)
-      | undefined;
+      ((value: HardwareDriverConnectOutcome) => void) | undefined;
     const connector = vi.fn(
       () =>
         new Promise<HardwareDriverConnectOutcome>((resolve) => {
@@ -292,11 +297,7 @@ describe("user-facing hardware safety facade", () => {
     ).resolves.toEqual([
       expect.objectContaining({ requestedValue: 1, verified: true }),
     ]);
-    expect(hardware.writeParameter).toHaveBeenLastCalledWith(
-      1,
-      1,
-      undefined,
-    );
+    expect(hardware.writeParameter).toHaveBeenLastCalledWith(1, 1, undefined);
   });
 
   it("retries read-back without repeating the write after a verification timeout", async () => {
