@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   export:
-    name: Export full formatted source
+    name: Export formatted source and locked toolchain
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -51,6 +51,13 @@ jobs:
             --exclude '**/coverage' \
             ./ /tmp/elrs-easy-source/
 
+      - name: Archive locked node modules
+        run: |
+          tar -czf /tmp/elrs-easy-node-modules.tar.gz \
+            node_modules \
+            apps/web/node_modules \
+            packages/*/node_modules
+
       - name: Upload full formatted source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -58,3 +65,11 @@ jobs:
           path: /tmp/elrs-easy-source
           if-no-files-found: error
           retention-days: 3
+
+      - name: Upload locked node modules
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: elrs-easy-node-modules
+          path: /tmp/elrs-easy-node-modules.tar.gz
+          if-no-files-found: error
+          retention-days: 1
