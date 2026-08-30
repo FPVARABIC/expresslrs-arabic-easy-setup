@@ -6,6 +6,10 @@ on:
       - feat/m2-real-hardware-first-test
     paths:
       - .github/workflows/m2-audit-format-export.yml
+      - apps/web/src/components/DeviceConnectionHub.tsx
+      - apps/web/src/components/DeviceConnectionHub.test.tsx
+      - apps/web/src/connection-hub.css
+      - apps/web/src/hardware/**
 
 permissions:
   contents: read
