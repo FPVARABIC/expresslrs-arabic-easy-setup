@@ -1,0 +1,322 @@
+name: M2 switch to rebuilt hardware journey
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-v2-switch.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: m2-switch-to-rebuilt-hardware-journey
+  cancel-in-progress: true
+
+jobs:
+  switch:
+    name: Replace accumulated UI, correct OTA artifact, and run all gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Check out latest branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Wait for older implementation runs and refresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$((SECONDS + 900))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            active="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=feat%2Fm2-real-hardware-first-test&per_page=100" \
+                --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\") | select(.name != \"CI\") | .id" \
+                | wc -l
+            )"
+            [ "$active" -eq 0 ] && break
+            sleep 15
+          done
+          git fetch origin feat/m2-real-hardware-first-test
+          git reset --hard origin/feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install and pin dependencies
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+
+      - name: Promote the rebuilt workbench
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('apps/web/src/components/ExpressLrsParityWorkbenchV2.tsx')
+          test_source = Path('apps/web/src/components/ExpressLrsParityWorkbenchV2.test.tsx')
+          if not source.exists() or not test_source.exists():
+              raise SystemExit('Rebuilt workbench sources are missing')
+          text = source.read_text(encoding='utf-8')
+          text = text.replace(
+              'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";',
+              'import { loadOfficialExpressLrsCatalogV2 } from "../hardware/official-catalog-v2";',
+          )
+          if 'officialArtifactFetch' not in text:
+              text = text.replace(
+                  'import { loadOfficialExpressLrsCatalogV2 } from "../hardware/official-catalog-v2";\n',
+                  'import { loadOfficialExpressLrsCatalogV2 } from "../hardware/official-catalog-v2";\nimport { officialArtifactFetch } from "../hardware/official-fetch-adapter";\n',
+                  1,
+              )
+          text = text.replace(
+              'export function ExpressLrsParityWorkbenchV2()',
+              'export function ExpressLrsParityWorkbench()',
+          )
+          text = text.replace(
+              'const loaded = await loadOfficialExpressLrsCatalog({',
+              'const loaded = await loadOfficialExpressLrsCatalogV2({',
+          )
+          text = text.replace(
+              '''        options: packageOptions,
+        signal: controller.signal,''',
+              '''        options: packageOptions,
+        fetchImplementation: officialArtifactFetch,
+        signal: controller.signal,''',
+              1,
+          )
+          text = text.replace(
+              '''        release: selectedRelease,
+        target: selectedTarget,
+      });''',
+              '''        release: selectedRelease,
+        target: selectedTarget,
+        fetchImplementation: officialArtifactFetch,
+      });''',
+              1,
+          )
+          Path('apps/web/src/components/ExpressLrsParityWorkbench.tsx').write_text(
+              text, encoding='utf-8'
+          )
+
+          test = test_source.read_text(encoding='utf-8')
+          test = test.replace(
+              '"../hardware/official-catalog"',
+              '"../hardware/official-catalog-v2"',
+          )
+          test = test.replace(
+              'loadOfficialExpressLrsCatalog: mocks.loadCatalog,',
+              'loadOfficialExpressLrsCatalogV2: mocks.loadCatalog,',
+          )
+          test = test.replace(
+              'ExpressLrsParityWorkbenchV2',
+              'ExpressLrsParityWorkbench',
+          )
+          test = test.replace(
+              'from "./ExpressLrsParityWorkbenchV2"',
+              'from "./ExpressLrsParityWorkbench"',
+          )
+          Path('apps/web/src/components/ExpressLrsParityWorkbench.test.tsx').write_text(
+              test, encoding='utf-8'
+          )
+          source.unlink()
+          test_source.unlink()
+          PY
+
+      - name: Correct primary OTA/download artifact and option bounds
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('apps/web/src/hardware/firmware-package.ts')
+          text = path.read_text(encoding='utf-8')
+          start = text.find('  let primaryDownload: Uint8Array;')
+          end = text.find('\n  const recoveryManifest', start)
+          if start < 0 or end < 0:
+              raise SystemExit('Primary download block was not found')
+          replacement = '''  let primaryDownload: Uint8Array;
+  let primaryFileName: string;
+  let primaryMimeType: string;
+  if (
+    family === "esp" &&
+    (input.target.config.platform.toLocaleLowerCase("en-US").includes("8285") ||
+      input.target.config.platform.toLocaleLowerCase("en-US").includes("8266"))
+  ) {
+    primaryDownload = gzipSync(configuredApplication, { level: 9 });
+    primaryFileName = "firmware.bin.gz";
+    primaryMimeType = "application/gzip";
+  } else {
+    // ExpressLRS Wi-Fi and ordinary download use the configured application
+    // image. Bootloader/partition sectors remain internal UART/recovery data.
+    primaryDownload = configuredApplication.slice();
+    primaryFileName = "firmware.bin";
+    primaryMimeType = "application/octet-stream";
+  }
+'''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('apps/web/src/hardware/firmware-options.ts')
+          text = path.read_text(encoding='utf-8')
+          marker = '''  const bindPhrase = boundedText("bindPhrase", options.bindPhrase, 192, true);'''
+          if marker in text:
+              text = text.replace(
+                  marker,
+                  '''  const bindPhrase = boundedText("bindPhrase", options.bindPhrase, 192, true);
+  if ([...bindPhrase].length > 128) {
+    throw new FirmwareOptionsError(
+      "bindPhrase",
+      "Binding phrase exceeds 128 Unicode characters",
+    );
+  }''',
+                  1,
+              )
+          path.write_text(text, encoding='utf-8')
+
+          # Existing package tests previously expected an ESP32 UART ZIP as the
+          # user download; update them to the official OTA/application semantics.
+          path = Path('apps/web/src/hardware/firmware-package.test.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'expect(result.primaryFileName).toBe("firmware-package.zip");',
+              'expect(result.primaryFileName).toBe("firmware.bin");',
+          )
+          text = text.replace(
+              'expect(result.primaryMimeType).toBe("application/zip");',
+              'expect(result.primaryMimeType).toBe("application/octet-stream");',
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # Manifest-tolerant DFU devices can disappear immediately after leave.
+          path = Path('apps/web/src/hardware/stm32-dfu.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '''      status.state === DfuState.downloadIdle ||
+      status.state === DfuState.dfuIdle''',
+              '''      status.state === DfuState.downloadIdle ||
+      status.state === DfuState.dfuIdle ||
+      status.state === DfuState.manifestWaitReset''',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Update permanent primary-path gate
+        run: |
+          cat > scripts/check-real-hardware-primary.mjs <<'EOF'
+          import { readFile } from "node:fs/promises";
+
+          const main = await readFile("apps/web/src/main.tsx", "utf8");
+          const workbench = await readFile(
+            "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
+            "utf8",
+          );
+          const failures = [];
+          if (!main.includes("ExpressLrsParityWorkbench")) {
+            failures.push("main.tsx does not render the real hardware workbench");
+          }
+          for (const forbidden of [
+            'from "./App"',
+            "DeviceConnectionHub",
+            "mockScenarios",
+            "runFoundationDemo",
+          ]) {
+            if (main.includes(forbidden)) failures.push(`legacy primary path: ${forbidden}`);
+          }
+          for (const required of [
+            "loadOfficialExpressLrsCatalogV2",
+            "ExpressLrsHardwareSession.connect",
+            "writeParameter",
+            "restoreSettingsBackup",
+            "startBinding",
+            "prepareOfficialFirmwarePackage",
+            "flashEspFirmware",
+            "flashXmodemFirmware",
+            "flashStm32DfuFirmware",
+            "validateRecoveryPackage",
+            "verifyObservedFirmwareBuild",
+            "reconnectAndVerify",
+          ]) {
+            if (!workbench.includes(required)) failures.push(`missing ${required}`);
+          }
+          if (failures.length > 0) {
+            console.error(failures.join("\n"));
+            process.exit(1);
+          }
+          console.log("Real hardware primary-path gate passed.");
+          EOF
+          node - <<'NODE'
+          const fs = require("fs");
+          const path = "package.json";
+          const json = JSON.parse(fs.readFileSync(path, "utf8"));
+          json.scripts["check:real-hardware-primary"] =
+            "node scripts/check-real-hardware-primary.mjs";
+          fs.writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`);
+          NODE
+
+      - name: Format and run every quality, test, build, and supply-chain gate
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: |
+          pnpm format
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm check:real-hardware-primary
+          pnpm test
+          pnpm exec vitest run \
+            apps/web/src/hardware/official-catalog.live.test.ts \
+            apps/web/src/hardware/official-artifacts.live.test.ts
+          pnpm build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit rebuilt green candidate
+        run: |
+          rm -f .github/workflows/m2-v2-switch.yml
+          rm -f .github/workflows/m2-certify-all.yml
+          rm -f .github/workflows/m2-stm32-dfu-integrate.yml
+          rm -f .github/workflows/m2-parity-release-candidate.yml
+          rm -f .github/workflows/m2-parity-green-v1.yml
+          rm -f .github/workflows/m2-parity-final-report.yml
+          rm -f .github/workflows/m2-write-path-fixups.yml
+          rm -f .github/workflows/m2-write-path-hardening.yml
+          rm -f .github/workflows/m2-parity-normalize.yml
+          rm -f .github/workflows/m2-parity-authoritative.yml
+          rm -f .github/workflows/m2-parity-audited-final.yml
+          rm -f .github/workflows/m2-parity-repair-v3.yml
+          rm -f .github/workflows/m2-parity-repair-v2.yml
+          rm -f .github/workflows/m2-parity-finalize.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+          rm -f .github/workflows/m2-format-parity.yml
+          rm -f .github/workflows/m2-lock-fflate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor(parity): certify rebuilt hardware journey and OTA bytes'
+          git fetch origin feat/m2-real-hardware-first-test
+          git rebase origin/feat/m2-real-hardware-first-test
+          git push origin HEAD:feat/m2-real-hardware-first-test
