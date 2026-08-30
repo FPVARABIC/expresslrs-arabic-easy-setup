@@ -1,0 +1,932 @@
+name: M2 converge official TX/RX parity candidate
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-parity-green-v1.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: m2-parity-green-v1
+  cancel-in-progress: true
+
+jobs:
+  converge:
+    name: Patch latest head, run every gate, and commit only green source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out latest branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Cancel stale branch runs and refresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=feat%2Fm2-real-hardware-first-test&per_page=100" \
+            --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\") | .id" \
+            | while read -r id; do
+                [ -z "$id" ] || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/cancel" || true
+              done
+          sleep 6
+          git fetch origin feat/m2-real-hardware-first-test
+          git reset --hard origin/feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install exact dependencies
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+
+      - name: Apply consolidated functional and safety patches
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def load(path: str) -> str:
+              return Path(path).read_text(encoding='utf-8')
+
+          def save(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding='utf-8')
+
+          # ------------------------------------------------------------------
+          # Official source fallback: Pages mirror first, Artifactory second.
+          # ------------------------------------------------------------------
+          path = 'apps/web/src/hardware/official-catalog.ts'
+          text = load(path)
+          if './official-source' not in text:
+              text = text.replace(
+                  'import { unzipSync } from "fflate";\n',
+                  'import { unzipSync } from "fflate";\n\nimport { fetchOfficialExpressLrsResource } from "./official-source";\n',
+                  1,
+              )
+          if './official-index' not in text:
+              marker = 'import type {\n'
+              at = text.find(marker)
+              if at < 0:
+                  raise SystemExit('official-catalog import marker missing')
+              text = (
+                  text[:at]
+                  + 'import { parseOfficialReleaseIndexFlexible } from "./official-index";\n'
+                  + 'import { parseOfficialTargetsFlexible } from "./official-target-index";\n'
+                  + text[at:]
+              )
+          text = re.sub(
+              r'export const EXPRESSLRS_ARTIFACT_BASE\s*=\s*\n?\s*"[^"]+"\s+as const;\n\n',
+              '',
+              text,
+              count=1,
+          )
+          function_start = text.find('async function fetchBytes(')
+          function_end = text.find('\nfunction parseJson(', function_start)
+          if function_start < 0 or function_end < 0:
+              raise SystemExit('official-catalog fetchBytes boundaries missing')
+          fetch_function = '''async function fetchBytes(input: {
+  readonly path: string;
+  readonly maximumBytes: number;
+  readonly signal?: AbortSignal;
+  readonly fetchImplementation?: typeof fetch;
+  readonly onProgress?: (received: number, total: number | null) => void;
+}): Promise<Uint8Array> {
+  const bridge = abortBridge(input.signal, 45_000);
+  try {
+    const response = await fetchOfficialExpressLrsResource({
+      path: input.path,
+      signal: bridge.signal,
+      ...(input.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: input.fetchImplementation }),
+      accept: "application/json, application/zip;q=0.9",
+    });
+    return await readBoundedResponse(
+      response,
+      input.maximumBytes,
+      input.onProgress,
+    );
+  } catch (error: unknown) {
+    if (error instanceof OfficialCatalogError) throw error;
+    throw new OfficialCatalogError(
+      "NETWORK",
+      error instanceof Error ? error.message : "Official catalog request failed",
+    );
+  } finally {
+    bridge.dispose();
+  }
+}
+'''
+          text = text[:function_start] + fetch_function + text[function_end:]
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/index.json`,',
+              'path: "index.json",',
+          )
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/hardware.zip`,',
+              'path: "hardware.zip",',
+          )
+          text = text.replace(
+              'const releases = parseOfficialReleaseIndex(parseJson(indexBytes));',
+              'const releases = parseOfficialReleaseIndexFlexible(parseJson(indexBytes));',
+          )
+          text = text.replace(
+              '''  const targets = parseOfficialTargets(
+    parseJson(targetJsonFromHardwareArchive(hardwareBytes)),
+  );''',
+              '''  const targets = parseOfficialTargetsFlexible(
+    parseJson(targetJsonFromHardwareArchive(hardwareBytes)),
+  );''',
+          )
+          text = text.replace(
+              '''      filter(file) {
+        return /(^|\/)targets\.json$/iu.test(file.name);
+      },''',
+              '''      filter(file) {
+        return (
+          /(^|\/)targets\.json$/iu.test(file.name) &&
+          file.originalSize <= MAX_TARGET_JSON_BYTES
+        );
+      },''',
+          )
+          save(path, text)
+
+          path = 'apps/web/src/hardware/firmware-package.ts'
+          text = load(path)
+          text = text.replace(
+              '''import {
+  EXPRESSLRS_ARTIFACT_BASE,
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";''',
+              '''import {
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";
+import { fetchOfficialExpressLrsResource } from "./official-source";''',
+          )
+          if './firmware-options' not in text:
+              text = text.replace(
+                  'import { expressLrsBindingUid } from "./bind-phrase";\n',
+                  'import { expressLrsBindingUid } from "./bind-phrase";\nimport { validateFirmwareOptions } from "./firmware-options";\n',
+                  1,
+              )
+          fetch_start = text.find('async function fetchArchive(')
+          fetch_end = text.find('\nfunction normalizedPath(', fetch_start)
+          if fetch_start < 0 or fetch_end < 0:
+              raise SystemExit('firmware fetchArchive boundaries missing')
+          fetch_archive = '''async function fetchArchive(input: {
+  readonly path: string;
+  readonly maximumBytes: number;
+  readonly signal?: AbortSignal;
+  readonly fetchImplementation?: typeof fetch;
+  readonly stage: "FIRMWARE_ARCHIVE" | "HARDWARE_ARCHIVE";
+  readonly onProgress?: FirmwareBuildProgressListener;
+}): Promise<Uint8Array> {
+  const bridge = abortBridge(input.signal, 120_000);
+  try {
+    const response = await fetchOfficialExpressLrsResource({
+      path: input.path,
+      signal: bridge.signal,
+      ...(input.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: input.fetchImplementation }),
+      accept: "application/zip",
+    });
+    return await readBoundedResponse(
+      response,
+      input.maximumBytes,
+      (receivedBytes, totalBytes) =>
+        input.onProgress?.({
+          stage: input.stage,
+          receivedBytes,
+          totalBytes,
+        }),
+    );
+  } catch (error: unknown) {
+    if (error instanceof OfficialCatalogError) {
+      throw new FirmwarePackageError("NETWORK", error.message);
+    }
+    if (error instanceof FirmwarePackageError) throw error;
+    throw new FirmwarePackageError(
+      "NETWORK",
+      error instanceof Error ? error.message : "Firmware archive request failed",
+    );
+  } finally {
+    bridge.dispose();
+  }
+}
+'''
+          text = text[:fetch_start] + fetch_archive + text[fetch_end:]
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/${revision}/firmware.zip`,',
+              'path: `${revision}/firmware.zip`,',
+          )
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/hardware.zip`,',
+              'path: "hardware.zip",',
+          )
+          text = text.replace(
+              'const revision = encodeURIComponent(input.release.revision);',
+              'const revision = input.release.revision;',
+          )
+          package_start = text.find('export async function prepareOfficialFirmwarePackage(')
+          package_end = text.find('\nexport function downloadPreparedBytes', package_start)
+          if package_start < 0 or package_end < 0:
+              raise SystemExit('prepareOfficialFirmwarePackage boundaries missing')
+          package_segment = text[package_start:package_end]
+          if 'const validatedOptions = validateFirmwareOptions' not in package_segment:
+              package_segment = package_segment.replace('input.options', 'validatedOptions')
+              package_segment = package_segment.replace(
+                  '): Promise<PreparedFirmwarePackage> {\n',
+                  '''): Promise<PreparedFirmwarePackage> {
+  const validatedOptions = validateFirmwareOptions({
+    target: input.target,
+    options: input.options,
+  });
+''',
+                  1,
+              )
+          text = text[:package_start] + package_segment + text[package_end:]
+          if 'actualUncompressedBytes' not in text:
+              marker = '''  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(entries).map(([name, bytes]) => [
+        normalizedPath(name),
+        bytes,
+      ]),
+    ),
+  );'''
+              replacement = '''  let actualUncompressedBytes = 0;
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (bytes.byteLength > input.maximumEntryBytes) {
+      throw new FirmwarePackageError(
+        "ARCHIVE",
+        `Archive entry ${name} exceeds its actual byte limit`,
+      );
+    }
+    actualUncompressedBytes += bytes.byteLength;
+    if (actualUncompressedBytes > input.maximumTotalBytes) {
+      throw new FirmwarePackageError(
+        "ARCHIVE",
+        "Decompressed archive entries exceed their actual total byte limit",
+      );
+    }
+  }
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(entries).map(([name, bytes]) => [
+        normalizedPath(name),
+        bytes,
+      ]),
+    ),
+  );'''
+              if marker in text:
+                  text = text.replace(marker, replacement, 1)
+          text = text.replace(
+              'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+              'bytes.slice().buffer',
+          )
+          text = text.replace('new Blob([bytes],', 'new Blob([bytes.slice().buffer],')
+          text = text.replace(
+              '''  anchor.click();
+  queueMicrotask(() => URL.revokeObjectURL(url));''',
+              '''  anchor.hidden = true;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);''',
+          )
+          # Fail closed for nightly STM32 until its exact config ABI is known.
+          if 'Nightly STM32 firmware configuration is not enabled' not in text:
+              marker = '''  const family = platformFamily(input.target.config.platform);
+  const configuredApplication ='''
+              text = text.replace(
+                  marker,
+                  '''  const family = platformFamily(input.target.config.platform);
+  if (family === "stm32" && input.release.channel === "branch") {
+    throw new FirmwarePackageError(
+      "PLATFORM_UNSUPPORTED",
+      "Nightly STM32 firmware configuration is not enabled without an exact release ABI",
+    );
+  }
+  const configuredApplication =''',
+                  1,
+              )
+          save(path, text)
+
+          path = 'apps/web/src/hardware/lua-package.ts'
+          text = load(path)
+          text = text.replace(
+              '''import {
+  EXPRESSLRS_ARTIFACT_BASE,
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";''',
+              '''import {
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";
+import { fetchOfficialExpressLrsResource } from "./official-source";''',
+          )
+          old_start = text.find('    response = await (input.fetchImplementation ?? fetch)(')
+          if old_start >= 0:
+              old_end = text.find('  } catch (error: unknown) {', old_start)
+              if old_end < 0:
+                  raise SystemExit('lua fetch block terminator missing')
+              replacement = '''    response = await fetchOfficialExpressLrsResource({
+      path: `${input.release.revision}/lua.zip`,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: input.fetchImplementation }),
+      accept: "application/zip",
+    });
+'''
+              text = text[:old_start] + replacement + text[old_end:]
+          save(path, text)
+
+          # ------------------------------------------------------------------
+          # Runtime bounds and TypeScript 6 owned-buffer compatibility.
+          # ------------------------------------------------------------------
+          for relative in [
+              'apps/web/src/hardware/recovery-package.ts',
+              'apps/web/src/hardware/recovery-package.test.ts',
+              'apps/web/src/hardware/official-catalog.test.ts',
+              'apps/web/src/hardware/firmware-package.test.ts',
+              'apps/web/src/hardware/lua-package.test.ts',
+          ]:
+              text = load(relative)
+              text = text.replace(
+                  'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+                  'bytes.slice().buffer',
+              )
+              text = text.replace(
+                  'crypto.subtle.digest("SHA-256", bytes)',
+                  'crypto.subtle.digest("SHA-256", bytes.slice().buffer)',
+              )
+              text = text.replace('new Response(hardwareZip, {', 'new Response(hardwareZip.slice().buffer, {')
+              text = text.replace('new Response(firmware)', 'new Response(firmware.slice().buffer)')
+              text = text.replace('new Response(archive)', 'new Response(archive.slice().buffer)')
+              save(relative, text)
+
+          path = 'apps/web/src/hardware/recovery-package.ts'
+          text = load(path)
+          if 'selectedArchiveBytes' not in text:
+              text = text.replace(
+                  '  let entries: Record<string, Uint8Array>;\n  try {',
+                  '  let entries: Record<string, Uint8Array>;\n'
+                  '  let selectedArchiveBytes = 0;\n'
+                  '  let selectedArchiveEntries = 0;\n'
+                  '  try {',
+                  1,
+              )
+              text = text.replace(
+                  '''        return (
+          name === "manifest.json" ||
+          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES)
+        );''',
+                  '''        const included =
+          name === "manifest.json" ||
+          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES);
+        if (!included) return false;
+        selectedArchiveEntries += 1;
+        selectedArchiveBytes += file.originalSize;
+        if (
+          selectedArchiveEntries > 9 ||
+          selectedArchiveBytes > 48 * 1024 * 1024
+        ) {
+          throw new RecoveryPackageError(
+            "TOO_LARGE",
+            "Recovery archive expansion exceeds its entry or byte limit",
+          );
+        }
+        return true;''',
+                  1,
+              )
+          save(path, text)
+
+          path = 'apps/web/src/hardware/crsf.ts'
+          text = load(path)
+          if 'function sanitizeCrsfText' not in text:
+              text = text.replace(
+                  '''function decodeText(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+''',
+                  '''function sanitizeCrsfText(value: string): string {
+  return value
+    .normalize("NFC")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, "")
+    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
+    .slice(0, 512);
+}
+
+function decodeText(bytes: Uint8Array): string {
+  return sanitizeCrsfText(
+    new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+  );
+}
+''',
+                  1,
+              )
+          text = text.replace(
+              '''  if (fieldCount === undefined || parameterVersion === undefined) {
+    return null;
+  }''',
+              '''  if (
+    fieldCount === undefined ||
+    parameterVersion === undefined ||
+    fieldCount > 64
+  ) {
+    return null;
+  }''',
+              1,
+          )
+          save(path, text)
+
+          path = 'apps/web/src/hardware/session.ts'
+          text = load(path)
+          if '"IDENTITY_CHANGED"' not in text:
+              text = text.replace(
+                  '      | "BINDING_NOT_ACKNOWLEDGED",',
+                  '      | "BINDING_NOT_ACKNOWLEDGED"\n      | "IDENTITY_CHANGED",',
+                  1,
+              )
+          text = text.replace(
+              '''    if (known.kind !== "number" && known.kind !== "selection") {
+      throw new ExpressLrsHardwareError(''',
+              '''    if (
+      known.hidden ||
+      (known.kind !== "number" && known.kind !== "selection")
+    ) {
+      throw new ExpressLrsHardwareError(''',
+              1,
+          )
+          if 'public async verifyCurrentIdentity' not in text:
+              marker = '''  public get parameters(): readonly CrsfParameter[] {
+    return Object.freeze(
+      [...this.#parameters.values()].sort((left, right) => left.id - right.id),
+    );
+  }
+'''
+              method = marker + '''
+  public async verifyCurrentIdentity(
+    signal?: AbortSignal,
+  ): Promise<ExpressLrsIdentity> {
+    this.#assertOpen();
+    const frame = await this.#link.request(
+      createDevicePing(this.#identity.requestOrigin),
+      (candidate) => {
+        const parsed = parseCrsfDeviceInfo(candidate);
+        return (
+          parsed !== null &&
+          parsed.expressLrsMarkerValid &&
+          parsed.origin === this.#identity.address
+        );
+      },
+      { timeoutMs: 2_000, signal },
+    );
+    const parsed = parseCrsfDeviceInfo(frame);
+    if (parsed === null) {
+      throw new ExpressLrsHardwareError(
+        "IDENTITY_CHANGED",
+        "The device did not return a valid identity before writing",
+      );
+    }
+    const actual = identityFromDeviceInfo(
+      parsed,
+      this.#identity.role,
+      this.#identity.usb,
+    );
+    if (!sameIdentity(this.#identity, actual)) {
+      throw new ExpressLrsHardwareError(
+        "IDENTITY_CHANGED",
+        "The connected device identity changed before writing",
+      );
+    }
+    return actual;
+  }
+'''
+              if marker not in text:
+                  raise SystemExit('session insertion marker missing')
+              text = text.replace(marker, method, 1)
+          text = text.replace(
+              '''      responseText += textDecoder.decode(chunk, { stream: true });
+      const line = responseText''',
+              '''      responseText += textDecoder.decode(chunk, { stream: true });
+      if (responseText.length > 4_096) {
+        responseText = responseText.slice(-2_048);
+      }
+      const line = responseText''',
+              1,
+          )
+          save(path, text)
+
+          # ------------------------------------------------------------------
+          # Primary user journey: official/manual target selection, real CRSF
+          # settings/bind, package recovery, and exact build verification.
+          # ------------------------------------------------------------------
+          path = 'apps/web/src/components/ExpressLrsParityWorkbench.tsx'
+          text = load(path)
+          if 'verifyObservedFirmwareBuild' not in text:
+              marker = 'import { flashEspFirmware } from "../hardware/esp-flasher";\n'
+              text = text.replace(
+                  marker,
+                  'import { verifyObservedFirmwareBuild } from "../hardware/build-verification";\n' + marker,
+                  1,
+              )
+          if '../hardware/regulatory-domain' not in text:
+              marker = '} from "../hardware/parity-types";\n'
+              text = text.replace(
+                  marker,
+                  marker + 'import {\n  regulatoryRegionByKey,\n  regulatoryRegionsForRadioKey,\n} from "../hardware/regulatory-domain";\n',
+                  1,
+              )
+          if 'acquireOfficialLuaScript' not in text:
+              text = text.replace(
+                  'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";\n',
+                  'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";\nimport { acquireOfficialLuaScript } from "../hardware/lua-package";\n',
+                  1,
+              )
+          if 'type HardwareSerialPort' not in text:
+              text = text.replace(
+                  '} from "../hardware/recovery-package";\n',
+                  '} from "../hardware/recovery-package";\nimport type { HardwareSerialPort } from "../hardware/serial";\n',
+                  1,
+              )
+          text = text.replace('  region: "FCC",\n  domain: 0,', '  region: "",\n  domain: -1,')
+          text = re.sub(
+              r'function regionsForRadio\(radioKey: string\): readonly string\[\] \{.*?\n\}\n\n',
+              '',
+              text,
+              flags=re.S,
+          )
+          text = text.replace(
+              'const regionChoices = regionsForRadio(radioKey);',
+              'const regionChoices = regulatoryRegionsForRadioKey(radioKey);',
+          )
+          text = re.sub(
+              r'region: regionsForRadio\([^\n]+\)\[0\] \?\? "FCC",',
+              'region: "",\n          domain: -1,',
+              text,
+          )
+          text = text.replace('let port;', 'let port: HardwareSerialPort;')
+
+          # Device-advertised parameter writes and Bind do not require a catalog Target.
+          text = text.replace(
+              'if (session === null || !exactHardwareTarget) return;',
+              'if (session === null) return;',
+              1,
+          )
+          text = text.replace(
+              'disabled={busy || !exactHardwareTarget || selectedSetting === undefined}',
+              'disabled={busy || sessionIdentity === null || selectedSetting === undefined}',
+          )
+          text = text.replace(
+              'disabled={busy || !exactHardwareTarget}',
+              'disabled={busy || sessionIdentity === null}',
+          )
+
+          # Direct serial accepts exact auto-match or explicit official Target confirmation.
+          text = text.replace(
+              '''    if (direct && (!exactHardwareTarget || sessionRef.current === null)) {
+      setStatus("USB المباشر يتطلب جلسة CRSF وTarget رسميًا متطابقًا قبل الكتابة.");
+      return;
+    }
+    if (!direct && !manualTargetConfirmed) {''',
+              '''    if (direct && sessionRef.current === null) {
+      setStatus("USB المباشر يتطلب جلسة CRSF مفتوحة قبل الكتابة.");
+      return;
+    }
+    if (!exactHardwareTarget && !manualTargetConfirmed) {''',
+          )
+          text = text.replace(
+              '''        const session = sessionRef.current;
+        if (session === null) throw new Error("جلسة CRSF أغلقت قبل التفليش");
+        await updateCheckpoint(prepared, "BOOTLOADER");''',
+              '''        const session = sessionRef.current;
+        if (session === null) throw new Error("جلسة CRSF أغلقت قبل التفليش");
+        const liveIdentity = await session.verifyCurrentIdentity(controller.signal);
+        if (liveIdentity.role !== selectedTarget.role) {
+          throw new Error("نوع الجهاز تغير أو لا يطابق Target المختار قبل الكتابة");
+        }
+        if (exactHardwareTarget) {
+          const liveMatch = matchHardwareIdentityToOfficialTargets({
+            identity: liveIdentity,
+            targets: catalog?.targets ?? [],
+          });
+          if (
+            liveMatch.confidence !== "EXACT" ||
+            liveMatch.selected?.id !== selectedTarget.id
+          ) {
+            throw new Error("تغيرت هوية Target قبل الكتابة");
+          }
+        }
+        await updateCheckpoint(prepared, "BOOTLOADER");''',
+              1,
+          )
+          text = text.replace(
+              'if (selectedTarget.role === "rx") {',
+              'if (family === "stm32" && selectedTarget.role === "rx") {',
+              1,
+          )
+          text = text.replace(
+              '} else {\n          const command = commandForBootloader(parameters);',
+              '} else if (selectedTarget.role === "tx") {\n          const command = commandForBootloader(parameters);',
+              1,
+          )
+
+          # Build only after explicit regulatory selection; freeze its exact domain snapshot.
+          guard = '''  async function buildFirmware() {
+    if (selectedRelease === null || selectedTarget === null) return;'''
+          if guard in text and 'const regulatoryRegion = regulatoryRegionByKey(options.region);' not in text:
+              text = text.replace(
+                  guard,
+                  '''  async function buildFirmware() {
+    if (selectedRelease === null || selectedTarget === null) return;
+    const regulatoryRegion = regulatoryRegionByKey(options.region);
+    if (regulatoryRegion === null) {
+      setStatus("اختر المنطقة التنظيمية صراحة قبل بناء Firmware.");
+      return;
+    }
+    const packageOptions: ExpressLrsFirmwareOptions = {
+      ...options,
+      region: regulatoryRegion.artifactDirectory,
+      domain: regulatoryRegion.domain,
+    };''',
+                  1,
+              )
+              text = text.replace(
+                  '        options,\n        signal: controller.signal,',
+                  '        options: packageOptions,\n        signal: controller.signal,',
+                  1,
+              )
+
+          # Reconnect must prove both official Target and selected release/branch commit.
+          text = text.replace(
+              'async function reconnectAndVerify(target: OfficialTarget): Promise<void> {',
+              'async function reconnectAndVerify(\n    target: OfficialTarget,\n    release: NonNullable<typeof selectedRelease>,\n  ): Promise<void> {',
+              1,
+          )
+          target_check = '''    if (match.confidence !== "EXACT" || match.selected?.id !== target.id) {
+      await outcome.session.close();
+      throw new Error("عاد جهاز بعد التفليش، لكن هويته لا تطابق Target المتوقع");
+    }'''
+          if target_check in text and 'verifyObservedFirmwareBuild' not in text[text.find(target_check):text.find(target_check)+1500]:
+              text = text.replace(
+                  target_check,
+                  target_check + '''
+    const buildVerification = verifyObservedFirmwareBuild({
+      release,
+      observedVersion: outcome.identity.firmwareVersion,
+      parameters: outcome.parameters,
+    });
+    if (!buildVerification.verified) {
+      await outcome.session.close();
+      throw new Error(
+        `عاد Target الصحيح، لكن الإصدار/Commit لا يطابق ${buildVerification.expected}`,
+      );
+    }''',
+                  1,
+              )
+          # Normal flash uses prepared release. Recovery uses recovery manifest release.
+          flash_start = text.find('  async function flashPreparedFirmware()')
+          flash_end = text.find('\n  async function recoverFromFile(', flash_start)
+          if flash_start >= 0 and flash_end >= 0:
+              block = text[flash_start:flash_end]
+              block = block.replace(
+                  'await reconnectAndVerify(selectedTarget);',
+                  'await reconnectAndVerify(selectedTarget, prepared.release);',
+              )
+              text = text[:flash_start] + block + text[flash_end:]
+          recovery_start = text.find('  async function recoverFromFile(')
+          recovery_end = text.find('\n  function updateOption<', recovery_start)
+          if recovery_start >= 0 and recovery_end >= 0:
+              block = text[recovery_start:recovery_end]
+              block = block.replace(
+                  'await reconnectAndVerify(selectedTarget);',
+                  '''await reconnectAndVerify(selectedTarget, {
+        label: validated.releaseLabel,
+        revision: validated.releaseRevision,
+        channel: /^v?\d+\.\d+\.\d+/u.test(validated.releaseLabel)
+          ? "release"
+          : "branch",
+      });''',
+              )
+              block = block.replace(
+                  'await reconnectAndVerify(selectedTarget, prepared.release);',
+                  '''await reconnectAndVerify(selectedTarget, {
+        label: validated.releaseLabel,
+        revision: validated.releaseRevision,
+        channel: /^v?\d+\.\d+\.\d+/u.test(validated.releaseLabel)
+          ? "release"
+          : "branch",
+      });''',
+              )
+              text = text[:recovery_start] + block + text[recovery_end:]
+
+          # Lua download if absent.
+          if 'async function downloadLuaScript' not in text:
+              marker = '  function downloadRecovery() {\n'
+              handler = '''  async function downloadLuaScript() {
+    if (
+      selectedRelease === null ||
+      selectedTarget === null ||
+      selectedTarget.role !== "tx" ||
+      selectedTarget.config.luaName === null
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus("جارٍ تنزيل ملف Lua الرسمي المطابق لهذا Target…");
+    try {
+      const script = await acquireOfficialLuaScript({
+        release: selectedRelease,
+        target: selectedTarget,
+      });
+      downloadPreparedBytes(script.bytes, script.fileName, "text/plain");
+      setStatus(`تم بدء تنزيل ملف Lua الرسمي: ${script.fileName}.`);
+    } catch (error: unknown) {
+      setStatus(`تعذر تنزيل ملف Lua: ${safeMessage(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+'''
+              if marker not in text:
+                  raise SystemExit('Lua insertion marker missing')
+              text = text.replace(marker, handler + marker, 1)
+
+          # Region options use explicit official keys.
+          text = text.replace(
+              '{regionChoices.map((region) => <option key={region} value={region}>{region}</option>)}',
+              '''<option value="">اختر المنطقة</option>
+              {regionChoices.map((region) => (
+                <option key={region.key} value={region.key}>
+                  {region.label}
+                </option>
+              ))}''',
+          )
+          # Manual Target confirmation appears whenever auto-match is not exact.
+          old_manual = '''            {method === "uart" ? null : method === "wifi" || method === "download" || method === "stlink" ? null : (
+              <label className="manual-confirm">'''
+          new_manual = '''            {!exactHardwareTarget &&
+            method !== "wifi" &&
+            method !== "download" &&
+            method !== "stlink" ? (
+              <label className="manual-confirm">'''
+          text = text.replace(old_manual, new_manual)
+          # Extend button gate for manual confirmation rather than exact-only direct UART.
+          text = text.replace(
+              '''(method === "uart" ? !exactHardwareTarget : !["wifi", "download", "stlink"].includes(method) && !manualTargetConfirmed)''',
+              '''(!["wifi", "download", "stlink"].includes(method) &&
+                  !exactHardwareTarget &&
+                  !manualTargetConfirmed)''',
+          )
+          # Disable download actions during mutation.
+          text = text.replace(
+              '<button type="button" className="secondary-button" onClick={downloadFirmware}>',
+              '<button type="button" className="secondary-button" disabled={busy} onClick={downloadFirmware}>',
+          )
+          text = text.replace(
+              '<button type="button" className="secondary-button" onClick={downloadRecovery}>',
+              '<button type="button" className="secondary-button" disabled={busy} onClick={downloadRecovery}>',
+          )
+          save(path, text)
+
+          # Official regulatory names used by ExpressLRS 4.x.
+          path = 'apps/web/src/hardware/regulatory-domain.ts'
+          text = load(path)
+          text = text.replace('key: "FCC_2400"', 'key: "ISM_2400"')
+          text = text.replace('key: "US_433"', 'key: "FCC_433"')
+          text = text.replace('label: "US 433 MHz"', 'label: "FCC 433 MHz"')
+          text = text.replace('artifactDirectory: "US_433"', 'artifactDirectory: "FCC_433"')
+          save(path, text)
+          path = 'apps/web/src/hardware/regulatory-domain.test.ts'
+          text = load(path).replace('"FCC_2400"', '"ISM_2400"').replace('"US_433"', '"FCC_433"')
+          save(path, text)
+
+          # CSP permits only official artifact hosts.
+          for path in ['apps/web/public/_headers', 'apps/web/index.html']:
+              text = load(path)
+              if 'connect-src' in text and 'artifactory.expresslrs.org' not in text:
+                  text = text.replace(
+                      "connect-src 'self'",
+                      "connect-src 'self' https://artifactory.expresslrs.org https://expresslrs.github.io",
+                  )
+              save(path, text)
+          PY
+
+      - name: Add permanent real-primary-path gate if missing
+        run: |
+          if [ ! -f scripts/check-real-hardware-primary.mjs ]; then
+            cat > scripts/check-real-hardware-primary.mjs <<'EOF'
+          import { readFile } from "node:fs/promises";
+          const main = await readFile("apps/web/src/main.tsx", "utf8");
+          const workbench = await readFile(
+            "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
+            "utf8",
+          );
+          const failures = [];
+          if (!main.includes("ExpressLrsParityWorkbench")) {
+            failures.push("main.tsx does not render the real hardware workbench");
+          }
+          for (const forbidden of ['from "./App"', "DeviceConnectionHub", "mockScenarios"]) {
+            if (main.includes(forbidden)) failures.push(`legacy primary path: ${forbidden}`);
+          }
+          for (const required of [
+            "loadOfficialExpressLrsCatalog",
+            "ExpressLrsHardwareSession.connect",
+            "prepareOfficialFirmwarePackage",
+            "flashEspFirmware",
+            "flashXmodemFirmware",
+            "validateRecoveryPackage",
+            "reconnectAndVerify",
+          ]) {
+            if (!workbench.includes(required)) failures.push(`missing ${required}`);
+          }
+          if (failures.length) {
+            console.error(failures.join("\n"));
+            process.exit(1);
+          }
+          console.log("Real hardware primary-path gate passed.");
+          EOF
+          fi
+          node - <<'NODE'
+          const fs = require("fs");
+          const path = "package.json";
+          const json = JSON.parse(fs.readFileSync(path, "utf8"));
+          json.scripts["check:real-hardware-primary"] =
+            "node scripts/check-real-hardware-primary.mjs";
+          fs.writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`);
+          NODE
+
+      - name: Format, static analysis, tests, builds, and supply-chain gates
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: |
+          pnpm format
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm check:real-hardware-primary
+          pnpm test
+          pnpm exec vitest run \
+            apps/web/src/hardware/official-catalog.live.test.ts \
+            apps/web/src/hardware/official-artifacts.live.test.ts
+          pnpm build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit the green convergence candidate
+        run: |
+          rm -f .github/workflows/m2-parity-green-v1.yml
+          rm -f .github/workflows/m2-parity-final-report.yml
+          rm -f .github/workflows/m2-write-path-fixups.yml
+          rm -f .github/workflows/m2-write-path-hardening.yml
+          rm -f .github/workflows/m2-parity-normalize.yml
+          rm -f .github/workflows/m2-parity-authoritative.yml
+          rm -f .github/workflows/m2-parity-audited-final.yml
+          rm -f .github/workflows/m2-parity-repair-v3.yml
+          rm -f .github/workflows/m2-parity-repair-v2.yml
+          rm -f .github/workflows/m2-parity-finalize.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(parity): converge official ExpressLRS TX/RX workflow'
+          git fetch origin feat/m2-real-hardware-first-test
+          git rebase origin/feat/m2-real-hardware-first-test
+          git push origin HEAD:feat/m2-real-hardware-first-test
