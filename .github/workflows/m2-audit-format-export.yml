@@ -12,12 +12,12 @@ permissions:
 
 jobs:
   apply:
-    name: Merge, format, and verify audited repair
+    name: Normalize, apply, and verify audited repair
     runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     steps:
-      - name: Check out hardware branch with history
+      - name: Check out hardware branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: feat/m2-real-hardware-first-test
@@ -38,9 +38,11 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Merge reviewed repair against current source
+      - name: Normalize and apply reviewed repair
         run: |
-          git apply --3way .github/patches/foundation-repair.patch
+          pnpm format
+          git apply --check .github/patches/foundation-repair.patch
+          git apply .github/patches/foundation-repair.patch
           pnpm format
 
       - name: Verify full repository
