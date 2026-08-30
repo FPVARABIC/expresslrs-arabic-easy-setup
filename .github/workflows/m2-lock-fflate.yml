@@ -1,0 +1,59 @@
+name: M2 lock bounded ZIP dependency
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-lock-fflate.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: m2-lock-fflate
+  cancel-in-progress: true
+
+jobs:
+  lock:
+    name: Pin fflate and commit dependency graph
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out latest branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Pin dependency and verify frozen install
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+          pnpm install --frozen-lockfile
+
+      - name: Commit dependency lock
+        run: |
+          rm -f .github/workflows/m2-lock-fflate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/web/package.json pnpm-lock.yaml .github/workflows/m2-lock-fflate.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'build(parity): pin fflate 0.8.2'
+            git fetch origin feat/m2-real-hardware-first-test
+            git rebase origin/feat/m2-real-hardware-first-test
+            git push origin HEAD:feat/m2-real-hardware-first-test
+          fi
