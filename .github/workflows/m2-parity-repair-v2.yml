@@ -1,0 +1,434 @@
+name: M2 parity hardening and final validation
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-parity-repair-v2.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: m2-parity-hardening
+  cancel-in-progress: true
+
+jobs:
+  harden:
+    name: Harden, test, build, and commit the parity workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out parity branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install and pin ZIP dependency
+        run: |
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+
+      - name: Apply protocol, recovery, region, and TypeScript hardening
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          # TypeScript 6 requires owned ArrayBuffers for DOM BufferSource/Blob bodies.
+          for relative in [
+              'apps/web/src/hardware/firmware-package.ts',
+              'apps/web/src/hardware/recovery-package.ts',
+              'apps/web/src/hardware/recovery-package.test.ts',
+              'apps/web/src/hardware/official-catalog.test.ts',
+              'apps/web/src/hardware/firmware-package.test.ts',
+          ]:
+              path = root / relative
+              text = path.read_text(encoding='utf-8')
+              text = text.replace(
+                  'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+                  'bytes.slice().buffer',
+              )
+              text = text.replace('new Blob([bytes],', 'new Blob([bytes.slice().buffer],')
+              text = text.replace('crypto.subtle.digest("SHA-256", bytes)', 'crypto.subtle.digest("SHA-256", bytes.slice().buffer)')
+              text = text.replace('new Response(hardwareZip, {', 'new Response(hardwareZip.slice().buffer, {')
+              text = text.replace('new Response(firmware)', 'new Response(firmware.slice().buffer)')
+              text = text.replace(
+                  'new Response(String(url).endsWith("hardware.zip") ? files.hardware : files.firmware),',
+                  'new Response(\n        (String(url).endsWith("hardware.zip")\n          ? files.hardware\n          : files.firmware\n        ).slice().buffer,\n      ),',
+              )
+              path.write_text(text, encoding='utf-8')
+
+          # XMODEM handshake must tolerate bounded one-second silent intervals.
+          path = root / 'apps/web/src/hardware/xmodem.ts'
+          text = path.read_text(encoding='utf-8')
+          old = '''    while (Date.now() < handshakeDeadline) {
+      const byte = await inbox.next({ timeoutMs: 1_000, signal: input.signal });
+      if (byte === CRC_REQUEST || byte === NAK) {
+        handshake = byte;
+        break;
+      }
+      if (byte === CAN) {
+        throw new XmodemError(
+          "TRANSFER_REJECTED",
+          "Receiver cancelled the XMODEM transfer",
+        );
+      }
+    }'''
+          new = '''    while (Date.now() < handshakeDeadline) {
+      let byte: number;
+      try {
+        byte = await inbox.next({
+          timeoutMs: Math.min(1_000, Math.max(1, handshakeDeadline - Date.now())),
+          signal: input.signal,
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof XmodemError &&
+          error.code === "TRANSFER_TIMEOUT" &&
+          Date.now() < handshakeDeadline
+        ) {
+          continue;
+        }
+        throw error;
+      }
+      if (byte === CRC_REQUEST || byte === NAK) {
+        handshake = byte;
+        break;
+      }
+      if (byte === CAN) {
+        throw new XmodemError(
+          "TRANSFER_REJECTED",
+          "Receiver cancelled the XMODEM transfer",
+        );
+      }
+    }'''
+          if old in text:
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+
+          # Bound recovery ZIP expansion before decompressing attacker-controlled entries.
+          path = root / 'apps/web/src/hardware/recovery-package.ts'
+          text = path.read_text(encoding='utf-8')
+          marker = '  let entries: Record<string, Uint8Array>;\n  try {'
+          if marker in text and 'let selectedArchiveBytes = 0;' not in text:
+              text = text.replace(
+                  marker,
+                  '  let entries: Record<string, Uint8Array>;\n'
+                  '  let selectedArchiveBytes = 0;\n'
+                  '  let selectedArchiveEntries = 0;\n'
+                  '  try {',
+                  1,
+              )
+          old_filter = '''      filter(file) {
+        const name = file.name.replaceAll("\\\\", "/");
+        return (
+          name === "manifest.json" ||
+          (/^segments\\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES)
+        );
+      },'''
+          new_filter = '''      filter(file) {
+        const name = file.name.replaceAll("\\\\", "/");
+        const included =
+          name === "manifest.json" ||
+          (/^segments\\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES);
+        if (!included) return false;
+        selectedArchiveEntries += 1;
+        selectedArchiveBytes += file.originalSize;
+        if (selectedArchiveEntries > 9 || selectedArchiveBytes > 48 * 1024 * 1024) {
+          throw new RecoveryPackageError(
+            "TOO_LARGE",
+            "Recovery archive expansion exceeds its entry or byte limit",
+          );
+        }
+        return true;
+      },'''
+          if old_filter in text:
+              text = text.replace(old_filter, new_filter)
+          path.write_text(text, encoding='utf-8')
+
+          # Sanitize all firmware-provided CRSF text and reject impossible parameter counts.
+          path = root / 'apps/web/src/hardware/crsf.ts'
+          text = path.read_text(encoding='utf-8')
+          if 'function sanitizeCrsfText' not in text:
+              needle = '''function decodeText(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+'''
+              replacement = '''function sanitizeCrsfText(value: string): string {
+  return value
+    .normalize("NFC")
+    .replace(/[\\u0000-\\u001f\\u007f-\\u009f]/gu, "")
+    .replace(/[\\u202a-\\u202e\\u2066-\\u2069]/gu, "")
+    .slice(0, 512);
+}
+
+function decodeText(bytes: Uint8Array): string {
+  return sanitizeCrsfText(
+    new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+  );
+}
+'''
+              if needle not in text:
+                  raise SystemExit('CRSF text decoder marker was not found')
+              text = text.replace(needle, replacement, 1)
+          field_marker = '''  if (fieldCount === undefined || parameterVersion === undefined) {
+    return null;
+  }'''
+          if field_marker in text:
+              text = text.replace(
+                  field_marker,
+                  '''  if (
+    fieldCount === undefined ||
+    parameterVersion === undefined ||
+    fieldCount > 64
+  ) {
+    return null;
+  }''',
+                  1,
+              )
+          path.write_text(text, encoding='utf-8')
+
+          # Hidden parameters must remain non-writable even through the programmatic API.
+          path = root / 'apps/web/src/hardware/session.ts'
+          text = path.read_text(encoding='utf-8')
+          writable_check = '''    if (known.kind !== "number" && known.kind !== "selection") {
+      throw new ExpressLrsHardwareError('''
+          if writable_check in text and '!known.hidden' not in text[text.find(writable_check)-200:text.find(writable_check)+200]:
+              text = text.replace(
+                  writable_check,
+                  '''    if (
+      known.hidden ||
+      (known.kind !== "number" && known.kind !== "selection")
+    ) {
+      throw new ExpressLrsHardwareError(''',
+                  1,
+              )
+          # Bound unstructured bootloader text.
+          text = text.replace(
+              '''      responseText += textDecoder.decode(chunk, { stream: true });
+      const line = responseText''',
+              '''      responseText += textDecoder.decode(chunk, { stream: true });
+      if (responseText.length > 4_096) {
+        responseText = responseText.slice(-2_048);
+      }
+      const line = responseText''',
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # Wire exact regulatory regions and fix direct ESP/RX bootloader semantics.
+          path = root / 'apps/web/src/components/ExpressLrsParityWorkbench.tsx'
+          text = path.read_text(encoding='utf-8')
+          if '../hardware/regulatory-domain' not in text:
+              marker = '} from "../hardware/parity-types";\n'
+              text = text.replace(
+                  marker,
+                  marker + '''import {
+  regulatoryRegionByKey,
+  regulatoryRegionsForRadioKey,
+} from "../hardware/regulatory-domain";
+''',
+                  1,
+              )
+          if 'type HardwareSerialPort' not in text:
+              marker = '} from "../hardware/recovery-package";\n'
+              text = text.replace(
+                  marker,
+                  marker + 'import type { HardwareSerialPort } from "../hardware/serial";\n',
+                  1,
+              )
+          text = text.replace('  region: "FCC",\n  domain: 0,', '  region: "",\n  domain: -1,')
+          text = re.sub(
+              r'''function regionsForRadio\(radioKey: string\): readonly string\[\] \{.*?\n\}\n\n''',
+              '',
+              text,
+              flags=re.S,
+          )
+          text = text.replace(
+              'const regionChoices = regionsForRadio(radioKey);',
+              'const regionChoices = regulatoryRegionsForRadioKey(radioKey);',
+          )
+          text = re.sub(
+              r'region: regionsForRadio\([^\n]+\)\[0\] \?\? "FCC",',
+              'region: "",\n          domain: -1,',
+              text,
+          )
+          text = text.replace('let port;', 'let port: HardwareSerialPort;')
+          text = text.replace(
+              'if (selectedTarget.role === "rx") {',
+              'if (family === "stm32" && selectedTarget.role === "rx") {',
+              1,
+          )
+          text = text.replace(
+              '} else {\n          const command = commandForBootloader(parameters);',
+              '} else if (selectedTarget.role === "tx") {\n          const command = commandForBootloader(parameters);',
+              1,
+          )
+          build_guard = '''  async function buildFirmware() {
+    if (selectedRelease === null || selectedTarget === null) return;'''
+          if build_guard in text and 'const regulatoryRegion = regulatoryRegionByKey' not in text:
+              text = text.replace(
+                  build_guard,
+                  '''  async function buildFirmware() {
+    if (selectedRelease === null || selectedTarget === null) return;
+    const regulatoryRegion = regulatoryRegionByKey(options.region);
+    if (regulatoryRegion === null) {
+      setStatus("اختر المنطقة التنظيمية صراحة قبل بناء Firmware.");
+      return;
+    }
+    const packageOptions: ExpressLrsFirmwareOptions = {
+      ...options,
+      region: regulatoryRegion.artifactDirectory,
+      domain: regulatoryRegion.domain,
+    };''',
+                  1,
+              )
+              text = text.replace(
+                  '''        options,
+        signal: controller.signal,''',
+                  '''        options: packageOptions,
+        signal: controller.signal,''',
+                  1,
+              )
+          text = re.sub(
+              r'''\{regionChoices\.map\(\(region\) => <option key=\{region\} value=\{region\}>\{region\}</option>\)\}''',
+              '''<option value="">اختر المنطقة</option>
+              {regionChoices.map((region) => (
+                <option key={region.key} value={region.key}>
+                  {region.label}
+                </option>
+              ))}''',
+              text,
+          )
+          # Formatted multiline variant.
+          text = text.replace(
+              '''              {regionChoices.map((region) => <option key={region} value={region}>{region}</option>)}''',
+              '''              <option value="">اختر المنطقة</option>
+              {regionChoices.map((region) => (
+                <option key={region.key} value={region.key}>
+                  {region.label}
+                </option>
+              ))}''',
+          )
+          text = text.replace(
+              'disabled={busy || selectedRelease === null || selectedTarget === null}',
+              'disabled={\n              busy ||\n              selectedRelease === null ||\n              selectedTarget === null ||\n              regulatoryRegionByKey(options.region) === null\n            }',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # Permit only the two official artifact hosts used by the parity adapter.
+          for relative in ['apps/web/public/_headers', 'apps/web/index.html']:
+              path = root / relative
+              text = path.read_text(encoding='utf-8')
+              if 'connect-src' in text and 'artifactory.expresslrs.org' not in text:
+                  text = text.replace(
+                      "connect-src 'self'",
+                      "connect-src 'self' https://artifactory.expresslrs.org https://expresslrs.github.io",
+                  )
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify pinned upstream regulatory enumeration
+        shell: bash
+        run: |
+          git clone --quiet --depth 1 --branch 4.1.0 https://github.com/ExpressLRS/ExpressLRS.git /tmp/expresslrs-upstream
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          expected = {
+              'Regulatory_Domain_AU_915': 0,
+              'Regulatory_Domain_FCC_915': 1,
+              'Regulatory_Domain_EU_868': 2,
+              'Regulatory_Domain_IN_866': 3,
+              'Regulatory_Domain_AU_433': 4,
+              'Regulatory_Domain_EU_433': 5,
+              'Regulatory_Domain_US_433': 6,
+              'Regulatory_Domain_FCC_2400': 7,
+              'Regulatory_Domain_EU_CE_2400': 8,
+          }
+          candidates = []
+          for path in Path('/tmp/expresslrs-upstream').rglob('*'):
+              if not path.is_file() or path.suffix.lower() not in {'.h', '.hpp', '.cpp', '.c'}:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8', errors='ignore')
+              except OSError:
+                  continue
+              if all(name in text for name in expected):
+                  candidates.append((path, text))
+          if not candidates:
+              raise SystemExit('Pinned upstream regulatory enum was not found')
+          valid = False
+          for path, text in candidates:
+              positions = {name: text.find(name) for name in expected}
+              ordered = [name for name, _ in sorted(positions.items(), key=lambda item: item[1])]
+              if all(expected[name] == index for index, name in enumerate(ordered)):
+                  valid = True
+                  print(f'Validated regulatory order in {path}')
+                  break
+          if not valid:
+              raise SystemExit('Local regulatory numeric mapping differs from ExpressLRS 4.1.0')
+          PY
+
+      - name: Apply formatting
+        run: pnpm format
+
+      - name: Run all quality gates
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+
+      - name: Run complete automated test suite
+        run: pnpm test
+
+      - name: Build production and Pages artifacts
+        run: |
+          pnpm build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+
+      - name: Verify licenses and known advisories
+        run: |
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit green parity candidate
+        shell: bash
+        run: |
+          rm -f .github/workflows/m2-parity-repair-v2.yml
+          rm -f .github/workflows/m2-parity-finalize.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(parity): complete and harden real ExpressLRS workflow'
+          git push origin HEAD:feat/m2-real-hardware-first-test
