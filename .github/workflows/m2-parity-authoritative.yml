@@ -1,0 +1,773 @@
+name: M2 authoritative ExpressLRS parity checkpoint
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-parity-authoritative.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: m2-authoritative-parity
+  cancel-in-progress: true
+
+jobs:
+  checkpoint:
+    name: Cancel stale runs, harden latest head, and record every gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out triggering branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Cancel older parity workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=feat%2Fm2-real-hardware-first-test&per_page=100" \
+            --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\") | .id" \
+            | while read -r run_id; do
+                [ -z "$run_id" ] || gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+              done
+          sleep 8
+          git fetch origin feat/m2-real-hardware-first-test
+          git reset --hard origin/feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install and pin dependencies
+        id: install
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm install --no-frozen-lockfile
+            pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+          } 2>&1 | tee /tmp/install.log
+
+      - name: Apply consolidated source hardening
+        id: harden
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee /tmp/harden.log
+          from pathlib import Path
+          import re
+
+          def read(relative: str) -> str:
+              return Path(relative).read_text(encoding='utf-8')
+
+          def write(relative: str, value: str) -> None:
+              Path(relative).write_text(value, encoding='utf-8')
+
+          # Current official names for the stable numeric regulatory enumeration.
+          relative = 'apps/web/src/hardware/regulatory-domain.ts'
+          text = read(relative)
+          text = text.replace('key: "FCC_2400"', 'key: "ISM_2400"')
+          text = text.replace('key: "US_433"', 'key: "FCC_433"')
+          text = text.replace('label: "US 433 MHz"', 'label: "FCC 433 MHz"')
+          text = text.replace('artifactDirectory: "US_433"', 'artifactDirectory: "FCC_433"')
+          write(relative, text)
+
+          relative = 'apps/web/src/hardware/regulatory-domain.test.ts'
+          text = read(relative)
+          text = text.replace('"FCC_2400"', '"ISM_2400"')
+          text = text.replace('"US_433"', '"FCC_433"')
+          write(relative, text)
+
+          # Route all release data through the bounded official-source fallback.
+          relative = 'apps/web/src/hardware/official-catalog.ts'
+          text = read(relative)
+          if './official-source' not in text:
+              text = text.replace(
+                  'import { unzipSync } from "fflate";\n',
+                  'import { unzipSync } from "fflate";\n\nimport { fetchOfficialExpressLrsResource } from "./official-source";\n',
+                  1,
+              )
+          text = re.sub(
+              r'export const EXPRESSLRS_ARTIFACT_BASE =\n\s*"[^"]+" as const;\n\n',
+              '',
+              text,
+              count=1,
+          )
+          text = text.replace('readonly url: string;', 'readonly path: string;', 1)
+          direct_fetch = re.compile(
+              r'''    const fetchImplementation = input\.fetchImplementation \?\? fetch;\n    const response = await fetchImplementation\(input\.url, \{\n      method: "GET",\n      cache: "no-store",\n      credentials: "omit",\n      redirect: "error",\n      signal: bridge\.signal,\n      headers: \{ Accept: "application/json, application/zip;q=0\.9" \},\n    \}\);'''
+          )
+          text, count = direct_fetch.subn(
+              '''    const response = await fetchOfficialExpressLrsResource({
+      path: input.path,
+      signal: bridge.signal,
+      ...(input.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: input.fetchImplementation }),
+      accept: "application/json, application/zip;q=0.9",
+    });''',
+              text,
+              count=1,
+          )
+          if count == 0 and 'fetchOfficialExpressLrsResource({' not in text:
+              raise SystemExit('Official catalog fetch block could not be hardened')
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/index.json`,',
+              'path: "index.json",',
+          )
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/hardware.zip`,',
+              'path: "hardware.zip",',
+          )
+          write(relative, text)
+
+          relative = 'apps/web/src/hardware/firmware-package.ts'
+          text = read(relative)
+          text = text.replace(
+              '''import {
+  EXPRESSLRS_ARTIFACT_BASE,
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";''',
+              '''import {
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";
+import { fetchOfficialExpressLrsResource } from "./official-source";''',
+          )
+          text = text.replace('readonly url: string;', 'readonly path: string;', 1)
+          archive_fetch = re.compile(
+              r'''    const response = await \(input\.fetchImplementation \?\? fetch\)\(input\.url, \{\n      method: "GET",\n      cache: "no-store",\n      credentials: "omit",\n      redirect: "error",\n      signal: bridge\.signal,\n      headers: \{ Accept: "application/zip" \},\n    \}\);'''
+          )
+          text, count = archive_fetch.subn(
+              '''    const response = await fetchOfficialExpressLrsResource({
+      path: input.path,
+      signal: bridge.signal,
+      ...(input.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: input.fetchImplementation }),
+      accept: "application/zip",
+    });''',
+              text,
+              count=1,
+          )
+          if count == 0 and 'path: input.path' not in text:
+              raise SystemExit('Firmware archive fetch block could not be hardened')
+          text = text.replace(
+              'const revision = encodeURIComponent(input.release.revision);',
+              'const revision = input.release.revision;',
+          )
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/${revision}/firmware.zip`,',
+              'path: `${revision}/firmware.zip`,',
+          )
+          text = text.replace(
+              'url: `${EXPRESSLRS_ARTIFACT_BASE}/hardware.zip`,',
+              'path: "hardware.zip",',
+          )
+          text = text.replace(
+              'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+              'bytes.slice().buffer',
+          )
+          text = text.replace('new Blob([bytes],', 'new Blob([bytes.slice().buffer],')
+          write(relative, text)
+
+          relative = 'apps/web/src/hardware/lua-package.ts'
+          text = read(relative)
+          text = text.replace(
+              '''import {
+  EXPRESSLRS_ARTIFACT_BASE,
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";''',
+              '''import {
+  OfficialCatalogError,
+  readBoundedResponse,
+} from "./official-catalog";
+import { fetchOfficialExpressLrsResource } from "./official-source";''',
+          )
+          lua_fetch = re.compile(
+              r'''    response = await \(input\.fetchImplementation \?\? fetch\)\(\n      `\$\{EXPRESSLRS_ARTIFACT_BASE\}/\$\{encodeURIComponent\(input\.release\.revision\)\}/lua\.zip`,\n      \{\n        method: "GET",\n        cache: "no-store",\n        credentials: "omit",\n        redirect: "error",\n        \Q...(input.signal === undefined ? {} : { signal: input.signal }),\E\n        headers: \{ Accept: "application/zip" \},\n      \},\n    \);'''
+          )
+          # Python's regex has no \Q; use a structural slice instead.
+          start = text.find('    response = await (input.fetchImplementation ?? fetch)(')
+          if start >= 0:
+              end_marker = '    );\n  } catch (error: unknown) {'
+              end = text.find(end_marker, start)
+              if end < 0:
+                  raise SystemExit('Lua fetch block terminator is missing')
+              replacement = '''    response = await fetchOfficialExpressLrsResource({
+      path: `${input.release.revision}/lua.zip`,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: input.fetchImplementation }),
+      accept: "application/zip",
+    });
+'''
+              text = text[:start] + replacement + text[end + len('    );\n'):]
+          write(relative, text)
+
+          # Owned buffers for TypeScript 6 DOM APIs and test responses.
+          for relative in [
+              'apps/web/src/hardware/recovery-package.ts',
+              'apps/web/src/hardware/recovery-package.test.ts',
+              'apps/web/src/hardware/official-catalog.test.ts',
+              'apps/web/src/hardware/firmware-package.test.ts',
+              'apps/web/src/hardware/lua-package.test.ts',
+          ]:
+              text = read(relative)
+              text = text.replace(
+                  'bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)',
+                  'bytes.slice().buffer',
+              )
+              text = text.replace(
+                  'crypto.subtle.digest("SHA-256", bytes)',
+                  'crypto.subtle.digest("SHA-256", bytes.slice().buffer)',
+              )
+              text = text.replace('new Response(hardwareZip, {', 'new Response(hardwareZip.slice().buffer, {')
+              text = text.replace('new Response(firmware)', 'new Response(firmware.slice().buffer)')
+              text = text.replace('new Response(archive)', 'new Response(archive.slice().buffer)')
+              write(relative, text)
+
+          # XMODEM handshake remains bounded but tolerates silent polling intervals.
+          relative = 'apps/web/src/hardware/xmodem.ts'
+          text = read(relative)
+          old = '''    while (Date.now() < handshakeDeadline) {
+      const byte = await inbox.next({ timeoutMs: 1_000, signal: input.signal });
+      if (byte === CRC_REQUEST || byte === NAK) {
+        handshake = byte;
+        break;
+      }
+      if (byte === CAN) {
+        throw new XmodemError(
+          "TRANSFER_REJECTED",
+          "Receiver cancelled the XMODEM transfer",
+        );
+      }
+    }'''
+          new = '''    while (Date.now() < handshakeDeadline) {
+      let byte: number;
+      try {
+        byte = await inbox.next({
+          timeoutMs: Math.min(1_000, Math.max(1, handshakeDeadline - Date.now())),
+          signal: input.signal,
+        });
+      } catch (error: unknown) {
+        if (
+          error instanceof XmodemError &&
+          error.code === "TRANSFER_TIMEOUT" &&
+          Date.now() < handshakeDeadline
+        ) {
+          continue;
+        }
+        throw error;
+      }
+      if (byte === CRC_REQUEST || byte === NAK) {
+        handshake = byte;
+        break;
+      }
+      if (byte === CAN) {
+        throw new XmodemError(
+          "TRANSFER_REJECTED",
+          "Receiver cancelled the XMODEM transfer",
+        );
+      }
+    }'''
+          if old in text:
+              text = text.replace(old, new)
+          write(relative, text)
+
+          # Recovery archive expansion is bounded before decompression.
+          relative = 'apps/web/src/hardware/recovery-package.ts'
+          text = read(relative)
+          if 'let selectedArchiveBytes = 0;' not in text:
+              text = text.replace(
+                  '  let entries: Record<string, Uint8Array>;\n  try {',
+                  '  let entries: Record<string, Uint8Array>;\n'
+                  '  let selectedArchiveBytes = 0;\n'
+                  '  let selectedArchiveEntries = 0;\n'
+                  '  try {',
+                  1,
+              )
+              text = text.replace(
+                  '''        return (
+          name === "manifest.json" ||
+          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES)
+        );''',
+                  '''        const included =
+          name === "manifest.json" ||
+          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
+            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES);
+        if (!included) return false;
+        selectedArchiveEntries += 1;
+        selectedArchiveBytes += file.originalSize;
+        if (
+          selectedArchiveEntries > 9 ||
+          selectedArchiveBytes > 48 * 1024 * 1024
+        ) {
+          throw new RecoveryPackageError(
+            "TOO_LARGE",
+            "Recovery archive expansion exceeds its entry or byte limit",
+          );
+        }
+        return true;''',
+                  1,
+              )
+          write(relative, text)
+
+          # Sanitize firmware-provided text, cap field count, and protect hidden settings.
+          relative = 'apps/web/src/hardware/crsf.ts'
+          text = read(relative)
+          if 'function sanitizeCrsfText' not in text:
+              text = text.replace(
+                  '''function decodeText(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+''',
+                  '''function sanitizeCrsfText(value: string): string {
+  return value
+    .normalize("NFC")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, "")
+    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
+    .slice(0, 512);
+}
+
+function decodeText(bytes: Uint8Array): string {
+  return sanitizeCrsfText(
+    new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+  );
+}
+''',
+                  1,
+              )
+          text = text.replace(
+              '''  if (fieldCount === undefined || parameterVersion === undefined) {
+    return null;
+  }''',
+              '''  if (
+    fieldCount === undefined ||
+    parameterVersion === undefined ||
+    fieldCount > 64
+  ) {
+    return null;
+  }''',
+              1,
+          )
+          write(relative, text)
+
+          relative = 'apps/web/src/hardware/session.ts'
+          text = read(relative)
+          text = text.replace(
+              '''    if (known.kind !== "number" && known.kind !== "selection") {
+      throw new ExpressLrsHardwareError(''',
+              '''    if (
+      known.hidden ||
+      (known.kind !== "number" && known.kind !== "selection")
+    ) {
+      throw new ExpressLrsHardwareError(''',
+              1,
+          )
+          text = text.replace(
+              '''      responseText += textDecoder.decode(chunk, { stream: true });
+      const line = responseText''',
+              '''      responseText += textDecoder.decode(chunk, { stream: true });
+      if (responseText.length > 4_096) {
+        responseText = responseText.slice(-2_048);
+      }
+      const line = responseText''',
+              1,
+          )
+          write(relative, text)
+
+          # Complete the workbench wiring for region/domain, Lua, and direct bootloader semantics.
+          relative = 'apps/web/src/components/ExpressLrsParityWorkbench.tsx'
+          text = read(relative)
+          if '../hardware/regulatory-domain' not in text:
+              text = text.replace(
+                  '} from "../hardware/parity-types";\n',
+                  '} from "../hardware/parity-types";\nimport {\n  regulatoryRegionByKey,\n  regulatoryRegionsForRadioKey,\n} from "../hardware/regulatory-domain";\n',
+                  1,
+              )
+          if 'acquireOfficialLuaScript' not in text:
+              text = text.replace(
+                  'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";\n',
+                  'import { loadOfficialExpressLrsCatalog } from "../hardware/official-catalog";\nimport { acquireOfficialLuaScript } from "../hardware/lua-package";\n',
+                  1,
+              )
+          if 'type HardwareSerialPort' not in text:
+              text = text.replace(
+                  '} from "../hardware/recovery-package";\n',
+                  '} from "../hardware/recovery-package";\nimport type { HardwareSerialPort } from "../hardware/serial";\n',
+                  1,
+              )
+          text = text.replace('  region: "FCC",\n  domain: 0,', '  region: "",\n  domain: -1,')
+          text = re.sub(
+              r'function regionsForRadio\(radioKey: string\): readonly string\[\] \{.*?\n\}\n\n',
+              '',
+              text,
+              flags=re.S,
+          )
+          text = text.replace(
+              'const regionChoices = regionsForRadio(radioKey);',
+              'const regionChoices = regulatoryRegionsForRadioKey(radioKey);',
+          )
+          text = re.sub(
+              r'region: regionsForRadio\([^\n]+\)\[0\] \?\? "FCC",',
+              'region: "",\n          domain: -1,',
+              text,
+          )
+          text = text.replace('let port;', 'let port: HardwareSerialPort;')
+          text = text.replace(
+              'if (selectedTarget.role === "rx") {',
+              'if (family === "stm32" && selectedTarget.role === "rx") {',
+              1,
+          )
+          text = text.replace(
+              '} else {\n          const command = commandForBootloader(parameters);',
+              '} else if (selectedTarget.role === "tx") {\n          const command = commandForBootloader(parameters);',
+              1,
+          )
+          guard = '''  async function buildFirmware() {
+    if (selectedRelease === null || selectedTarget === null) return;'''
+          if guard in text and 'const regulatoryRegion = regulatoryRegionByKey(options.region);' not in text:
+              text = text.replace(
+                  guard,
+                  '''  async function buildFirmware() {
+    if (selectedRelease === null || selectedTarget === null) return;
+    const regulatoryRegion = regulatoryRegionByKey(options.region);
+    if (regulatoryRegion === null) {
+      setStatus("اختر المنطقة التنظيمية صراحة قبل بناء Firmware.");
+      return;
+    }
+    const packageOptions: ExpressLrsFirmwareOptions = {
+      ...options,
+      region: regulatoryRegion.artifactDirectory,
+      domain: regulatoryRegion.domain,
+    };''',
+                  1,
+              )
+              text = text.replace(
+                  '        options,\n        signal: controller.signal,',
+                  '        options: packageOptions,\n        signal: controller.signal,',
+                  1,
+              )
+          if 'async function downloadLuaScript' not in text:
+              marker = '  function downloadRecovery() {\n'
+              handler = '''  async function downloadLuaScript() {
+    if (
+      selectedRelease === null ||
+      selectedTarget === null ||
+      selectedTarget.role !== "tx" ||
+      selectedTarget.config.luaName === null
+    ) {
+      return;
+    }
+    setBusy(true);
+    setStatus("جارٍ تنزيل ملف Lua الرسمي المطابق لهذا Target…");
+    try {
+      const script = await acquireOfficialLuaScript({
+        release: selectedRelease,
+        target: selectedTarget,
+      });
+      downloadPreparedBytes(script.bytes, script.fileName, "text/plain");
+      setStatus(`تم بدء تنزيل ملف Lua الرسمي: ${script.fileName}.`);
+    } catch (error: unknown) {
+      setStatus(`تعذر تنزيل ملف Lua: ${safeMessage(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+'''
+              if marker not in text:
+                  raise SystemExit('Lua workbench insertion marker is missing')
+              text = text.replace(marker, handler + marker, 1)
+          text = text.replace(
+              '{regionChoices.map((region) => <option key={region} value={region}>{region}</option>)}',
+              '''<option value="">اختر المنطقة</option>
+              {regionChoices.map((region) => (
+                <option key={region.key} value={region.key}>
+                  {region.label}
+                </option>
+              ))}''',
+          )
+          if 'تنزيل ملف Lua' not in text:
+              marker = '<button type="button" className="secondary-button" onClick={downloadRecovery}>تنزيل حزمة الاستعادة</button>'
+              if marker in text:
+                  text = text.replace(
+                      marker,
+                      marker + '''
+              {selectedTarget?.role === "tx" && selectedTarget.config.luaName !== null ? (
+                <button type="button" className="secondary-button" disabled={busy} onClick={() => void downloadLuaScript()}>
+                  تنزيل ملف Lua
+                </button>
+              ) : null}''',
+                      1,
+                  )
+          write(relative, text)
+
+          # CSP permits only the official remote artifact hosts in addition to existing local-device origins.
+          for relative in ['apps/web/public/_headers', 'apps/web/index.html']:
+              path = Path(relative)
+              text = path.read_text(encoding='utf-8')
+              if 'connect-src' in text and 'artifactory.expresslrs.org' not in text:
+                  text = text.replace(
+                      "connect-src 'self'",
+                      "connect-src 'self' https://artifactory.expresslrs.org https://expresslrs.github.io",
+                  )
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Apply repository formatting
+        id: format
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm format
+            pnpm format:check
+          } 2>&1 | tee /tmp/format.log
+
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: pnpm lint 2>&1 | tee /tmp/lint.log
+
+      - name: Typecheck
+        id: typecheck
+        continue-on-error: true
+        run: pnpm typecheck 2>&1 | tee /tmp/typecheck.log
+
+      - name: Repository policy gates
+        id: policies
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm check:boundaries
+            pnpm check:security-headers
+            pnpm check:pwa-safety
+            pnpm check:visual-theme
+            pnpm check:links
+            pnpm check:master-plan
+          } 2>&1 | tee /tmp/policies.log
+
+      - name: Complete automated tests
+        id: tests
+        continue-on-error: true
+        run: pnpm test 2>&1 | tee /tmp/tests.log
+
+      - name: Live official source contract tests
+        id: live
+        continue-on-error: true
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            apps/web/src/hardware/official-catalog.live.test.ts \
+            apps/web/src/hardware/official-artifacts.live.test.ts \
+            2>&1 | tee /tmp/live.log
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        run: pnpm build 2>&1 | tee /tmp/build.log
+
+      - name: Pages build verification
+        id: pages
+        continue-on-error: true
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+        run: |
+          set -o pipefail
+          {
+            pnpm --filter @elrs-easy/web build
+            pnpm check:pages-build
+          } 2>&1 | tee /tmp/pages.log
+
+      - name: Licenses and advisories
+        id: supply
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm licenses:report
+            pnpm licenses:check
+            pnpm security:audit
+          } 2>&1 | tee /tmp/supply.log
+
+      - name: Verify pinned regulatory enumeration
+        id: upstream
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            git clone --quiet --depth 1 --branch 4.1.0 https://github.com/ExpressLRS/ExpressLRS.git /tmp/expresslrs-upstream
+            python - <<'PY'
+          from pathlib import Path
+
+          expected = [
+              'Regulatory_Domain_AU_915',
+              'Regulatory_Domain_FCC_915',
+              'Regulatory_Domain_EU_868',
+              'Regulatory_Domain_IN_866',
+              'Regulatory_Domain_AU_433',
+              'Regulatory_Domain_EU_433',
+              'Regulatory_Domain_FCC_433',
+              'Regulatory_Domain_ISM_2400',
+              'Regulatory_Domain_EU_CE_2400',
+          ]
+          valid = []
+          for path in Path('/tmp/expresslrs-upstream').rglob('*'):
+              if not path.is_file() or path.suffix.lower() not in {'.h', '.hpp', '.c', '.cpp', '.py'}:
+                  continue
+              text = path.read_text(encoding='utf-8', errors='ignore')
+              if all(name in text for name in expected):
+                  positions = [text.find(name) for name in expected]
+                  if positions == sorted(positions):
+                      valid.append(path)
+          if not valid:
+              raise SystemExit('Pinned ExpressLRS domain order differs from the local map')
+          print(f'Validated against {valid[0]}')
+          PY
+          } 2>&1 | tee /tmp/upstream.log
+
+      - name: Write authoritative validation evidence
+        if: always()
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          HARDEN: ${{ steps.harden.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          POLICIES: ${{ steps.policies.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          LIVE: ${{ steps.live.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          PAGES: ${{ steps.pages.outcome }}
+          SUPPLY: ${{ steps.supply.outcome }}
+          UPSTREAM: ${{ steps.upstream.outcome }}
+        run: |
+          mkdir -p docs/testing
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+
+          gates = [
+              ('Install', os.environ['INSTALL'], '/tmp/install.log'),
+              ('Source hardening', os.environ['HARDEN'], '/tmp/harden.log'),
+              ('Format', os.environ['FORMAT'], '/tmp/format.log'),
+              ('Lint', os.environ['LINT'], '/tmp/lint.log'),
+              ('TypeScript', os.environ['TYPECHECK'], '/tmp/typecheck.log'),
+              ('Repository policies', os.environ['POLICIES'], '/tmp/policies.log'),
+              ('Automated tests', os.environ['TESTS'], '/tmp/tests.log'),
+              ('Live official artifacts', os.environ['LIVE'], '/tmp/live.log'),
+              ('Production build', os.environ['BUILD'], '/tmp/build.log'),
+              ('Pages build', os.environ['PAGES'], '/tmp/pages.log'),
+              ('Licenses and advisories', os.environ['SUPPLY'], '/tmp/supply.log'),
+              ('Pinned upstream enum', os.environ['UPSTREAM'], '/tmp/upstream.log'),
+          ]
+          success = all(outcome == 'success' for _, outcome, _ in gates)
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          lines = [
+              '# Authoritative ExpressLRS TX/RX parity checkpoint',
+              '',
+              f'- Input SHA: `{head}`',
+              f'- Overall software result: `{"PASS" if success else "FAIL"}`',
+              '- Hardware validation: `NONE`',
+              '- Real writes published to stable Pages: `NO`',
+              '',
+              '| Gate | Outcome |',
+              '|---|---|',
+          ]
+          for name, outcome, _ in gates:
+              lines.append(f'| {name} | `{outcome.upper()}` |')
+          lines.extend([
+              '',
+              '## Implemented in the current TX/RX scope',
+              '',
+              '- Official releases, vendors, bands, Targets, and supported update methods.',
+              '- Official regulatory region and embedded-domain mapping.',
+              '- Target-specific Firmware and Lua acquisition from official sources.',
+              '- Binding phrase UID, Wi-Fi options, TX options, and RX options.',
+              '- CRSF identity, all parameters, setting read-back, backup/restore, and Bind.',
+              '- Direct Espressif flashing, EdgeTX passthrough, flight-controller passthrough, and STM32 XMODEM.',
+              '- Per-segment SHA-256, mandatory recovery package, recovery checkpoint, reset, reconnect, and exact Target verification.',
+              '- Wi-Fi handoff and offline package download.',
+              '',
+              '## Explicit boundaries',
+              '',
+              '- Internal ST-Link/WebUSB write remains a separate unsupported method; the UI does not claim it works internally.',
+              '- Backpack/VRX targets are outside this TX/RX checkpoint.',
+              '- No physical success or RF-link improvement is claimed before observed hardware evidence.',
+          ])
+          if not success:
+              lines.extend(['', '## Failure tails', ''])
+              for name, outcome, log_name in gates:
+                  if outcome == 'success':
+                      continue
+                  path = Path(log_name)
+                  tail = path.read_text(encoding='utf-8', errors='replace').splitlines()[-100:] if path.exists() else ['No log produced.']
+                  lines.extend([f'### {name}', '', '```text', *tail, '```', ''])
+          Path('docs/testing/expresslrs-feature-parity-validation.md').write_text(
+              '\n'.join(lines) + '\n', encoding='utf-8'
+          )
+          Path('/tmp/parity-authoritative-result').write_text('1' if success else '0', encoding='utf-8')
+          PY
+
+      - name: Commit latest source and evidence
+        if: always()
+        shell: bash
+        run: |
+          result="$(cat /tmp/parity-authoritative-result)"
+          if [ "$result" = "1" ]; then
+            rm -f .github/workflows/m2-parity-authoritative.yml
+            rm -f .github/workflows/m2-parity-audited-final.yml
+            rm -f .github/workflows/m2-parity-repair-v3.yml
+            rm -f .github/workflows/m2-parity-repair-v2.yml
+            rm -f .github/workflows/m2-parity-finalize.yml
+            rm -f .github/workflows/m2-audit-format-export.yml
+            message='feat(parity): complete authoritative ExpressLRS TX/RX checkpoint'
+          else
+            message='chore(parity): preserve authoritative validation failures'
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "$message"
+            git fetch origin feat/m2-real-hardware-first-test
+            git rebase origin/feat/m2-real-hardware-first-test
+            git push origin HEAD:feat/m2-real-hardware-first-test
+          fi
+
+      - name: Enforce authoritative result
+        if: always()
+        run: |
+          if [ "$(cat /tmp/parity-authoritative-result)" != "1" ]; then
+            echo '::error::The parity checkpoint is not green. Exact logs were committed to docs/testing/expresslrs-feature-parity-validation.md.'
+            exit 1
+          fi
