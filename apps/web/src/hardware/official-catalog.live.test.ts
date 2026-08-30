@@ -1,0 +1,29 @@
+import { describe, expect, it } from "vitest";
+
+import { loadOfficialExpressLrsCatalog } from "./official-catalog";
+
+const runLive = process.env.EXPRESSLRS_LIVE_CATALOG === "1";
+
+(runLive ? describe : describe.skip)("live official ExpressLRS catalog", () => {
+  it(
+    "parses the current official release index and target archive",
+    async () => {
+      const catalog = await loadOfficialExpressLrsCatalog();
+
+      expect(catalog.source).toBe("EXPRESSLRS_ARTIFACTORY");
+      expect(catalog.releases.length).toBeGreaterThan(0);
+      expect(catalog.targets.length).toBeGreaterThan(0);
+      expect(catalog.targets.some((target) => target.role === "tx")).toBe(true);
+      expect(catalog.targets.some((target) => target.role === "rx")).toBe(true);
+      expect(
+        catalog.targets.every(
+          (target) =>
+            target.config.productName.length > 0 &&
+            target.config.platform.length > 0 &&
+            target.config.firmware.length > 0,
+        ),
+      ).toBe(true);
+    },
+    120_000,
+  );
+});
