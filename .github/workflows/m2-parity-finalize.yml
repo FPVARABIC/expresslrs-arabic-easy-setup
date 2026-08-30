@@ -1,0 +1,86 @@
+name: M2 ExpressLRS parity validation
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-parity-finalize.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: m2-expresslrs-parity-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Install, format, test, build, and commit parity candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out hardware parity branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Add bounded ZIP implementation
+        run: pnpm --filter @elrs-easy/web add fflate@0.8.2 --save-exact
+
+      - name: Apply repository formatter
+        run: pnpm format
+
+      - name: Run lint and type safety gates
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+
+      - name: Run all automated tests
+        run: pnpm test
+
+      - name: Build production and Pages artifacts
+        run: |
+          pnpm build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+
+      - name: Verify dependencies
+        run: |
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit validated candidate and remove temporary workflows
+        shell: bash
+        run: |
+          rm -f .github/workflows/m2-parity-finalize.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(parity): complete first real ExpressLRS update workflow'
+          git push origin HEAD:feat/m2-real-hardware-first-test
