@@ -1,0 +1,277 @@
+name: M2 integrate STM32 DFU parity path
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-stm32-dfu-integrate.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: m2-stm32-dfu-integration
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    name: Integrate WebUSB DFU, run all gates, and commit only green source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Wait for older parity workflows and refresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$((SECONDS + 600))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            active="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=feat%2Fm2-real-hardware-first-test&per_page=100" \
+                --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\") | select(.name != \"CI\") | .id" \
+                | wc -l
+            )"
+            [ "$active" -eq 0 ] && break
+            sleep 15
+          done
+          git fetch origin feat/m2-real-hardware-first-test
+          git reset --hard origin/feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Integrate STM32 DFU into the real workbench
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/web/src/hardware/stm32-dfu.ts')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '''    if (
+      status.state === DfuState.downloadIdle ||
+      status.state === DfuState.dfuIdle
+    ) {
+      return;
+    }''',
+              '''    if (
+      status.state === DfuState.downloadIdle ||
+      status.state === DfuState.dfuIdle ||
+      status.state === DfuState.manifestWaitReset
+    ) {
+      return;
+    }''',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('apps/web/src/components/ExpressLrsParityWorkbench.tsx')
+          text = path.read_text(encoding='utf-8')
+          if 'flashStm32DfuFirmware' not in text:
+              marker = 'import { flashXmodemFirmware } from "../hardware/xmodem";\n'
+              text = text.replace(
+                  marker,
+                  'import { flashStm32DfuFirmware } from "../hardware/stm32-dfu";\n' + marker,
+                  1,
+              )
+          text = text.replace('stlink: "ST-Link",', 'stlink: "ST-Link / STM32 DFU",')
+          text = text.replace(
+              '''    if (method === "stlink") {
+      setStatus("مسار ST-Link الداخلي لم يُفتح بعد؛ لا توجد كتابة صورية. استخدم التنزيل مع أداة ST-Link المعتمدة حاليًا.");
+      return;
+    }
+''',
+              '',
+          )
+          # ST-Link/DFU has no CRSF session at bootloader entry, therefore it uses
+          # the official Target plus explicit typed confirmation when no exact
+          # live match is available.
+          text = text.replace(
+              '''    const direct = method === "uart";
+    if (direct && sessionRef.current === null) {''',
+              '''    const direct = method === "uart";
+    const usbDfu = method === "stlink";
+    if (direct && sessionRef.current === null) {''',
+              1,
+          )
+          text = text.replace(
+              '''    if (!exactHardwareTarget && !manualTargetConfirmed) {''',
+              '''    if ((direct || usbDfu || !["wifi", "download"].includes(method)) &&
+        !exactHardwareTarget &&
+        !manualTargetConfirmed) {''',
+              1,
+          )
+          marker = '''      let port: HardwareSerialPort;
+      let resetMode: "default_reset" | "no_reset" = "default_reset";
+      if (direct) {'''
+          if marker not in text:
+              raise SystemExit('Flash transport branch marker is missing')
+          text = text.replace(
+              marker,
+              '''      let port: HardwareSerialPort | null = null;
+      let resetMode: "default_reset" | "no_reset" = "default_reset";
+      if (usbDfu) {
+        await updateCheckpoint(prepared, "BOOTLOADER");
+      } else if (direct) {''',
+              1,
+          )
+          text = text.replace(
+              '''        port = await requestHardwarePort();''',
+              '''        port = await requestHardwarePort();''',
+          )
+          write_marker = '''      await updateCheckpoint(prepared, "WRITING");
+      if (family === "esp") {'''
+          if write_marker not in text:
+              raise SystemExit('Flash write branch marker is missing')
+          text = text.replace(
+              write_marker,
+              '''      await updateCheckpoint(prepared, "WRITING");
+      if (usbDfu) {
+        if (family !== "stm32") {
+          throw new Error("طريقة STM32 DFU لا تطابق منصة Target المختار");
+        }
+        const firmware = prepared.segments.find(
+          (segment) => segment.name === "firmware.bin",
+        );
+        if (firmware === undefined) {
+          throw new Error("حزمة STM32 لا تحتوي firmware.bin");
+        }
+        await flashStm32DfuFirmware({
+          target: selectedTarget,
+          segment: firmware,
+          signal: controller.signal,
+          onProgress(progress) {
+            setFlashProgress(progress);
+          },
+        });
+      } else if (family === "esp") {''',
+              1,
+          )
+          # TypeScript narrowing: serial flash branches require a selected port.
+          text = text.replace(
+              '''        await flashEspFirmware({
+          port,''',
+              '''        if (port === null) throw new Error("لم يتم اختيار منفذ UART");
+        await flashEspFirmware({
+          port,''',
+              1,
+          )
+          # Replace the XMODEM serial branch's port use as well.
+          xmodem_marker = '''        await flashXmodemFirmware({
+          port,
+          firmware: firmware.bytes,'''
+          text = text.replace(
+              xmodem_marker,
+              '''        if (port === null) throw new Error("لم يتم اختيار منفذ UART");
+        await flashXmodemFirmware({
+          port,
+          firmware: firmware.bytes,''',
+              1,
+          )
+          # Manual target confirmation must also be shown for USB DFU.
+          text = text.replace(
+              '''            method !== "stlink" ? (''',
+              '''            true ? (''',
+          )
+          # Keep it hidden only for Wi-Fi/download or an exact hardware match.
+          text = text.replace(
+              '''            {!exactHardwareTarget &&
+            method !== "wifi" &&
+            method !== "download" &&
+            true ? (''',
+              '''            {!exactHardwareTarget &&
+            method !== "wifi" &&
+            method !== "download" ? (''',
+          )
+          # Button gate and label now treat ST-Link as an internal write method.
+          text = text.replace(
+              '''(!["wifi", "download", "stlink"].includes(method) &&''',
+              '''(!["wifi", "download"].includes(method) &&''',
+          )
+          text = text.replace(
+              '''method === "stlink" ? "عرض حالة ST-Link" : "بدء التفليش الحقيقي"''',
+              '''method === "stlink" ? "بدء ST-Link / STM32 DFU" : "بدء التفليش الحقيقي"''',
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # The permanent gate must include the new internal path.
+          gate = Path('scripts/check-real-hardware-primary.mjs')
+          if gate.exists():
+              text = gate.read_text(encoding='utf-8')
+              if 'flashStm32DfuFirmware' not in text:
+                  text = text.replace(
+                      '"flashXmodemFirmware",',
+                      '"flashXmodemFirmware",\n    "flashStm32DfuFirmware",',
+                      1,
+                  )
+              gate.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Format and run every gate including WebUSB DFU tests
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: |
+          pnpm format
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm check:real-hardware-primary
+          pnpm test
+          pnpm exec vitest run \
+            apps/web/src/hardware/official-catalog.live.test.ts \
+            apps/web/src/hardware/official-artifacts.live.test.ts
+          pnpm build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit green STM32 DFU parity path
+        run: |
+          rm -f .github/workflows/m2-stm32-dfu-integrate.yml
+          rm -f .github/workflows/m2-parity-release-candidate.yml
+          rm -f .github/workflows/m2-parity-green-v1.yml
+          rm -f .github/workflows/m2-parity-final-report.yml
+          rm -f .github/workflows/m2-write-path-fixups.yml
+          rm -f .github/workflows/m2-write-path-hardening.yml
+          rm -f .github/workflows/m2-parity-normalize.yml
+          rm -f .github/workflows/m2-parity-authoritative.yml
+          rm -f .github/workflows/m2-parity-audited-final.yml
+          rm -f .github/workflows/m2-parity-repair-v3.yml
+          rm -f .github/workflows/m2-parity-repair-v2.yml
+          rm -f .github/workflows/m2-parity-finalize.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat(parity): add internal STM32 WebUSB DFU path'
+          git fetch origin feat/m2-real-hardware-first-test
+          git rebase origin/feat/m2-real-hardware-first-test
+          git push origin HEAD:feat/m2-real-hardware-first-test
