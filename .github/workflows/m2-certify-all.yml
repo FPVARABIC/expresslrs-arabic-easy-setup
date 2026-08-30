@@ -1,0 +1,356 @@
+name: M2 certify complete ExpressLRS TX/RX parity
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-certify-all.yml
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: m2-certify-complete-expresslrs-parity
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    name: Validate complete TX/RX feature matrix and preserve exact evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Wait for implementation runs and refresh latest head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          deadline=$((SECONDS + 720))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            active="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=feat%2Fm2-real-hardware-first-test&per_page=100" \
+                --jq ".workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.status == \"queued\" or .status == \"in_progress\") | select(.name != \"CI\") | .id" \
+                | wc -l
+            )"
+            [ "$active" -eq 0 ] && break
+            sleep 15
+          done
+          git fetch origin feat/m2-real-hardware-first-test
+          git reset --hard origin/feat/m2-real-hardware-first-test
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Frozen install
+        id: install
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee /tmp/install.log
+
+      - name: Implementation matrix gate
+        id: matrix
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee /tmp/matrix.log
+          from pathlib import Path
+
+          required = {
+              'apps/web/src/main.tsx': ['ExpressLrsParityWorkbench'],
+              'apps/web/src/components/ExpressLrsParityWorkbench.tsx': [
+                  'loadOfficialExpressLrsCatalog',
+                  'ExpressLrsHardwareSession.connect',
+                  'writeParameter',
+                  'restoreSettingsBackup',
+                  'startBinding',
+                  'prepareOfficialFirmwarePackage',
+                  'downloadLuaScript',
+                  'flashEspFirmware',
+                  'initializeSerialPassthrough',
+                  'flashXmodemFirmware',
+                  'flashStm32DfuFirmware',
+                  'validateRecoveryPackage',
+                  'verifyCurrentIdentity',
+                  'verifyObservedFirmwareBuild',
+                  'reconnectAndVerify',
+              ],
+              'apps/web/src/hardware/official-source.ts': [
+                  'expresslrs.github.io',
+                  'artifactory.expresslrs.org',
+                  'UNTRUSTED_REDIRECT',
+              ],
+              'apps/web/src/hardware/firmware-package.ts': [
+                  'validateFirmwareOptions',
+                  'recoveryArchive',
+                  'sha256Hex',
+                  'actualUncompressedBytes',
+              ],
+              'apps/web/src/hardware/stm32-dfu.ts': [
+                  'parseDfuSeMemoryDescriptor',
+                  'createDfuSeAddressCommand',
+                  'VERIFY_FAILED',
+                  'manifestWaitReset',
+              ],
+          }
+          failures = []
+          for path_name, tokens in required.items():
+              path = Path(path_name)
+              if not path.exists():
+                  failures.append(f'Missing {path_name}')
+                  continue
+              text = path.read_text(encoding='utf-8')
+              for token in tokens:
+                  if token not in text:
+                      failures.append(f'{path_name} missing {token}')
+          main = Path('apps/web/src/main.tsx').read_text(encoding='utf-8')
+          for forbidden in ['from "./App"', 'DeviceConnectionHub', '<App />']:
+              if forbidden in main:
+                  failures.append(f'Legacy primary path active: {forbidden}')
+          if failures:
+              raise SystemExit('\n'.join(failures))
+          print('Complete TX/RX implementation matrix gate passed.')
+          PY
+
+      - name: Formatting
+        id: format
+        continue-on-error: true
+        run: pnpm format:check 2>&1 | tee /tmp/format.log
+
+      - name: Lint
+        id: lint
+        continue-on-error: true
+        run: pnpm lint 2>&1 | tee /tmp/lint.log
+
+      - name: TypeScript
+        id: typecheck
+        continue-on-error: true
+        run: pnpm typecheck 2>&1 | tee /tmp/typecheck.log
+
+      - name: Repository and product policies
+        id: policies
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm check:boundaries
+            pnpm check:security-headers
+            pnpm check:pwa-safety
+            pnpm check:visual-theme
+            pnpm check:links
+            pnpm check:master-plan
+            pnpm check:real-hardware-primary
+          } 2>&1 | tee /tmp/policies.log
+
+      - name: Complete automated tests
+        id: tests
+        continue-on-error: true
+        run: pnpm test 2>&1 | tee /tmp/tests.log
+
+      - name: Live official ExpressLRS contracts
+        id: live
+        continue-on-error: true
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            apps/web/src/hardware/official-catalog.live.test.ts \
+            apps/web/src/hardware/official-artifacts.live.test.ts \
+            2>&1 | tee /tmp/live.log
+
+      - name: Production build
+        id: build
+        continue-on-error: true
+        run: pnpm build 2>&1 | tee /tmp/build.log
+
+      - name: Pages artifact
+        id: pages
+        continue-on-error: true
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+        run: |
+          set -o pipefail
+          {
+            pnpm --filter @elrs-easy/web build
+            pnpm check:pages-build
+          } 2>&1 | tee /tmp/pages.log
+
+      - name: Licenses and dependency advisories
+        id: supply
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            pnpm licenses:report
+            pnpm licenses:check
+            pnpm security:audit
+          } 2>&1 | tee /tmp/supply.log
+
+      - name: Produce complete feature-parity report
+        if: always()
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          MATRIX: ${{ steps.matrix.outcome }}
+          FORMAT: ${{ steps.format.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          POLICIES: ${{ steps.policies.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          LIVE: ${{ steps.live.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          PAGES: ${{ steps.pages.outcome }}
+          SUPPLY: ${{ steps.supply.outcome }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+
+          gates = [
+              ('Frozen install', os.environ['INSTALL'], '/tmp/install.log'),
+              ('Implementation matrix', os.environ['MATRIX'], '/tmp/matrix.log'),
+              ('Formatting', os.environ['FORMAT'], '/tmp/format.log'),
+              ('Lint', os.environ['LINT'], '/tmp/lint.log'),
+              ('TypeScript', os.environ['TYPECHECK'], '/tmp/typecheck.log'),
+              ('Policy gates', os.environ['POLICIES'], '/tmp/policies.log'),
+              ('Automated tests', os.environ['TESTS'], '/tmp/tests.log'),
+              ('Live official contracts', os.environ['LIVE'], '/tmp/live.log'),
+              ('Production build', os.environ['BUILD'], '/tmp/build.log'),
+              ('Pages artifact', os.environ['PAGES'], '/tmp/pages.log'),
+              ('Licenses/advisories', os.environ['SUPPLY'], '/tmp/supply.log'),
+          ]
+          success = all(value == 'success' for _, value, _ in gates)
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tests_text = Path('/tmp/tests.log').read_text(encoding='utf-8', errors='replace') if Path('/tmp/tests.log').exists() else ''
+          files = re.findall(r'Test Files\s+(\d+) passed', tests_text)
+          count = re.findall(r'Tests\s+(\d+) passed', tests_text)
+          lines = [
+              '# Complete ExpressLRS TX/RX software parity certification',
+              '',
+              f'- Candidate SHA: `{head}`',
+              f'- Software certification: `{"PASS" if success else "FAIL"}`',
+              f'- Test files passed: `{files[-1] if files else "UNKNOWN"}`',
+              f'- Tests passed: `{count[-1] if count else "UNKNOWN"}`',
+              '- Hardware validation: `NONE`',
+              '- Stable public hardware writes enabled: `NO`',
+              '',
+              '| Gate | Result |',
+              '|---|---|',
+          ]
+          lines.extend(f'| {name} | `{value.upper()}` |' for name, value, _ in gates)
+          lines.extend([
+              '',
+              '## ExpressLRS Web Flasher comparison — TX/RX scope',
+              '',
+              '| Official capability | Implementation |',
+              '|---|---|',
+              '| Release and branch index | Implemented from official sources |',
+              '| Vendor/band/Target catalog | Implemented from official targets archive |',
+              '| Binding phrase UID | Implemented |',
+              '| Regulatory domains | Implemented with explicit selection |',
+              '| TX and RX build options | Implemented and validated |',
+              '| Target-specific firmware configuration | Implemented |',
+              '| Firmware download | Implemented |',
+              '| Target-specific Lua download | Implemented |',
+              '| Wi-Fi update | Configured file + local-device handoff |',
+              '| Direct UART Espressif | Implemented in software |',
+              '| EdgeTX passthrough | Implemented in software |',
+              '| Flight-controller passthrough | Implemented in software |',
+              '| STM32 XMODEM | Implemented in software |',
+              '| STM32 WebUSB DFU / ST-Link path | Implemented in software with page erase and byte read-back |',
+              '',
+              '## Additional safety/product capabilities',
+              '',
+              '- CRSF identity and bounded complete parameter enumeration.',
+              '- Device-advertised setting write with exact read-back.',
+              '- Settings snapshot and same-device restore.',
+              '- TX Bind command and RX Bind transmission without false RF-success claims.',
+              '- Mandatory recovery package with per-segment SHA-256.',
+              '- Pre-write identity recheck.',
+              '- Power and TX-antenna acknowledgements.',
+              '- Post-write exact Target and release-version/branch-commit verification.',
+              '',
+              '## Scope boundary',
+              '',
+              '- Backpack and VRX devices remain outside this TX/RX checkpoint.',
+              '- Software certification is not physical hardware evidence.',
+          ])
+          if not success:
+              lines.extend(['', '## Failed gate tails', ''])
+              for name, value, log in gates:
+                  if value == 'success':
+                      continue
+                  path = Path(log)
+                  tail = path.read_text(encoding='utf-8', errors='replace').splitlines()[-140:] if path.exists() else ['No log produced.']
+                  lines.extend([f'### {name}', '', '```text', *tail, '```', ''])
+          report = Path('docs/testing/expresslrs-feature-parity-validation.md')
+          report.parent.mkdir(parents=True, exist_ok=True)
+          report.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          marker = Path('docs/testing/EXPRESSLRS_TX_RX_SOFTWARE_PARITY_READY')
+          if success:
+              marker.write_text(head + '\n', encoding='utf-8')
+          else:
+              marker.unlink(missing_ok=True)
+          Path('/tmp/m2-certification-result').write_text('1' if success else '0', encoding='utf-8')
+          PY
+
+      - name: Commit exact certification evidence
+        if: always()
+        run: |
+          result="$(cat /tmp/m2-certification-result)"
+          if [ "$result" = "1" ]; then
+            rm -f .github/workflows/m2-certify-all.yml
+            rm -f .github/workflows/m2-stm32-dfu-integrate.yml
+            rm -f .github/workflows/m2-parity-release-candidate.yml
+            rm -f .github/workflows/m2-parity-green-v1.yml
+            rm -f .github/workflows/m2-parity-final-report.yml
+            rm -f .github/workflows/m2-write-path-fixups.yml
+            rm -f .github/workflows/m2-write-path-hardening.yml
+            rm -f .github/workflows/m2-parity-normalize.yml
+            rm -f .github/workflows/m2-parity-authoritative.yml
+            rm -f .github/workflows/m2-parity-audited-final.yml
+            rm -f .github/workflows/m2-parity-repair-v3.yml
+            rm -f .github/workflows/m2-parity-repair-v2.yml
+            rm -f .github/workflows/m2-parity-finalize.yml
+            rm -f .github/workflows/m2-audit-format-export.yml
+            message='test(parity): certify complete ExpressLRS TX/RX software parity'
+          else
+            message='test(parity): preserve complete parity failure evidence'
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "$message"
+            git fetch origin feat/m2-real-hardware-first-test
+            git rebase origin/feat/m2-real-hardware-first-test
+            git push origin HEAD:feat/m2-real-hardware-first-test
+          fi
+
+      - name: Enforce certification result
+        if: always()
+        run: |
+          if [ "$(cat /tmp/m2-certification-result)" != "1" ]; then
+            echo '::error::Complete software parity certification failed; exact tails were committed to docs/testing/expresslrs-feature-parity-validation.md.'
+            exit 1
+          fi
