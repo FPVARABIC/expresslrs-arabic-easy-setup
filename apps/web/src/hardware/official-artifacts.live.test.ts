@@ -5,12 +5,14 @@ import { fetchOfficialExpressLrsResource } from "./official-source";
 
 const runLive = process.env.EXPRESSLRS_LIVE_CATALOG === "1";
 
-(runLive ? describe : describe.skip)("live official ExpressLRS release artifacts", () => {
-  it(
-    "resolves the current Firmware and Lua archives without consuming them",
-    async () => {
+(runLive ? describe : describe.skip)(
+  "live official ExpressLRS release artifacts",
+  () => {
+    it("resolves the current Firmware and Lua archives without consuming them", async () => {
       const catalog = await loadOfficialExpressLrsCatalog();
-      const release = catalog.releases.find((item) => item.channel === "release");
+      const release = catalog.releases.find(
+        (item) => item.channel === "release",
+      );
       expect(release).toBeDefined();
       if (release === undefined) return;
 
@@ -22,7 +24,6 @@ const runLive = process.env.EXPRESSLRS_LIVE_CATALOG === "1";
         expect(response.ok).toBe(true);
         await response.body?.cancel();
       }
-    },
-    120_000,
-  );
-});
+    }, 120_000);
+  },
+);

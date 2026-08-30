@@ -17,12 +17,12 @@ describe("official ExpressLRS artifact source", () => {
         "https://artifactory.expresslrs.org/ExpressLRS/index.json",
       ),
     ).toBe(true);
-    expect(isTrustedOfficialExpressLrsUrl("https://example.com/index.json")).toBe(
-      false,
-    );
-    expect(isTrustedOfficialExpressLrsUrl("http://expresslrs.github.io/a")).toBe(
-      false,
-    );
+    expect(
+      isTrustedOfficialExpressLrsUrl("https://example.com/index.json"),
+    ).toBe(false);
+    expect(
+      isTrustedOfficialExpressLrsUrl("http://expresslrs.github.io/a"),
+    ).toBe(false);
   });
 
   it("falls back from the Pages mirror to official Artifactory", async () => {

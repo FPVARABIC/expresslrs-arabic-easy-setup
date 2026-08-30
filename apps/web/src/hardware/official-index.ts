@@ -12,8 +12,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function safeLabel(value: unknown): string | null {
-  return typeof value === "string" &&
-    /^[A-Za-z0-9_.@+ -]{1,160}$/u.test(value)
+  return typeof value === "string" && /^[A-Za-z0-9_.@+ -]{1,160}$/u.test(value)
     ? value
     : null;
 }
@@ -97,8 +96,7 @@ function collectCollection(
     }
     if (!isRecord(item)) continue;
     const explicitLabel =
-      recordString(item, ["label", "name", "version", "tag", "branch"]) ??
-      key;
+      recordString(item, ["label", "name", "version", "tag", "branch"]) ?? key;
     const revision = recordString(item, [
       "revision",
       "commit",

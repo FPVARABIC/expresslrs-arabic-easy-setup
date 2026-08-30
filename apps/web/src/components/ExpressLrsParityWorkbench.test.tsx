@@ -26,9 +26,7 @@ import { ExpressLrsParityWorkbench } from "./ExpressLrsParityWorkbench";
 const catalog: OfficialCatalog = {
   source: "EXPRESSLRS_ARTIFACTORY",
   loadedAt: "2026-08-30T00:00:00.000Z",
-  releases: [
-    { label: "4.1.0", revision: "release410", channel: "release" },
-  ],
+  releases: [{ label: "4.1.0", revision: "release410", channel: "release" }],
   targets: [
     {
       id: "vendor/tx_2400/module",
@@ -103,7 +101,9 @@ describe("primary ExpressLRS hardware workbench", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("option", { name: "Vendor TX Module" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("option", { name: "Vendor TX Module" }),
+      ).toBeInTheDocument(),
     );
     expect(mocks.loadCatalog).toHaveBeenCalledTimes(1);
     const build = screen.getByRole("button", {
@@ -133,7 +133,9 @@ describe("primary ExpressLRS hardware workbench", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("option", { name: "USB مباشر / UART" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("option", { name: "USB مباشر / UART" }),
+      ).toBeInTheDocument(),
     );
     expect(
       screen.queryByRole("option", { name: "ST-Link" }),

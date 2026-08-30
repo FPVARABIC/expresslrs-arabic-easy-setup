@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { validateFirmwareOptions } from "./firmware-options";
-import type {
-  ExpressLrsFirmwareOptions,
-  OfficialTarget,
-} from "./parity-types";
+import type { ExpressLrsFirmwareOptions, OfficialTarget } from "./parity-types";
 
 const target: OfficialTarget = {
   id: "vendor/tx_2400/module",

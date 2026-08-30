@@ -53,7 +53,10 @@ export async function fetchOfficialExpressLrsResource(input: {
   const failures: string[] = [];
   for (const base of OFFICIAL_EXPRESSLRS_ARTIFACT_BASES) {
     if (input.signal?.aborted === true) {
-      throw new DOMException("Official artifact request was cancelled", "AbortError");
+      throw new DOMException(
+        "Official artifact request was cancelled",
+        "AbortError",
+      );
     }
     const requestedUrl = `${base}/${path}`;
     try {

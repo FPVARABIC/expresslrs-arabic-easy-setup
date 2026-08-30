@@ -1,7 +1,4 @@
-import type {
-  ExpressLrsFirmwareOptions,
-  OfficialTarget,
-} from "./parity-types";
+import type { ExpressLrsFirmwareOptions, OfficialTarget } from "./parity-types";
 
 export class FirmwareOptionsError extends Error {
   public constructor(

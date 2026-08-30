@@ -1,6 +1,8 @@
 import type { OfficialRelease } from "./parity-types";
 
-function semverTriplet(value: string): readonly [number, number, number] | null {
+function semverTriplet(
+  value: string,
+): readonly [number, number, number] | null {
   const match = /(?:^|[^0-9])(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:$|[^0-9])/u.exec(
     ` ${value} `,
   );

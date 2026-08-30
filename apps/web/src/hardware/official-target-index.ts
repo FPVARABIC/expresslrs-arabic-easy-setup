@@ -73,7 +73,10 @@ function roleFromValue(value: unknown): OfficialTarget["role"] | null {
 function roleFromPath(path: readonly string[]): OfficialTarget["role"] | null {
   for (const part of path.toReversed()) {
     const normalized = part.toLocaleLowerCase("en-US");
-    if (/^tx(?:_|-|$)/u.test(normalized) || normalized.includes("transmitter")) {
+    if (
+      /^tx(?:_|-|$)/u.test(normalized) ||
+      normalized.includes("transmitter")
+    ) {
       return "tx";
     }
     if (/^rx(?:_|-|$)/u.test(normalized) || normalized.includes("receiver")) {
@@ -83,11 +86,14 @@ function roleFromPath(path: readonly string[]): OfficialTarget["role"] | null {
   return null;
 }
 
-function configFromRecord(value: Readonly<Record<string, unknown>>): OfficialTargetConfig | null {
+function configFromRecord(
+  value: Readonly<Record<string, unknown>>,
+): OfficialTargetConfig | null {
   const productName = safeKey(value.product_name);
   const platform = safeKey(value.platform);
   const firmware = safeKey(value.firmware);
-  if (productName === null || platform === null || firmware === null) return null;
+  if (productName === null || platform === null || firmware === null)
+    return null;
   const sourceMethods = Array.isArray(value.upload_methods)
     ? value.upload_methods
     : typeof value.upload_method === "string"
@@ -119,9 +125,13 @@ interface WalkContext {
   readonly vendorName: string;
 }
 
-export function parseOfficialTargetsFlexible(value: unknown): readonly OfficialTarget[] {
+export function parseOfficialTargetsFlexible(
+  value: unknown,
+): readonly OfficialTarget[] {
   if (!isRecord(value)) {
-    throw new OfficialTargetIndexError("Official target catalog is not an object");
+    throw new OfficialTargetIndexError(
+      "Official target catalog is not an object",
+    );
   }
   const output = new Map<string, OfficialTarget>();
   const visited = new Set<object>();
@@ -165,14 +175,18 @@ export function parseOfficialTargetsFlexible(value: unknown): readonly OfficialT
     }
 
     for (const [keyValue, child] of Object.entries(node).slice(0, 1_024)) {
-      if (keyValue === "__proto__" || keyValue === "prototype" || keyValue === "constructor") {
+      if (
+        keyValue === "__proto__" ||
+        keyValue === "prototype" ||
+        keyValue === "constructor"
+      ) {
         continue;
       }
       const key = safeKey(keyValue);
       if (key === null || !isRecord(child)) continue;
       const nextVendorKey = depth === 0 ? key : context.vendorKey;
       const nextVendorName =
-        depth === 0 ? safeKey(child.name) ?? key : context.vendorName;
+        depth === 0 ? (safeKey(child.name) ?? key) : context.vendorName;
       walk(
         child,
         {
@@ -185,7 +199,11 @@ export function parseOfficialTargetsFlexible(value: unknown): readonly OfficialT
     }
   };
 
-  walk(value, { path: Object.freeze([]), vendorKey: "unknown", vendorName: "Unknown" }, 0);
+  walk(
+    value,
+    { path: Object.freeze([]), vendorKey: "unknown", vendorName: "Unknown" },
+    0,
+  );
   if (output.size === 0) {
     throw new OfficialTargetIndexError(
       "Official target catalog contains no bounded TX/RX definitions",
