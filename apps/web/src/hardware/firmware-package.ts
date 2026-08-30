@@ -47,7 +47,10 @@ export class FirmwarePackageError extends Error {
   }
 }
 
-function abortBridge(signal: AbortSignal | undefined, timeoutMs: number): {
+function abortBridge(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): {
   readonly signal: AbortSignal;
   readonly dispose: () => void;
 } {
@@ -100,7 +103,9 @@ async function fetchArchive(input: {
     if (error instanceof FirmwarePackageError) throw error;
     throw new FirmwarePackageError(
       "NETWORK",
-      error instanceof Error ? error.message : "Firmware archive request failed",
+      error instanceof Error
+        ? error.message
+        : "Firmware archive request failed",
     );
   } finally {
     bridge.dispose();
@@ -169,7 +174,10 @@ function unzipSelected(input: {
 }
 
 function canonical(value: string): string {
-  return value.trim().toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/gu, "");
+  return value
+    .trim()
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/gu, "");
 }
 
 function targetPathMatch(
@@ -251,7 +259,11 @@ function parseLayout(bytes: Uint8Array): Readonly<Record<string, unknown>> {
   }
 }
 
-function encodeFixedString(value: string, size: number, field: string): Uint8Array {
+function encodeFixedString(
+  value: string,
+  size: number,
+  field: string,
+): Uint8Array {
   const encoded = new TextEncoder().encode(value);
   if (encoded.byteLength >= size) {
     throw new FirmwarePackageError(
@@ -296,7 +308,10 @@ function findEspImageEnd(bytes: Uint8Array): number {
       );
     }
     const size = view.getUint32(offset + 4, true);
-    if (size > MAX_FIRMWARE_ENTRY_BYTES || offset + 8 + size > bytes.byteLength) {
+    if (
+      size > MAX_FIRMWARE_ENTRY_BYTES ||
+      offset + 8 + size > bytes.byteLength
+    ) {
       throw new FirmwarePackageError(
         "INVALID_FIRMWARE",
         "ESP segment exceeds the application boundary",
@@ -823,7 +838,8 @@ export async function prepareOfficialFirmwarePackage(input: {
       domain: input.options.domain,
       bindingConfigured: input.options.bindPhrase.length > 0,
       wifiConfigured:
-        input.options.wifiSsid.length > 0 || input.options.wifiPassword.length > 0,
+        input.options.wifiSsid.length > 0 ||
+        input.options.wifiPassword.length > 0,
     }),
     segments,
     primaryFileName,

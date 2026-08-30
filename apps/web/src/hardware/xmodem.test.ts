@@ -10,8 +10,8 @@ import { crc16Xmodem, flashXmodemFirmware } from "./xmodem";
 class Queue {
   readonly #values: Uint8Array[] = [];
   #resolve:
-    | ((value: Readonly<{ done: boolean; value?: Uint8Array }>) => void)
-    | null = null;
+    ((value: Readonly<{ done: boolean; value?: Uint8Array }>) => void) | null =
+    null;
 
   public push(value: Uint8Array): void {
     if (this.#resolve !== null) {

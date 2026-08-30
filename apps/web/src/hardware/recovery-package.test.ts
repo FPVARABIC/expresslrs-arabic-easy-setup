@@ -37,7 +37,8 @@ async function archive(
   input: { readonly targetId?: string; readonly corruptHash?: boolean } = {},
 ): Promise<Uint8Array> {
   const firmware = new Uint8Array([1, 2, 3, 4]);
-  const hash = input.corruptHash === true ? "0".repeat(64) : await sha256(firmware);
+  const hash =
+    input.corruptHash === true ? "0".repeat(64) : await sha256(firmware);
   return zipSync({
     "manifest.json": strToU8(
       JSON.stringify({

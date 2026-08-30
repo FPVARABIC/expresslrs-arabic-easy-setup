@@ -1,11 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
-import {
-  bytesToHex,
-  expressLrsBindingUid,
-  md5Bytes,
-} from "./bind-phrase";
+import { bytesToHex, expressLrsBindingUid, md5Bytes } from "./bind-phrase";
 
 function nodeMd5(value: string): string {
   return createHash("md5").update(value, "utf8").digest("hex");
@@ -18,7 +14,9 @@ describe("ExpressLRS binding phrase UID", () => {
     ["abc", "900150983cd24fb0d6963f7d28e17f72"],
     ["message digest", "f96b697d7cb7938d525a2f31aaf161d0"],
   ])("matches the RFC MD5 vector for %s", (value, expected) => {
-    expect(bytesToHex(md5Bytes(new TextEncoder().encode(value)))).toBe(expected);
+    expect(bytesToHex(md5Bytes(new TextEncoder().encode(value)))).toBe(
+      expected,
+    );
   });
 
   it.each(["FPV Arabic", "عبارة ربط عربية", "A1-b2_C3"])(

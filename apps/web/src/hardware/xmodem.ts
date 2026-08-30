@@ -32,7 +32,10 @@ export function crc16Xmodem(bytes: Uint8Array): number {
   for (const byte of bytes) {
     crc ^= byte << 8;
     for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc & 0x8000) !== 0 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+      crc =
+        (crc & 0x8000) !== 0
+          ? ((crc << 1) ^ 0x1021) & 0xffff
+          : (crc << 1) & 0xffff;
     }
   }
   return crc;
@@ -100,8 +103,13 @@ export async function flashXmodemFirmware(input: {
   readonly signal?: AbortSignal;
   readonly onProgress?: FirmwareFlashProgressListener;
 }): Promise<Readonly<{ bytesWritten: number; blocks: number }>> {
-  if (input.firmware.byteLength === 0 || input.firmware.byteLength > 4 * 1024 * 1024) {
-    throw new RangeError("XMODEM firmware size is outside the 1-byte to 4-MiB limit");
+  if (
+    input.firmware.byteLength === 0 ||
+    input.firmware.byteLength > 4 * 1024 * 1024
+  ) {
+    throw new RangeError(
+      "XMODEM firmware size is outside the 1-byte to 4-MiB limit",
+    );
   }
   if (input.signal?.aborted === true) {
     throw new XmodemError("ABORTED", "XMODEM transfer was cancelled");
@@ -116,7 +124,10 @@ export async function flashXmodemFirmware(input: {
       flowControl: "none",
     });
   } catch {
-    throw new XmodemError("OPEN_FAILED", "XMODEM serial port could not be opened");
+    throw new XmodemError(
+      "OPEN_FAILED",
+      "XMODEM serial port could not be opened",
+    );
   }
   const readable = input.port.readable;
   const writable = input.port.writable;
@@ -218,7 +229,10 @@ export async function flashXmodemFirmware(input: {
       let accepted = false;
       for (let attempt = 0; attempt < MAX_RETRIES && !accepted; attempt += 1) {
         await writer.write(frame);
-        const answer = await inbox.next({ timeoutMs: 3_000, signal: input.signal });
+        const answer = await inbox.next({
+          timeoutMs: 3_000,
+          signal: input.signal,
+        });
         if (answer === ACK) {
           accepted = true;
           break;
@@ -242,7 +256,10 @@ export async function flashXmodemFirmware(input: {
       }
       input.onProgress?.({
         stage: "WRITE",
-        writtenBytes: Math.min((blockIndex + 1) * BLOCK_BYTES, input.firmware.byteLength),
+        writtenBytes: Math.min(
+          (blockIndex + 1) * BLOCK_BYTES,
+          input.firmware.byteLength,
+        ),
         totalBytes: input.firmware.byteLength,
         detail: `Transferred XMODEM block ${blockIndex + 1}/${blockCount}`,
       });
@@ -251,7 +268,10 @@ export async function flashXmodemFirmware(input: {
     let eotAccepted = false;
     for (let attempt = 0; attempt < MAX_RETRIES && !eotAccepted; attempt += 1) {
       await writer.write(new Uint8Array([EOT]));
-      const answer = await inbox.next({ timeoutMs: 3_000, signal: input.signal });
+      const answer = await inbox.next({
+        timeoutMs: 3_000,
+        signal: input.signal,
+      });
       if (answer === ACK) eotAccepted = true;
       if (answer === CAN) {
         throw new XmodemError(

@@ -66,16 +66,21 @@ export async function requestHardwarePort(
         "Serial-port permission was denied",
       );
     }
-    throw new PassthroughError("OPEN_FAILED", "Serial port could not be selected");
+    throw new PassthroughError(
+      "OPEN_FAILED",
+      "Serial port could not be selected",
+    );
   }
 }
 
 class CliSerialTransport {
   readonly #port: HardwareSerialPort;
-  #reader: ReturnType<NonNullable<HardwareSerialPort["readable"]>["getReader"]> | null =
-    null;
-  #writer: ReturnType<NonNullable<HardwareSerialPort["writable"]>["getWriter"]> | null =
-    null;
+  #reader: ReturnType<
+    NonNullable<HardwareSerialPort["readable"]>["getReader"]
+  > | null = null;
+  #writer: ReturnType<
+    NonNullable<HardwareSerialPort["writable"]>["getWriter"]
+  > | null = null;
   #buffer = "";
   #closed = false;
 
@@ -94,7 +99,10 @@ class CliSerialTransport {
         flowControl: "none",
       });
     } catch {
-      throw new PassthroughError("OPEN_FAILED", "Serial console could not be opened");
+      throw new PassthroughError(
+        "OPEN_FAILED",
+        "Serial console could not be opened",
+      );
     }
     if (this.#port.readable == null || this.#port.writable == null) {
       try {
@@ -130,7 +138,10 @@ class CliSerialTransport {
     const decoder = new TextDecoder("utf-8", { fatal: false });
     while (Date.now() < deadline) {
       if (input.signal?.aborted === true) {
-        throw new PassthroughError("ABORTED", "Passthrough setup was cancelled");
+        throw new PassthroughError(
+          "ABORTED",
+          "Passthrough setup was cancelled",
+        );
       }
       matcher.lastIndex = 0;
       if (matcher.test(this.#buffer)) return this.#buffer;
@@ -259,10 +270,18 @@ async function initializeBetaflight(
   await transport.command("#\r\n", /#\s*$/mu, signal);
   let identifier = uartIdentifier;
   if (identifier === null) {
-    const serialOutput = await transport.command("serial\r\n", /#\s*$/mu, signal);
+    const serialOutput = await transport.command(
+      "serial\r\n",
+      /#\s*$/mu,
+      signal,
+    );
     identifier = parseReceiverUart(serialOutput);
   }
-  if (identifier === null || !Number.isSafeInteger(identifier) || identifier < 0) {
+  if (
+    identifier === null ||
+    !Number.isSafeInteger(identifier) ||
+    identifier < 0
+  ) {
     throw new PassthroughError(
       "UART_NOT_FOUND",
       "Flight-controller CLI did not expose one RX_SERIAL UART",

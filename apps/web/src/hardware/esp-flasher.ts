@@ -53,11 +53,7 @@ interface EspToolModule {
 export class EspFlashError extends Error {
   public constructor(
     public readonly code:
-      | "PLATFORM_MISMATCH"
-      | "BOOTLOADER"
-      | "WRITE"
-      | "RESET"
-      | "ABORTED",
+      "PLATFORM_MISMATCH" | "BOOTLOADER" | "WRITE" | "RESET" | "ABORTED",
     message: string,
   ) {
     super(message);

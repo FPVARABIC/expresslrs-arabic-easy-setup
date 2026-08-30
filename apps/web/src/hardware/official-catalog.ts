@@ -50,7 +50,10 @@ function safeRecord(value: unknown): Readonly<Record<string, unknown>> | null {
   return isRecord(value) ? Object.freeze({ ...value }) : null;
 }
 
-function abortBridge(signal: AbortSignal | undefined, timeoutMs: number): {
+function abortBridge(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): {
   readonly signal: AbortSignal;
   readonly dispose: () => void;
 } {
@@ -80,7 +83,8 @@ export async function readBoundedResponse(
     );
   }
   const declared = Number(response.headers.get("content-length"));
-  const total = Number.isSafeInteger(declared) && declared >= 0 ? declared : null;
+  const total =
+    Number.isSafeInteger(declared) && declared >= 0 ? declared : null;
   if (total !== null && total > maximumBytes) {
     throw new OfficialCatalogError(
       "TOO_LARGE",
@@ -91,7 +95,10 @@ export async function readBoundedResponse(
   if (response.body === null) {
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > maximumBytes) {
-      throw new OfficialCatalogError("TOO_LARGE", "Official response is too large");
+      throw new OfficialCatalogError(
+        "TOO_LARGE",
+        "Official response is too large",
+      );
     }
     onProgress?.(bytes.byteLength, total);
     return bytes;
@@ -155,7 +162,9 @@ async function fetchBytes(input: {
     if (error instanceof OfficialCatalogError) throw error;
     throw new OfficialCatalogError(
       "NETWORK",
-      error instanceof Error ? error.message : "Official catalog request failed",
+      error instanceof Error
+        ? error.message
+        : "Official catalog request failed",
     );
   } finally {
     bridge.dispose();
@@ -189,9 +198,14 @@ function compareReleaseLabels(left: string, right: string): number {
   return right.localeCompare(left, "en");
 }
 
-export function parseOfficialReleaseIndex(value: unknown): readonly OfficialRelease[] {
+export function parseOfficialReleaseIndex(
+  value: unknown,
+): readonly OfficialRelease[] {
   if (!isRecord(value)) {
-    throw new OfficialCatalogError("INVALID_SCHEMA", "Release index is not an object");
+    throw new OfficialCatalogError(
+      "INVALID_SCHEMA",
+      "Release index is not an object",
+    );
   }
   const releases: OfficialRelease[] = [];
   for (const [property, channel] of [
@@ -253,7 +267,8 @@ function parseTargetConfig(value: unknown): OfficialTargetConfig | null {
   const productName = safeKey(value.product_name);
   const platform = safeKey(value.platform);
   const firmware = safeKey(value.firmware);
-  if (productName === null || platform === null || firmware === null) return null;
+  if (productName === null || platform === null || firmware === null)
+    return null;
   const methods = Array.isArray(value.upload_methods)
     ? value.upload_methods
         .map(normalizeUploadMethod)
@@ -276,9 +291,14 @@ function parseTargetConfig(value: unknown): OfficialTargetConfig | null {
   });
 }
 
-export function parseOfficialTargets(value: unknown): readonly OfficialTarget[] {
+export function parseOfficialTargets(
+  value: unknown,
+): readonly OfficialTarget[] {
   if (!isRecord(value)) {
-    throw new OfficialCatalogError("INVALID_SCHEMA", "Target catalog is not an object");
+    throw new OfficialCatalogError(
+      "INVALID_SCHEMA",
+      "Target catalog is not an object",
+    );
   }
   const targets: OfficialTarget[] = [];
   for (const [vendorKeyValue, vendorValue] of Object.entries(value)) {
@@ -366,15 +386,17 @@ function targetJsonFromHardwareArchive(archive: Uint8Array): Uint8Array {
   return bytes;
 }
 
-export async function loadOfficialExpressLrsCatalog(input: {
-  readonly signal?: AbortSignal;
-  readonly fetchImplementation?: typeof fetch;
-  readonly onProgress?: (
-    stage: "INDEX" | "HARDWARE",
-    received: number,
-    total: number | null,
-  ) => void;
-} = {}): Promise<OfficialCatalog> {
+export async function loadOfficialExpressLrsCatalog(
+  input: {
+    readonly signal?: AbortSignal;
+    readonly fetchImplementation?: typeof fetch;
+    readonly onProgress?: (
+      stage: "INDEX" | "HARDWARE",
+      received: number,
+      total: number | null,
+    ) => void;
+  } = {},
+): Promise<OfficialCatalog> {
   const indexBytes = await fetchBytes({
     url: `${EXPRESSLRS_ARTIFACT_BASE}/index.json`,
     maximumBytes: MAX_INDEX_BYTES,

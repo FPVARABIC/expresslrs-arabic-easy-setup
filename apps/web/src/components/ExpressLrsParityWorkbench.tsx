@@ -57,15 +57,16 @@ const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
   receiverAsTransmitter: false,
 });
 
-const METHOD_LABELS: Readonly<Record<ExpressLrsFlashMethod, string>> = Object.freeze({
-  uart: "USB مباشر / UART",
-  betaflight: "عبر متحكم الطيران",
-  edgetx: "عبر جهاز التحكم",
-  passthru: "Passthrough جاهز",
-  wifi: "Wi-Fi",
-  stlink: "ST-Link",
-  download: "تنزيل فقط",
-});
+const METHOD_LABELS: Readonly<Record<ExpressLrsFlashMethod, string>> =
+  Object.freeze({
+    uart: "USB مباشر / UART",
+    betaflight: "عبر متحكم الطيران",
+    edgetx: "عبر جهاز التحكم",
+    passthru: "Passthrough جاهز",
+    wifi: "Wi-Fi",
+    stlink: "ST-Link",
+    download: "تنزيل فقط",
+  });
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -80,7 +81,11 @@ function normalized(value: string): string {
 
 function platformFamily(target: OfficialTarget): "esp" | "stm32" | "other" {
   const platform = target.config.platform.toLocaleLowerCase("en-US");
-  if (platform.startsWith("esp32") || platform.includes("8285") || platform.includes("8266")) {
+  if (
+    platform.startsWith("esp32") ||
+    platform.includes("8285") ||
+    platform.includes("8266")
+  ) {
     return "esp";
   }
   if (platform.startsWith("stm32")) return "stm32";
@@ -89,13 +94,19 @@ function platformFamily(target: OfficialTarget): "esp" | "stm32" | "other" {
 
 function regionsForRadio(radioKey: string): readonly string[] {
   if (radioKey.includes("2400")) return Object.freeze(["FCC", "EU_CE_2400"]);
-  if (radioKey.includes("900") || radioKey.includes("868") || radioKey.includes("915")) {
+  if (
+    radioKey.includes("900") ||
+    radioKey.includes("868") ||
+    radioKey.includes("915")
+  ) {
     return Object.freeze(["FCC", "AU_915", "EU_868", "IN_866"]);
   }
   return Object.freeze(["FCC"]);
 }
 
-function commandForBootloader(parameters: readonly CrsfParameter[]): string | null {
+function commandForBootloader(
+  parameters: readonly CrsfParameter[],
+): string | null {
   const command = parameters.find(
     (parameter) =>
       parameter.kind === "command" &&
@@ -117,7 +128,8 @@ function formatBytes(value: number): string {
 }
 
 function safeMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "توقفت العملية بسبب خطأ غير معروف";
+  const message =
+    error instanceof Error ? error.message : "توقفت العملية بسبب خطأ غير معروف";
   return message
     .replace(/[\u0000-\u001f\u007f]/gu, " ")
     .replace(/\s+/gu, " ")
@@ -136,33 +148,44 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 function fileBytes(file: File, maximumBytes: number): Promise<Uint8Array> {
   if (file.size <= 0 || file.size > maximumBytes) {
-    throw new RangeError(`الملف يجب أن يكون بين 1 و${formatBytes(maximumBytes)}`);
+    throw new RangeError(
+      `الملف يجب أن يكون بين 1 و${formatBytes(maximumBytes)}`,
+    );
   }
   return file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
 }
 
 export function ExpressLrsParityWorkbench() {
   const [catalog, setCatalog] = useState<OfficialCatalog | null>(null);
-  const [catalogState, setCatalogState] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [catalogState, setCatalogState] = useState<
+    "idle" | "loading" | "ready" | "failed"
+  >("idle");
   const [role, setRole] = useState<ExpressLrsDeviceRole>("tx");
   const [releaseRevision, setReleaseRevision] = useState("");
   const [vendorKey, setVendorKey] = useState("");
   const [radioKey, setRadioKey] = useState("");
   const [targetId, setTargetId] = useState("");
   const [method, setMethod] = useState<ExpressLrsFlashMethod>("uart");
-  const [options, setOptions] = useState<ExpressLrsFirmwareOptions>(DEFAULT_OPTIONS);
+  const [options, setOptions] =
+    useState<ExpressLrsFirmwareOptions>(DEFAULT_OPTIONS);
   const [status, setStatus] = useState("حمّل الكتالوج الرسمي للبدء.");
   const [busy, setBusy] = useState(false);
-  const [sessionIdentity, setSessionIdentity] = useState<ExpressLrsIdentity | null>(null);
+  const [sessionIdentity, setSessionIdentity] =
+    useState<ExpressLrsIdentity | null>(null);
   const [parameters, setParameters] = useState<readonly CrsfParameter[]>([]);
   const [backup, setBackup] = useState<ExpressLrsSettingsBackup | null>(null);
-  const [targetMatch, setTargetMatch] = useState<TargetMatchResult | null>(null);
+  const [targetMatch, setTargetMatch] = useState<TargetMatchResult | null>(
+    null,
+  );
   const [selectedSettingId, setSelectedSettingId] = useState("");
   const [settingDraft, setSettingDraft] = useState("");
-  const [prepared, setPrepared] = useState<PreparedFirmwarePackage | null>(null);
+  const [prepared, setPrepared] = useState<PreparedFirmwarePackage | null>(
+    null,
+  );
   const [recoveryDownloaded, setRecoveryDownloaded] = useState(false);
   const [manualTargetConfirmation, setManualTargetConfirmation] = useState("");
-  const [flashProgress, setFlashProgress] = useState<FirmwareFlashProgress | null>(null);
+  const [flashProgress, setFlashProgress] =
+    useState<FirmwareFlashProgress | null>(null);
   const [checkpoint, setCheckpoint] = useState<RecoveryCheckpoint | null>(null);
   const sessionRef = useRef<ExpressLrsHardwareSession | null>(null);
   const catalogAbort = useRef<AbortController | null>(null);
@@ -185,13 +208,25 @@ export function ExpressLrsParityWorkbench() {
   }, []);
 
   const releases = catalog?.releases ?? [];
-  const roleTargets = (catalog?.targets ?? []).filter((target) => target.role === role);
-  const vendors = [...new Map(roleTargets.map((target) => [target.vendorKey, target.vendorName])).entries()];
-  const vendorTargets = roleTargets.filter((target) => target.vendorKey === vendorKey);
+  const roleTargets = (catalog?.targets ?? []).filter(
+    (target) => target.role === role,
+  );
+  const vendors = [
+    ...new Map(
+      roleTargets.map((target) => [target.vendorKey, target.vendorName]),
+    ).entries(),
+  ];
+  const vendorTargets = roleTargets.filter(
+    (target) => target.vendorKey === vendorKey,
+  );
   const radios = [...new Set(vendorTargets.map((target) => target.radioKey))];
-  const visibleTargets = vendorTargets.filter((target) => target.radioKey === radioKey);
-  const selectedRelease = releases.find((release) => release.revision === releaseRevision) ?? null;
-  const selectedTarget = roleTargets.find((target) => target.id === targetId) ?? null;
+  const visibleTargets = vendorTargets.filter(
+    (target) => target.radioKey === radioKey,
+  );
+  const selectedRelease =
+    releases.find((release) => release.revision === releaseRevision) ?? null;
+  const selectedTarget =
+    roleTargets.find((target) => target.id === targetId) ?? null;
   const regionChoices = regionsForRadio(radioKey);
   const methods = selectedTarget?.config.uploadMethods ?? [];
   const writableParameters = parameters.filter(
@@ -208,20 +243,27 @@ export function ExpressLrsParityWorkbench() {
     targetMatch.selected?.id === selectedTarget.id;
   const manualTargetConfirmed =
     selectedTarget !== null &&
-    normalized(manualTargetConfirmation) === normalized(selectedTarget.targetKey);
+    normalized(manualTargetConfirmation) ===
+      normalized(selectedTarget.targetKey);
 
   function resetTargetChain(nextRole = role) {
-    const targets = (catalog?.targets ?? []).filter((target) => target.role === nextRole);
+    const targets = (catalog?.targets ?? []).filter(
+      (target) => target.role === nextRole,
+    );
     const nextVendor = targets[0]?.vendorKey ?? "";
-    const nextRadio = targets.find((target) => target.vendorKey === nextVendor)?.radioKey ?? "";
+    const nextRadio =
+      targets.find((target) => target.vendorKey === nextVendor)?.radioKey ?? "";
     const nextTarget = targets.find(
-      (target) => target.vendorKey === nextVendor && target.radioKey === nextRadio,
+      (target) =>
+        target.vendorKey === nextVendor && target.radioKey === nextRadio,
     );
     setVendorKey(nextVendor);
     setRadioKey(nextRadio);
     setTargetId(nextTarget?.id ?? "");
     const nextMethods = nextTarget?.config.uploadMethods ?? [];
-    setMethod(nextMethods.includes("uart") ? "uart" : (nextMethods[0] ?? "download"));
+    setMethod(
+      nextMethods.includes("uart") ? "uart" : (nextMethods[0] ?? "download"),
+    );
     setOptions((current) => ({
       ...current,
       region: regionsForRadio(nextRadio)[0] ?? "FCC",
@@ -251,14 +293,18 @@ export function ExpressLrsParityWorkbench() {
       setCatalog(loaded);
       setCatalogState("ready");
       setReleaseRevision(loaded.releases[0]?.revision ?? "");
-      const firstRoleTarget = loaded.targets.find((target) => target.role === role);
+      const firstRoleTarget = loaded.targets.find(
+        (target) => target.role === role,
+      );
       const nextVendor = firstRoleTarget?.vendorKey ?? "";
       const nextRadio = firstRoleTarget?.radioKey ?? "";
       setVendorKey(nextVendor);
       setRadioKey(nextRadio);
       setTargetId(firstRoleTarget?.id ?? "");
       const nextMethods = firstRoleTarget?.config.uploadMethods ?? [];
-      setMethod(nextMethods.includes("uart") ? "uart" : (nextMethods[0] ?? "download"));
+      setMethod(
+        nextMethods.includes("uart") ? "uart" : (nextMethods[0] ?? "download"),
+      );
       setOptions((current) => ({
         ...current,
         region: regionsForRadio(nextRadio)[0] ?? "FCC",
@@ -296,7 +342,9 @@ export function ExpressLrsParityWorkbench() {
     const controller = new AbortController();
     operationAbort.current = controller;
     setBusy(true);
-    setStatus("اختر منفذ وحدة ExpressLRS المباشر. جارٍ إرسال CRSF Device Ping…");
+    setStatus(
+      "اختر منفذ وحدة ExpressLRS المباشر. جارٍ إرسال CRSF Device Ping…",
+    );
     try {
       const outcome = await ExpressLrsHardwareSession.connect({
         role,
@@ -321,19 +369,27 @@ export function ExpressLrsParityWorkbench() {
           !parameter.hidden &&
           (parameter.kind === "number" || parameter.kind === "selection"),
       );
-      setSelectedSettingId(firstWritable === undefined ? "" : String(firstWritable.id));
+      setSelectedSettingId(
+        firstWritable === undefined ? "" : String(firstWritable.id),
+      );
       setSettingDraft(settingValue(firstWritable));
       if (match.confidence === "EXACT" && match.selected !== null) {
         setTargetId(match.selected.id);
         setVendorKey(match.selected.vendorKey);
         setRadioKey(match.selected.radioKey);
         const nextMethods = match.selected.config.uploadMethods;
-        setMethod(nextMethods.includes("uart") ? "uart" : (nextMethods[0] ?? "download"));
+        setMethod(
+          nextMethods.includes("uart")
+            ? "uart"
+            : (nextMethods[0] ?? "download"),
+        );
         setOptions((current) => ({
           ...current,
           region: regionsForRadio(match.selected?.radioKey ?? "")[0] ?? "FCC",
         }));
-        setStatus(`تم تعريف ${outcome.identity.productName} ومطابقته بـTarget رسمي واحد.`);
+        setStatus(
+          `تم تعريف ${outcome.identity.productName} ومطابقته بـTarget رسمي واحد.`,
+        );
       } else {
         setStatus(
           `تم إثبات CRSF وهوية الجهاز، لكن مطابقة Target هي ${match.confidence}. تبقى الكتابة مغلقة.`,
@@ -456,7 +512,9 @@ export function ExpressLrsParityWorkbench() {
       "application/zip",
     );
     setRecoveryDownloaded(true);
-    setStatus("تم تنزيل حزمة الاستعادة. احتفظ بها حتى اكتمال إعادة الاتصال والتحقق.");
+    setStatus(
+      "تم تنزيل حزمة الاستعادة. احتفظ بها حتى اكتمال إعادة الاتصال والتحقق.",
+    );
   }
 
   async function updateCheckpoint(
@@ -472,7 +530,10 @@ export function ExpressLrsParityWorkbench() {
       productName: packageValue.target.config.productName,
       packageSha256,
       stage,
-      createdAt: previous?.targetId === packageValue.target.id ? previous.createdAt : nowIso(),
+      createdAt:
+        previous?.targetId === packageValue.target.id
+          ? previous.createdAt
+          : nowIso(),
       updatedAt: nowIso(),
       safeError,
     });
@@ -484,12 +545,24 @@ export function ExpressLrsParityWorkbench() {
   async function reconnectAndVerify(target: OfficialTarget): Promise<void> {
     setFlashProgress({
       stage: "RECONNECT",
-      writtenBytes: prepared?.segments.reduce((sum, segment) => sum + segment.bytes.byteLength, 0) ?? 0,
-      totalBytes: prepared?.segments.reduce((sum, segment) => sum + segment.bytes.byteLength, 0) ?? 0,
+      writtenBytes:
+        prepared?.segments.reduce(
+          (sum, segment) => sum + segment.bytes.byteLength,
+          0,
+        ) ?? 0,
+      totalBytes:
+        prepared?.segments.reduce(
+          (sum, segment) => sum + segment.bytes.byteLength,
+          0,
+        ) ?? 0,
       detail: "أعد اختيار منفذ الجهاز بعد إعادة التشغيل",
     });
-    setStatus("أعد اختيار منفذ الجهاز بعد إعادة التشغيل لإثبات الهوية والإصدار.");
-    const outcome = await ExpressLrsHardwareSession.connect({ role: target.role });
+    setStatus(
+      "أعد اختيار منفذ الجهاز بعد إعادة التشغيل لإثبات الهوية والإصدار.",
+    );
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: target.role,
+    });
     if (outcome.status !== "CONNECTED") {
       throw new Error(`تعذرت إعادة قراءة الجهاز: ${outcome.message}`);
     }
@@ -499,7 +572,9 @@ export function ExpressLrsParityWorkbench() {
     });
     if (match.confidence !== "EXACT" || match.selected?.id !== target.id) {
       await outcome.session.close();
-      throw new Error("عاد جهاز بعد التفليش، لكن هويته لا تطابق Target المتوقع");
+      throw new Error(
+        "عاد جهاز بعد التفليش، لكن هويته لا تطابق Target المتوقع",
+      );
     }
     sessionRef.current = outcome.session;
     setSessionIdentity(outcome.identity);
@@ -510,8 +585,16 @@ export function ExpressLrsParityWorkbench() {
     setCheckpoint(null);
     setFlashProgress({
       stage: "COMPLETE",
-      writtenBytes: prepared?.segments.reduce((sum, segment) => sum + segment.bytes.byteLength, 0) ?? 0,
-      totalBytes: prepared?.segments.reduce((sum, segment) => sum + segment.bytes.byteLength, 0) ?? 0,
+      writtenBytes:
+        prepared?.segments.reduce(
+          (sum, segment) => sum + segment.bytes.byteLength,
+          0,
+        ) ?? 0,
+      totalBytes:
+        prepared?.segments.reduce(
+          (sum, segment) => sum + segment.bytes.byteLength,
+          0,
+        ) ?? 0,
       detail: "عاد Target المتوقع وتمت قراءة CRSF مجددًا",
     });
   }
@@ -525,11 +608,15 @@ export function ExpressLrsParityWorkbench() {
     if (method === "wifi") {
       downloadFirmware();
       window.open(
-        selectedTarget.role === "tx" ? "http://elrs_tx.local/" : "http://elrs_rx.local/",
+        selectedTarget.role === "tx"
+          ? "http://elrs_tx.local/"
+          : "http://elrs_rx.local/",
         "_blank",
         "noopener,noreferrer",
       );
-      setStatus("تم تجهيز ملف Wi-Fi وفتح صفحة الجهاز المحلية. اختر الملف المنزّل داخلها.");
+      setStatus(
+        "تم تجهيز ملف Wi-Fi وفتح صفحة الجهاز المحلية. اختر الملف المنزّل داخلها.",
+      );
       return;
     }
     if (method === "download") {
@@ -537,16 +624,22 @@ export function ExpressLrsParityWorkbench() {
       return;
     }
     if (method === "stlink") {
-      setStatus("مسار ST-Link الداخلي لم يُفتح بعد؛ لا توجد كتابة صورية. استخدم التنزيل مع أداة ST-Link المعتمدة حاليًا.");
+      setStatus(
+        "مسار ST-Link الداخلي لم يُفتح بعد؛ لا توجد كتابة صورية. استخدم التنزيل مع أداة ST-Link المعتمدة حاليًا.",
+      );
       return;
     }
     const direct = method === "uart";
     if (direct && (!exactHardwareTarget || sessionRef.current === null)) {
-      setStatus("USB المباشر يتطلب جلسة CRSF وTarget رسميًا متطابقًا قبل الكتابة.");
+      setStatus(
+        "USB المباشر يتطلب جلسة CRSF وTarget رسميًا متطابقًا قبل الكتابة.",
+      );
       return;
     }
     if (!direct && !manualTargetConfirmed) {
-      setStatus("اكتب مفتاح Target الظاهر حرفيًا لتأكيد مسار Passthrough الذي لا يملك هوية CRSF مستقلة.");
+      setStatus(
+        "اكتب مفتاح Target الظاهر حرفيًا لتأكيد مسار Passthrough الذي لا يملك هوية CRSF مستقلة.",
+      );
       return;
     }
 
@@ -557,7 +650,8 @@ export function ExpressLrsParityWorkbench() {
     try {
       await updateCheckpoint(prepared, "PACKAGE_SAVED");
       const family = platformFamily(selectedTarget);
-      if (family === "other") throw new Error("منصة Target غير مدعومة داخل التطبيق");
+      if (family === "other")
+        throw new Error("منصة Target غير مدعومة داخل التطبيق");
       let port;
       let resetMode: "default_reset" | "no_reset" = "default_reset";
       if (direct) {
@@ -572,12 +666,21 @@ export function ExpressLrsParityWorkbench() {
             normalized(selectedTarget.config.firmware),
             normalized(selectedTarget.config.productName),
           ];
-          if (!allowed.some((value) => value.length >= 3 && (observed.includes(value) || value.includes(observed)))) {
-            throw new Error(`Bootloader أبلغ Target مختلفًا: ${bootloader.target}`);
+          if (
+            !allowed.some(
+              (value) =>
+                value.length >= 3 &&
+                (observed.includes(value) || value.includes(observed)),
+            )
+          ) {
+            throw new Error(
+              `Bootloader أبلغ Target مختلفًا: ${bootloader.target}`,
+            );
           }
         } else {
           const command = commandForBootloader(parameters);
-          if (command !== null) await session.executeCommand(command, controller.signal);
+          if (command !== null)
+            await session.executeCommand(command, controller.signal);
         }
         port = await session.detachPortForBootloader();
         sessionRef.current = null;
@@ -608,8 +711,11 @@ export function ExpressLrsParityWorkbench() {
           },
         });
       } else {
-        const firmware = prepared.segments.find((segment) => segment.name === "firmware.bin");
-        if (firmware === undefined) throw new Error("حزمة STM32 لا تحتوي firmware.bin");
+        const firmware = prepared.segments.find(
+          (segment) => segment.name === "firmware.bin",
+        );
+        if (firmware === undefined)
+          throw new Error("حزمة STM32 لا تحتوي firmware.bin");
         await flashXmodemFirmware({
           port,
           firmware: firmware.bytes,
@@ -662,8 +768,11 @@ export function ExpressLrsParityWorkbench() {
           onProgress: setFlashProgress,
         });
       } else if (family === "stm32") {
-        const firmware = validated.segments.find((segment) => segment.name === "firmware.bin");
-        if (firmware === undefined) throw new Error("حزمة الاستعادة لا تحتوي firmware.bin");
+        const firmware = validated.segments.find(
+          (segment) => segment.name === "firmware.bin",
+        );
+        if (firmware === undefined)
+          throw new Error("حزمة الاستعادة لا تحتوي firmware.bin");
         await flashXmodemFirmware({
           port,
           firmware: firmware.bytes,
@@ -696,9 +805,16 @@ export function ExpressLrsParityWorkbench() {
         <div>
           <span className="section-kicker">ELRS السهل · Hardware Lab</span>
           <h1>إعداد وتحديث ExpressLRS</h1>
-          <p>كتالوج رسمي، تعريف CRSF، إعدادات حقيقية، حزمة استعادة، ونجاح مشروط بعودة الجهاز المتوقع.</p>
+          <p>
+            كتالوج رسمي، تعريف CRSF، إعدادات حقيقية، حزمة استعادة، ونجاح مشروط
+            بعودة الجهاز المتوقع.
+          </p>
         </div>
-        <span className={sessionIdentity === null ? "parity-state" : "parity-state is-ready"}>
+        <span
+          className={
+            sessionIdentity === null ? "parity-state" : "parity-state is-ready"
+          }
+        >
           {sessionIdentity === null ? "لا توجد جلسة جهاز" : "CRSF متصل"}
         </span>
       </header>
@@ -716,9 +832,16 @@ export function ExpressLrsParityWorkbench() {
       {checkpoint === null ? null : (
         <section className="parity-warning" aria-labelledby="recovery-heading">
           <div>
-            <strong id="recovery-heading">استعادة معلّقة · {checkpoint.stage}</strong>
-            <p>{checkpoint.productName} — احتفظ بالجهاز موصولًا واختر حزمة الاستعادة المطابقة.</p>
-            {checkpoint.safeError === null ? null : <p>{checkpoint.safeError}</p>}
+            <strong id="recovery-heading">
+              استعادة معلّقة · {checkpoint.stage}
+            </strong>
+            <p>
+              {checkpoint.productName} — احتفظ بالجهاز موصولًا واختر حزمة
+              الاستعادة المطابقة.
+            </p>
+            {checkpoint.safeError === null ? null : (
+              <p>{checkpoint.safeError}</p>
+            )}
           </div>
           <label className="file-button">
             اختيار حزمة الاستعادة
@@ -742,11 +865,21 @@ export function ExpressLrsParityWorkbench() {
             <span>1</span>
             <div>
               <h2 id="catalog-heading">الإصدار وTarget</h2>
-              <p>البيانات تأتي من Artifactory الرسمي ولا تُقبل قبل فحص البنية والحدود.</p>
+              <p>
+                البيانات تأتي من Artifactory الرسمي ولا تُقبل قبل فحص البنية
+                والحدود.
+              </p>
             </div>
           </div>
-          <button type="button" className="primary-button" disabled={busy} onClick={() => void loadCatalog()}>
-            {catalogState === "loading" ? "جارٍ التحميل…" : "تحميل الكتالوج الرسمي"}
+          <button
+            type="button"
+            className="primary-button"
+            disabled={busy}
+            onClick={() => void loadCatalog()}
+          >
+            {catalogState === "loading"
+              ? "جارٍ التحميل…"
+              : "تحميل الكتالوج الرسمي"}
           </button>
         </div>
 
@@ -771,116 +904,325 @@ export function ExpressLrsParityWorkbench() {
         <div className="form-grid">
           <label>
             <span>الإصدار</span>
-            <select value={releaseRevision} disabled={catalog === null || busy} onChange={(event) => { setReleaseRevision(event.currentTarget.value); setPrepared(null); }}>
+            <select
+              value={releaseRevision}
+              disabled={catalog === null || busy}
+              onChange={(event) => {
+                setReleaseRevision(event.currentTarget.value);
+                setPrepared(null);
+              }}
+            >
               {releases.map((release) => (
-                <option key={`${release.channel}:${release.revision}`} value={release.revision}>
-                  {release.label}{release.channel === "branch" ? " · تجريبي" : ""}
+                <option
+                  key={`${release.channel}:${release.revision}`}
+                  value={release.revision}
+                >
+                  {release.label}
+                  {release.channel === "branch" ? " · تجريبي" : ""}
                 </option>
               ))}
             </select>
           </label>
           <label>
             <span>الشركة</span>
-            <select value={vendorKey} disabled={catalog === null || busy} onChange={(event) => {
-              const nextVendor = event.currentTarget.value;
-              const nextRadio = roleTargets.find((target) => target.vendorKey === nextVendor)?.radioKey ?? "";
-              const nextTarget = roleTargets.find((target) => target.vendorKey === nextVendor && target.radioKey === nextRadio);
-              setVendorKey(nextVendor); setRadioKey(nextRadio); setTargetId(nextTarget?.id ?? ""); setPrepared(null);
-            }}>
-              {vendors.map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+            <select
+              value={vendorKey}
+              disabled={catalog === null || busy}
+              onChange={(event) => {
+                const nextVendor = event.currentTarget.value;
+                const nextRadio =
+                  roleTargets.find((target) => target.vendorKey === nextVendor)
+                    ?.radioKey ?? "";
+                const nextTarget = roleTargets.find(
+                  (target) =>
+                    target.vendorKey === nextVendor &&
+                    target.radioKey === nextRadio,
+                );
+                setVendorKey(nextVendor);
+                setRadioKey(nextRadio);
+                setTargetId(nextTarget?.id ?? "");
+                setPrepared(null);
+              }}
+            >
+              {vendors.map(([key, name]) => (
+                <option key={key} value={key}>
+                  {name}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             <span>النطاق / العائلة</span>
-            <select value={radioKey} disabled={catalog === null || busy} onChange={(event) => {
-              const nextRadio = event.currentTarget.value;
-              const nextTarget = vendorTargets.find((target) => target.radioKey === nextRadio);
-              setRadioKey(nextRadio); setTargetId(nextTarget?.id ?? ""); updateOption("region", regionsForRadio(nextRadio)[0] ?? "FCC");
-            }}>
-              {radios.map((radio) => <option key={radio} value={radio}>{radio}</option>)}
+            <select
+              value={radioKey}
+              disabled={catalog === null || busy}
+              onChange={(event) => {
+                const nextRadio = event.currentTarget.value;
+                const nextTarget = vendorTargets.find(
+                  (target) => target.radioKey === nextRadio,
+                );
+                setRadioKey(nextRadio);
+                setTargetId(nextTarget?.id ?? "");
+                updateOption("region", regionsForRadio(nextRadio)[0] ?? "FCC");
+              }}
+            >
+              {radios.map((radio) => (
+                <option key={radio} value={radio}>
+                  {radio}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             <span>Target</span>
-            <select value={targetId} disabled={catalog === null || busy} onChange={(event) => {
-              const nextId = event.currentTarget.value;
-              const nextTarget = roleTargets.find((target) => target.id === nextId);
-              setTargetId(nextId); setPrepared(null); setRecoveryDownloaded(false);
-              if (nextTarget !== undefined) {
-                const nextMethods = nextTarget.config.uploadMethods;
-                setMethod(nextMethods.includes("uart") ? "uart" : (nextMethods[0] ?? "download"));
-              }
-            }}>
-              {visibleTargets.map((target) => <option key={target.id} value={target.id}>{target.config.productName}</option>)}
+            <select
+              value={targetId}
+              disabled={catalog === null || busy}
+              onChange={(event) => {
+                const nextId = event.currentTarget.value;
+                const nextTarget = roleTargets.find(
+                  (target) => target.id === nextId,
+                );
+                setTargetId(nextId);
+                setPrepared(null);
+                setRecoveryDownloaded(false);
+                if (nextTarget !== undefined) {
+                  const nextMethods = nextTarget.config.uploadMethods;
+                  setMethod(
+                    nextMethods.includes("uart")
+                      ? "uart"
+                      : (nextMethods[0] ?? "download"),
+                  );
+                }
+              }}
+            >
+              {visibleTargets.map((target) => (
+                <option key={target.id} value={target.id}>
+                  {target.config.productName}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             <span>المنطقة التنظيمية</span>
-            <select value={options.region} disabled={selectedTarget === null || busy} onChange={(event) => updateOption("region", event.currentTarget.value)}>
-              {regionChoices.map((region) => <option key={region} value={region}>{region}</option>)}
+            <select
+              value={options.region}
+              disabled={selectedTarget === null || busy}
+              onChange={(event) =>
+                updateOption("region", event.currentTarget.value)
+              }
+            >
+              {regionChoices.map((region) => (
+                <option key={region} value={region}>
+                  {region}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             <span>طريقة التحديث</span>
-            <select value={method} disabled={selectedTarget === null || busy} onChange={(event) => setMethod(event.currentTarget.value as ExpressLrsFlashMethod)}>
-              {methods.map((item) => <option key={item} value={item}>{METHOD_LABELS[item]}</option>)}
+            <select
+              value={method}
+              disabled={selectedTarget === null || busy}
+              onChange={(event) =>
+                setMethod(event.currentTarget.value as ExpressLrsFlashMethod)
+              }
+            >
+              {methods.map((item) => (
+                <option key={item} value={item}>
+                  {METHOD_LABELS[item]}
+                </option>
+              ))}
             </select>
           </label>
         </div>
 
         {selectedTarget === null ? null : (
           <dl className="target-summary">
-            <div><dt>المنصة</dt><dd>{selectedTarget.config.platform}</dd></div>
-            <div><dt>Firmware key</dt><dd>{selectedTarget.config.firmware}</dd></div>
-            <div><dt>طرق Target</dt><dd>{selectedTarget.config.uploadMethods.map((item) => METHOD_LABELS[item]).join(" · ")}</dd></div>
+            <div>
+              <dt>المنصة</dt>
+              <dd>{selectedTarget.config.platform}</dd>
+            </div>
+            <div>
+              <dt>Firmware key</dt>
+              <dd>{selectedTarget.config.firmware}</dd>
+            </div>
+            <div>
+              <dt>طرق Target</dt>
+              <dd>
+                {selectedTarget.config.uploadMethods
+                  .map((item) => METHOD_LABELS[item])
+                  .join(" · ")}
+              </dd>
+            </div>
           </dl>
         )}
       </section>
 
       <section className="parity-card" aria-labelledby="device-heading">
         <div className="parity-card-heading">
-          <div><span>2</span><div><h2 id="device-heading">تعريف الجهاز وإعداداته</h2><p>فتح COM وحده لا يكفي؛ يلزم Device Info وCRC ثم Target رسمي واحد.</p></div></div>
+          <div>
+            <span>2</span>
+            <div>
+              <h2 id="device-heading">تعريف الجهاز وإعداداته</h2>
+              <p>
+                فتح COM وحده لا يكفي؛ يلزم Device Info وCRC ثم Target رسمي واحد.
+              </p>
+            </div>
+          </div>
           <div className="button-row">
             {sessionIdentity === null ? (
-              <button type="button" className="primary-button" disabled={busy || catalog === null} onClick={() => void connectHardware()}>تعريف الجهاز عبر CRSF</button>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={busy || catalog === null}
+                onClick={() => void connectHardware()}
+              >
+                تعريف الجهاز عبر CRSF
+              </button>
             ) : (
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnectHardware()}>إغلاق الجلسة</button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => void disconnectHardware()}
+              >
+                إغلاق الجلسة
+              </button>
             )}
           </div>
         </div>
 
         {sessionIdentity === null ? (
-          <p className="empty-state">استخدم USB المباشر لوحدة ELRS. منفذ Joystick أو منفذ الراديو العام لن يمر من بوابة CRSF.</p>
+          <p className="empty-state">
+            استخدم USB المباشر لوحدة ELRS. منفذ Joystick أو منفذ الراديو العام
+            لن يمر من بوابة CRSF.
+          </p>
         ) : (
           <>
             <dl className="target-summary">
-              <div><dt>الجهاز</dt><dd>{sessionIdentity.productName}</dd></div>
-              <div><dt>Firmware</dt><dd>{sessionIdentity.firmwareVersion}</dd></div>
-              <div><dt>CRSF Parameters</dt><dd>{sessionIdentity.parameterCount}</dd></div>
-              <div><dt>مطابقة Target</dt><dd>{targetMatch?.confidence ?? "NOT_FOUND"}</dd></div>
+              <div>
+                <dt>الجهاز</dt>
+                <dd>{sessionIdentity.productName}</dd>
+              </div>
+              <div>
+                <dt>Firmware</dt>
+                <dd>{sessionIdentity.firmwareVersion}</dd>
+              </div>
+              <div>
+                <dt>CRSF Parameters</dt>
+                <dd>{sessionIdentity.parameterCount}</dd>
+              </div>
+              <div>
+                <dt>مطابقة Target</dt>
+                <dd>{targetMatch?.confidence ?? "NOT_FOUND"}</dd>
+              </div>
             </dl>
-            {exactHardwareTarget ? <p className="success-note">Target المختار مطابق لهوية CRSF. بوابات الكتابة المباشرة مفتوحة.</p> : <p className="danger-note">لا توجد مطابقة EXACT بين الجهاز وTarget المختار؛ التفليش المباشر والربط مقفلان.</p>}
+            {exactHardwareTarget ? (
+              <p className="success-note">
+                Target المختار مطابق لهوية CRSF. بوابات الكتابة المباشرة مفتوحة.
+              </p>
+            ) : (
+              <p className="danger-note">
+                لا توجد مطابقة EXACT بين الجهاز وTarget المختار؛ التفليش المباشر
+                والربط مقفلان.
+              </p>
+            )}
 
             <div className="settings-grid">
               <label>
                 <span>الإعداد</span>
-                <select value={selectedSettingId} disabled={busy || writableParameters.length === 0} onChange={(event) => {
-                  const id = event.currentTarget.value;
-                  setSelectedSettingId(id);
-                  setSettingDraft(settingValue(writableParameters.find((parameter) => String(parameter.id) === id)));
-                }}>
-                  {writableParameters.map((parameter) => <option key={parameter.id} value={parameter.id}>{parameter.name}</option>)}
+                <select
+                  value={selectedSettingId}
+                  disabled={busy || writableParameters.length === 0}
+                  onChange={(event) => {
+                    const id = event.currentTarget.value;
+                    setSelectedSettingId(id);
+                    setSettingDraft(
+                      settingValue(
+                        writableParameters.find(
+                          (parameter) => String(parameter.id) === id,
+                        ),
+                      ),
+                    );
+                  }}
+                >
+                  {writableParameters.map((parameter) => (
+                    <option key={parameter.id} value={parameter.id}>
+                      {parameter.name}
+                    </option>
+                  ))}
                 </select>
               </label>
               {selectedSetting?.kind === "selection" ? (
-                <label><span>القيمة</span><select value={settingDraft} disabled={busy} onChange={(event) => setSettingDraft(event.currentTarget.value)}>{selectedSetting.options.map((label, index) => <option key={`${index}:${label}`} value={index}>{label || index}</option>)}</select></label>
+                <label>
+                  <span>القيمة</span>
+                  <select
+                    value={settingDraft}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setSettingDraft(event.currentTarget.value)
+                    }
+                  >
+                    {selectedSetting.options.map((label, index) => (
+                      <option key={`${index}:${label}`} value={index}>
+                        {label || index}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               ) : (
-                <label><span>القيمة</span><input type="number" value={settingDraft} min={selectedSetting?.kind === "number" ? selectedSetting.min : undefined} max={selectedSetting?.kind === "number" ? selectedSetting.max : undefined} disabled={busy || selectedSetting === undefined} onChange={(event) => setSettingDraft(event.currentTarget.value)} /></label>
+                <label>
+                  <span>القيمة</span>
+                  <input
+                    type="number"
+                    value={settingDraft}
+                    min={
+                      selectedSetting?.kind === "number"
+                        ? selectedSetting.min
+                        : undefined
+                    }
+                    max={
+                      selectedSetting?.kind === "number"
+                        ? selectedSetting.max
+                        : undefined
+                    }
+                    disabled={busy || selectedSetting === undefined}
+                    onChange={(event) =>
+                      setSettingDraft(event.currentTarget.value)
+                    }
+                  />
+                </label>
               )}
               <div className="settings-actions">
-                <button type="button" className="primary-button" disabled={busy || !exactHardwareTarget || selectedSetting === undefined} onClick={() => void writeSetting()}>حفظ مع قراءة رجعية</button>
-                <button type="button" className="secondary-button" disabled={busy || backup === null} onClick={() => void restoreSettings()}>استعادة اللقطة</button>
-                <button type="button" className="secondary-button" disabled={busy || !exactHardwareTarget} onClick={() => void startBinding()}>تشغيل الربط الحقيقي</button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={
+                    busy ||
+                    !exactHardwareTarget ||
+                    selectedSetting === undefined
+                  }
+                  onClick={() => void writeSetting()}
+                >
+                  حفظ مع قراءة رجعية
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy || backup === null}
+                  onClick={() => void restoreSettings()}
+                >
+                  استعادة اللقطة
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy || !exactHardwareTarget}
+                  onClick={() => void startBinding()}
+                >
+                  تشغيل الربط الحقيقي
+                </button>
               </div>
             </div>
           </>
@@ -888,51 +1230,299 @@ export function ExpressLrsParityWorkbench() {
       </section>
 
       <section className="parity-card" aria-labelledby="config-heading">
-        <div className="parity-card-heading"><div><span>3</span><div><h2 id="config-heading">خيارات Firmware</h2><p>عبارة الربط وكلمة Wi-Fi لا تُحفظان في المتصفح؛ تبقيان في الذاكرة حتى بناء الحزمة.</p></div></div></div>
+        <div className="parity-card-heading">
+          <div>
+            <span>3</span>
+            <div>
+              <h2 id="config-heading">خيارات Firmware</h2>
+              <p>
+                عبارة الربط وكلمة Wi-Fi لا تُحفظان في المتصفح؛ تبقيان في الذاكرة
+                حتى بناء الحزمة.
+              </p>
+            </div>
+          </div>
+        </div>
         <div className="form-grid">
-          <label><span>عبارة الربط</span><input type="password" autoComplete="off" value={options.bindPhrase} maxLength={128} onChange={(event) => updateOption("bindPhrase", event.currentTarget.value)} /></label>
-          <label><span>اسم شبكة Wi-Fi</span><input type="text" autoComplete="off" value={options.wifiSsid} maxLength={32} onChange={(event) => updateOption("wifiSsid", event.currentTarget.value)} /></label>
-          <label><span>كلمة مرور Wi-Fi</span><input type="password" autoComplete="new-password" value={options.wifiPassword} maxLength={64} onChange={(event) => updateOption("wifiPassword", event.currentTarget.value)} /></label>
-          <label><span>تشغيل Wi-Fi تلقائيًا بعد (ثانية)</span><input type="number" min={0} max={3600} value={options.wifiAutoOnInterval} onChange={(event) => updateOption("wifiAutoOnInterval", Number(event.currentTarget.value))} /></label>
-          <label><span>Fan runtime</span><input type="number" min={0} max={3600} value={options.fanRuntime} onChange={(event) => updateOption("fanRuntime", Number(event.currentTarget.value))} /></label>
+          <label>
+            <span>عبارة الربط</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={options.bindPhrase}
+              maxLength={128}
+              onChange={(event) =>
+                updateOption("bindPhrase", event.currentTarget.value)
+              }
+            />
+          </label>
+          <label>
+            <span>اسم شبكة Wi-Fi</span>
+            <input
+              type="text"
+              autoComplete="off"
+              value={options.wifiSsid}
+              maxLength={32}
+              onChange={(event) =>
+                updateOption("wifiSsid", event.currentTarget.value)
+              }
+            />
+          </label>
+          <label>
+            <span>كلمة مرور Wi-Fi</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={options.wifiPassword}
+              maxLength={64}
+              onChange={(event) =>
+                updateOption("wifiPassword", event.currentTarget.value)
+              }
+            />
+          </label>
+          <label>
+            <span>تشغيل Wi-Fi تلقائيًا بعد (ثانية)</span>
+            <input
+              type="number"
+              min={0}
+              max={3600}
+              value={options.wifiAutoOnInterval}
+              onChange={(event) =>
+                updateOption(
+                  "wifiAutoOnInterval",
+                  Number(event.currentTarget.value),
+                )
+              }
+            />
+          </label>
+          <label>
+            <span>Fan runtime</span>
+            <input
+              type="number"
+              min={0}
+              max={3600}
+              value={options.fanRuntime}
+              onChange={(event) =>
+                updateOption("fanRuntime", Number(event.currentTarget.value))
+              }
+            />
+          </label>
           {role === "tx" ? (
             <>
-              <label><span>Telemetry interval</span><input type="number" min={0} max={10000} value={options.telemetryInterval} onChange={(event) => updateOption("telemetryInterval", Number(event.currentTarget.value))} /></label>
-              <label className="check-field"><input type="checkbox" checked={options.uartInverted} onChange={(event) => updateOption("uartInverted", event.currentTarget.checked)} /><span>UART مقلوب</span></label>
-              <label className="check-field"><input type="checkbox" checked={options.unlockHigherPower} onChange={(event) => updateOption("unlockHigherPower", event.currentTarget.checked)} /><span>فتح مستويات الطاقة الأعلى</span></label>
+              <label>
+                <span>Telemetry interval</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  value={options.telemetryInterval}
+                  onChange={(event) =>
+                    updateOption(
+                      "telemetryInterval",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={options.uartInverted}
+                  onChange={(event) =>
+                    updateOption("uartInverted", event.currentTarget.checked)
+                  }
+                />
+                <span>UART مقلوب</span>
+              </label>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={options.unlockHigherPower}
+                  onChange={(event) =>
+                    updateOption(
+                      "unlockHigherPower",
+                      event.currentTarget.checked,
+                    )
+                  }
+                />
+                <span>فتح مستويات الطاقة الأعلى</span>
+              </label>
             </>
           ) : (
             <>
-              <label><span>Receiver UART baud</span><input type="number" min={9600} max={1_000_000} value={options.receiverUartBaud} onChange={(event) => updateOption("receiverUartBaud", Number(event.currentTarget.value))} /></label>
-              <label className="check-field"><input type="checkbox" checked={options.receiverInvertTx} onChange={(event) => updateOption("receiverInvertTx", event.currentTarget.checked)} /><span>عكس خرج TX للمستقبل</span></label>
-              <label className="check-field"><input type="checkbox" checked={options.lockOnFirstConnection} onChange={(event) => updateOption("lockOnFirstConnection", event.currentTarget.checked)} /><span>قفل أول اتصال</span></label>
-              <label className="check-field"><input type="checkbox" checked={options.r9mmMiniSbus} onChange={(event) => updateOption("r9mmMiniSbus", event.currentTarget.checked)} /><span>R9MM Mini SBUS</span></label>
-              <label className="check-field"><input type="checkbox" checked={options.receiverAsTransmitter} onChange={(event) => updateOption("receiverAsTransmitter", event.currentTarget.checked)} /><span>استخدام RX كمرسل</span></label>
+              <label>
+                <span>Receiver UART baud</span>
+                <input
+                  type="number"
+                  min={9600}
+                  max={1_000_000}
+                  value={options.receiverUartBaud}
+                  onChange={(event) =>
+                    updateOption(
+                      "receiverUartBaud",
+                      Number(event.currentTarget.value),
+                    )
+                  }
+                />
+              </label>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={options.receiverInvertTx}
+                  onChange={(event) =>
+                    updateOption(
+                      "receiverInvertTx",
+                      event.currentTarget.checked,
+                    )
+                  }
+                />
+                <span>عكس خرج TX للمستقبل</span>
+              </label>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={options.lockOnFirstConnection}
+                  onChange={(event) =>
+                    updateOption(
+                      "lockOnFirstConnection",
+                      event.currentTarget.checked,
+                    )
+                  }
+                />
+                <span>قفل أول اتصال</span>
+              </label>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={options.r9mmMiniSbus}
+                  onChange={(event) =>
+                    updateOption("r9mmMiniSbus", event.currentTarget.checked)
+                  }
+                />
+                <span>R9MM Mini SBUS</span>
+              </label>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={options.receiverAsTransmitter}
+                  onChange={(event) =>
+                    updateOption(
+                      "receiverAsTransmitter",
+                      event.currentTarget.checked,
+                    )
+                  }
+                />
+                <span>استخدام RX كمرسل</span>
+              </label>
             </>
           )}
         </div>
       </section>
 
       <section className="parity-card" aria-labelledby="package-heading">
-        <div className="parity-card-heading"><div><span>4</span><div><h2 id="package-heading">بناء الحزمة والتفليش</h2><p>كل قطاع يحصل على SHA-256، وحزمة الاستعادة إلزامية قبل أول كتابة.</p></div></div><button type="button" className="primary-button" disabled={busy || selectedRelease === null || selectedTarget === null} onClick={() => void buildFirmware()}>بناء Firmware الرسمي</button></div>
+        <div className="parity-card-heading">
+          <div>
+            <span>4</span>
+            <div>
+              <h2 id="package-heading">بناء الحزمة والتفليش</h2>
+              <p>
+                كل قطاع يحصل على SHA-256، وحزمة الاستعادة إلزامية قبل أول كتابة.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={
+              busy || selectedRelease === null || selectedTarget === null
+            }
+            onClick={() => void buildFirmware()}
+          >
+            بناء Firmware الرسمي
+          </button>
+        </div>
 
-        {prepared === null ? <p className="empty-state">لم تُبنَ حزمة بعد.</p> : (
+        {prepared === null ? (
+          <p className="empty-state">لم تُبنَ حزمة بعد.</p>
+        ) : (
           <>
             <dl className="segment-list">
-              {prepared.segments.map((segment) => <div key={`${segment.address}:${segment.name}`}><dt>{segment.name} · 0x{segment.address.toString(16).toUpperCase()}</dt><dd>{formatBytes(segment.bytes.byteLength)} · <code>{segment.sha256.slice(0, 16)}…</code></dd></div>)}
+              {prepared.segments.map((segment) => (
+                <div key={`${segment.address}:${segment.name}`}>
+                  <dt>
+                    {segment.name} · 0x
+                    {segment.address.toString(16).toUpperCase()}
+                  </dt>
+                  <dd>
+                    {formatBytes(segment.bytes.byteLength)} ·{" "}
+                    <code>{segment.sha256.slice(0, 16)}…</code>
+                  </dd>
+                </div>
+              ))}
             </dl>
             <div className="button-row">
-              <button type="button" className="secondary-button" onClick={downloadFirmware}>تنزيل Firmware</button>
-              <button type="button" className="secondary-button" onClick={downloadRecovery}>تنزيل حزمة الاستعادة</button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={downloadFirmware}
+              >
+                تنزيل Firmware
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={downloadRecovery}
+              >
+                تنزيل حزمة الاستعادة
+              </button>
             </div>
-            {!recoveryDownloaded ? <p className="danger-note">زر التفليش يبقى مقفلًا حتى تنزيل حزمة الاستعادة.</p> : <p className="success-note">تم تأكيد تنزيل حزمة الاستعادة لهذه الجلسة.</p>}
-
-            {method === "uart" ? null : method === "wifi" || method === "download" || method === "stlink" ? null : (
-              <label className="manual-confirm"><span>تأكيد Target لمسار Passthrough</span><input type="text" value={manualTargetConfirmation} placeholder={selectedTarget?.targetKey ?? ""} onChange={(event) => setManualTargetConfirmation(event.currentTarget.value)} /><small>اكتب: {selectedTarget?.targetKey}</small></label>
+            {!recoveryDownloaded ? (
+              <p className="danger-note">
+                زر التفليش يبقى مقفلًا حتى تنزيل حزمة الاستعادة.
+              </p>
+            ) : (
+              <p className="success-note">
+                تم تأكيد تنزيل حزمة الاستعادة لهذه الجلسة.
+              </p>
             )}
 
-            <button type="button" className="danger-button" disabled={busy || !recoveryDownloaded || selectedTarget === null || (method === "uart" ? !exactHardwareTarget : !["wifi", "download", "stlink"].includes(method) && !manualTargetConfirmed)} onClick={() => void flashPreparedFirmware()}>
-              {method === "wifi" ? "تنزيل وفتح صفحة Wi-Fi" : method === "download" ? "تنزيل الحزمة" : method === "stlink" ? "عرض حالة ST-Link" : "بدء التفليش الحقيقي"}
+            {method === "uart" ? null : method === "wifi" ||
+              method === "download" ||
+              method === "stlink" ? null : (
+              <label className="manual-confirm">
+                <span>تأكيد Target لمسار Passthrough</span>
+                <input
+                  type="text"
+                  value={manualTargetConfirmation}
+                  placeholder={selectedTarget?.targetKey ?? ""}
+                  onChange={(event) =>
+                    setManualTargetConfirmation(event.currentTarget.value)
+                  }
+                />
+                <small>اكتب: {selectedTarget?.targetKey}</small>
+              </label>
+            )}
+
+            <button
+              type="button"
+              className="danger-button"
+              disabled={
+                busy ||
+                !recoveryDownloaded ||
+                selectedTarget === null ||
+                (method === "uart"
+                  ? !exactHardwareTarget
+                  : !["wifi", "download", "stlink"].includes(method) &&
+                    !manualTargetConfirmed)
+              }
+              onClick={() => void flashPreparedFirmware()}
+            >
+              {method === "wifi"
+                ? "تنزيل وفتح صفحة Wi-Fi"
+                : method === "download"
+                  ? "تنزيل الحزمة"
+                  : method === "stlink"
+                    ? "عرض حالة ST-Link"
+                    : "بدء التفليش الحقيقي"}
             </button>
           </>
         )}
@@ -940,7 +1530,10 @@ export function ExpressLrsParityWorkbench() {
         {flashProgress === null ? null : (
           <div className="flash-progress" aria-live="polite">
             <strong>{flashProgress.stage}</strong>
-            <progress max={Math.max(flashProgress.totalBytes, 1)} value={flashProgress.writtenBytes} />
+            <progress
+              max={Math.max(flashProgress.totalBytes, 1)}
+              value={flashProgress.writtenBytes}
+            />
             <span>{flashProgress.detail}</span>
           </div>
         )}

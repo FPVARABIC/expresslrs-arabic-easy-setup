@@ -95,5 +95,7 @@ export function regulatoryRegionsForRadioKey(
 export function regulatoryRegionByKey(
   key: string,
 ): ExpressLrsRegulatoryRegion | null {
-  return EXPRESSLRS_REGULATORY_REGIONS.find((region) => region.key === key) ?? null;
+  return (
+    EXPRESSLRS_REGULATORY_REGIONS.find((region) => region.key === key) ?? null
+  );
 }

@@ -69,7 +69,10 @@ describe("official target matching", () => {
   });
 
   it("excludes the wrong device role", () => {
-    const rx = { ...target("vendor/rx_2400/super", identity.productName), role: "rx" as const };
+    const rx = {
+      ...target("vendor/rx_2400/super", identity.productName),
+      role: "rx" as const,
+    };
     const result = matchHardwareIdentityToOfficialTargets({
       identity,
       targets: [rx],

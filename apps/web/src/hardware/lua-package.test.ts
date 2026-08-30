@@ -38,8 +38,8 @@ describe("official Lua script acquisition", () => {
       "lua/example.lua": new TextEncoder().encode("return 'example'"),
       "lua/other.lua": new TextEncoder().encode("return 'other'"),
     });
-    const fetchImplementation = vi.fn(async () =>
-      new Response(archive.slice().buffer),
+    const fetchImplementation = vi.fn(
+      async () => new Response(archive.slice().buffer),
     ) as unknown as typeof fetch;
 
     const result = await acquireOfficialLuaScript({
@@ -56,7 +56,11 @@ describe("official Lua script acquisition", () => {
     await expect(
       acquireOfficialLuaScript({
         release,
-        target: { ...target, role: "rx", config: { ...target.config, luaName: null } },
+        target: {
+          ...target,
+          role: "rx",
+          config: { ...target.config, luaName: null },
+        },
         fetchImplementation: vi.fn() as unknown as typeof fetch,
       }),
     ).rejects.toMatchObject({ code: "NOT_AVAILABLE" });

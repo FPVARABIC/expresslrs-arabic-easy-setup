@@ -227,9 +227,7 @@ export async function validateRecoveryPackage(input: {
     }
     seenNames.add(name);
     seenAddresses.add(address);
-    segments.push(
-      Object.freeze({ name, address, bytes, sha256: actualSha }),
-    );
+    segments.push(Object.freeze({ name, address, bytes, sha256: actualSha }));
   }
   if (segments.length === 0 || segments.length > 8) {
     throw new RecoveryPackageError(
@@ -338,7 +336,8 @@ export async function loadRecoveryCheckpoint(): Promise<RecoveryCheckpoint | nul
   ]);
   const createdAt = safeString(value.createdAt);
   const updatedAt = safeString(value.updatedAt);
-  const safeError = value.safeError === null ? null : safeString(value.safeError, 500);
+  const safeError =
+    value.safeError === null ? null : safeString(value.safeError, 500);
   if (
     targetId === null ||
     productName === null ||

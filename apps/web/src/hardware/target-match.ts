@@ -31,7 +31,10 @@ function tokenSet(value: string): ReadonlySet<string> {
   );
 }
 
-function overlap(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
+function overlap(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): number {
   let matches = 0;
   for (const value of left) if (right.has(value)) matches += 1;
   return matches;
@@ -81,7 +84,10 @@ export function matchHardwareIdentityToOfficialTargets(input: {
     }
   }
 
-  candidates.sort((left, right) => right.score - left.score || left.target.id.localeCompare(right.target.id));
+  candidates.sort(
+    (left, right) =>
+      right.score - left.score || left.target.id.localeCompare(right.target.id),
+  );
   const top = candidates[0];
   const second = candidates[1];
   if (top === undefined) {
@@ -98,7 +104,10 @@ export function matchHardwareIdentityToOfficialTargets(input: {
       candidates: Object.freeze(candidates.slice(0, 8)),
     });
   }
-  if (top.score >= 70 && (second === undefined || top.score - second.score >= 20)) {
+  if (
+    top.score >= 70 &&
+    (second === undefined || top.score - second.score >= 20)
+  ) {
     return Object.freeze({
       confidence: "LIKELY",
       selected: null,

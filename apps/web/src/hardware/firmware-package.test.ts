@@ -89,8 +89,13 @@ function archives(): {
 describe("official firmware package preparation", () => {
   it("extracts only the selected target, appends configuration, hashes segments, and emits recovery", async () => {
     const files = archives();
-    const fetchImplementation = vi.fn(async (url: string | URL | Request) =>
-      new Response(String(url).endsWith("hardware.zip") ? files.hardware : files.firmware),
+    const fetchImplementation = vi.fn(
+      async (url: string | URL | Request) =>
+        new Response(
+          String(url).endsWith("hardware.zip")
+            ? files.hardware
+            : files.firmware,
+        ),
     ) as unknown as typeof fetch;
 
     const prepared = await prepareOfficialFirmwarePackage({
@@ -100,15 +105,17 @@ describe("official firmware package preparation", () => {
       fetchImplementation,
     });
 
-    expect(prepared.segments.map((segment) => [segment.name, segment.address])).toEqual([
+    expect(
+      prepared.segments.map((segment) => [segment.name, segment.address]),
+    ).toEqual([
       ["bootloader.bin", 0x1000],
       ["partitions.bin", 0x8000],
       ["boot_app0.bin", 0xe000],
       ["firmware.bin", 0x10000],
     ]);
-    expect(prepared.segments.every((segment) => segment.sha256.length === 64)).toBe(
-      true,
-    );
+    expect(
+      prepared.segments.every((segment) => segment.sha256.length === 64),
+    ).toBe(true);
     const application = prepared.segments.at(-1)?.bytes;
     expect(application).toBeDefined();
     expect(new TextDecoder().decode(application?.slice(48, 80))).toContain(
@@ -129,7 +136,9 @@ describe("official firmware package preparation", () => {
     const firmware = zipSync({
       "firmware/FCC/EXAMPLE_RX_2400/firmware.bin": espImage(),
     });
-    const fetchImplementation = vi.fn(async () => new Response(firmware)) as unknown as typeof fetch;
+    const fetchImplementation = vi.fn(
+      async () => new Response(firmware),
+    ) as unknown as typeof fetch;
     const rxTarget: OfficialTarget = {
       ...target,
       id: "vendor/rx_2400/example-rx",
@@ -161,12 +170,13 @@ describe("official firmware package preparation", () => {
   });
 
   it("fails closed when the selected region/target path is not present", async () => {
-    const fetchImplementation = vi.fn(async () =>
-      new Response(
-        zipSync({
-          "firmware/EU/OTHER/firmware.bin": espImage(),
-        }),
-      ),
+    const fetchImplementation = vi.fn(
+      async () =>
+        new Response(
+          zipSync({
+            "firmware/EU/OTHER/firmware.bin": espImage(),
+          }),
+        ),
     ) as unknown as typeof fetch;
 
     await expect(
