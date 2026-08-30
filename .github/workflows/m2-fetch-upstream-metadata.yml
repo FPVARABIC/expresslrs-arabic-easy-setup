@@ -1,0 +1,60 @@
+name: M2 capture official ExpressLRS metadata
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-fetch-upstream-metadata.yml
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Fetch bounded upstream metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Fetch official Web Flasher metadata
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/expresslrs-upstream
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 45 \
+            --output /tmp/expresslrs-upstream/firmware-index.json \
+            https://expresslrs.github.io/web-flasher/assets/firmware/index.json
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 45 \
+            --output /tmp/expresslrs-upstream/firmware-targets.json \
+            https://expresslrs.github.io/web-flasher/assets/firmware/hardware/targets.json
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 45 \
+            --output /tmp/expresslrs-upstream/backpack-index.json \
+            https://expresslrs.github.io/web-flasher/assets/backpack/index.json
+          curl --fail --silent --show-error --location \
+            --connect-timeout 10 --max-time 45 \
+            --output /tmp/expresslrs-upstream/backpack-targets.json \
+            https://expresslrs.github.io/web-flasher/assets/backpack/hardware/targets.json
+
+      - name: Validate and summarize metadata
+        run: |
+          set -euo pipefail
+          for file in /tmp/expresslrs-upstream/*.json; do
+            test "$(stat -c%s "$file")" -le 5242880
+            jq -e 'type == "object"' "$file" >/dev/null
+            sha256sum "$file"
+          done
+          jq '{tags, branches}' /tmp/expresslrs-upstream/firmware-index.json \
+            > /tmp/expresslrs-upstream/firmware-index-summary.json
+          jq '{tags, branches}' /tmp/expresslrs-upstream/backpack-index.json \
+            > /tmp/expresslrs-upstream/backpack-index-summary.json
+
+      - name: Upload metadata snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: expresslrs-official-metadata
+          path: /tmp/expresslrs-upstream
+          if-no-files-found: error
+          retention-days: 3
