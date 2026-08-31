@@ -1,4 +1,4 @@
-name: M2 apply audited foundation repair
+name: M2 audit source export
 
 on:
   push:
@@ -8,20 +8,17 @@ on:
       - .github/workflows/m2-audit-format-export.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    name: Normalize, apply, and verify audited repair
+  export:
+    name: Export exact source and locked dependencies
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
 
     steps:
-      - name: Check out hardware branch
+      - name: Check out exact branch commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: feat/m2-real-hardware-first-test
-          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -35,30 +32,40 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Install locked dependencies
+      - name: Install dependencies from the committed lockfile
         run: pnpm install --frozen-lockfile
 
-      - name: Normalize and apply reviewed repair
+      - name: Assemble exact source snapshot
         run: |
-          pnpm format
-          git apply --check .github/patches/foundation-repair.patch
-          git apply .github/patches/foundation-repair.patch
-          pnpm format
+          mkdir -p /tmp/elrs-audit-source
+          rsync -a \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '**/node_modules' \
+            --exclude 'dist' \
+            --exclude '**/dist' \
+            --exclude 'coverage' \
+            --exclude '**/coverage' \
+            ./ /tmp/elrs-audit-source/
+          git rev-parse HEAD > /tmp/elrs-audit-source/AUDIT_HEAD_SHA
 
-      - name: Verify full repository
-        run: |
-          pnpm lint
-          pnpm typecheck
-          pnpm test
-          pnpm build
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: elrs-audit-source
+          path: /tmp/elrs-audit-source
+          if-no-files-found: error
+          retention-days: 3
+          include-hidden-files: true
 
-      - name: Commit verified repair
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/web/src/components/DeviceConnectionHub.tsx \
-            apps/web/src/components/DeviceConnectionHub.test.tsx \
-            apps/web/src/hardware/*.ts \
-            packages/platform-browser/src/firmware-artifact-decompression.ts
-          git commit -m "fix(hardware): stabilize CRSF and user session foundation"
-          git push origin HEAD:feat/m2-real-hardware-first-test
+      - name: Upload installed dependency tree
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: elrs-audit-node-modules
+          path: |
+            node_modules
+            apps/web/node_modules
+            packages/*/node_modules
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: true
