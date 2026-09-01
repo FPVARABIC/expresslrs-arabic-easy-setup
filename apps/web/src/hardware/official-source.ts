@@ -3,6 +3,7 @@ export const OFFICIAL_EXPRESSLRS_ARTIFACT_BASES = Object.freeze([
   "https://artifactory.expresslrs.org/ExpressLRS",
 ] as const);
 
+import { isAbortRequested } from "./byte-utils";
 const ALLOWED_HOSTS = Object.freeze(
   new Set(["expresslrs.github.io", "artifactory.expresslrs.org"]),
 );
@@ -52,7 +53,7 @@ export async function fetchOfficialExpressLrsResource(input: {
   const fetchImplementation = input.fetchImplementation ?? fetch;
   const failures: string[] = [];
   for (const base of OFFICIAL_EXPRESSLRS_ARTIFACT_BASES) {
-    if (input.signal?.aborted === true) {
+    if (isAbortRequested(input.signal)) {
       throw new DOMException(
         "Official artifact request was cancelled",
         "AbortError",
@@ -79,7 +80,7 @@ export async function fetchOfficialExpressLrsResource(input: {
       failures.push(`${requestedUrl}: HTTP ${response.status}`);
     } catch (error: unknown) {
       if (error instanceof OfficialSourceError) throw error;
-      if (input.signal?.aborted === true) throw error;
+      if (isAbortRequested(input.signal)) throw error;
       failures.push(
         `${requestedUrl}: ${error instanceof Error ? error.message : "network failure"}`,
       );

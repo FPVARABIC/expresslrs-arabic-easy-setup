@@ -15,18 +15,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function safeKey(value: unknown, maximum = 160): string | null {
-  return typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= maximum &&
-    /^[A-Za-z0-9_.@+ /()-]+$/u.test(value)
-    ? value
+function cleanText(value: string, maximum: number): string | null {
+  const normalized = value
+    .normalize("NFC")
+    .trim()
+    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "");
+  return normalized.length > 0 &&
+    normalized.length <= maximum &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(normalized)
+    ? normalized
     : null;
 }
 
-function safeOptionalString(value: unknown): string | null {
+function safeIdentifier(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = cleanText(value, 160);
+  if (
+    normalized === null ||
+    normalized.includes("..") ||
+    /[\\/]/u.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function safeDisplay(value: unknown): string | null {
+  return typeof value === "string" ? cleanText(value, 200) : null;
+}
+
+function safeArtifactName(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
-  return safeKey(value);
+  if (typeof value !== "string") return null;
+  const normalized = cleanText(value.replaceAll("\\", "/"), 240);
+  if (
+    normalized === null ||
+    normalized.includes("..") ||
+    normalized.startsWith("/") ||
+    /^[A-Za-z]:/u.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 function safeRecord(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -52,6 +82,7 @@ function normalizeMethod(value: unknown): ExpressLrsFlashMethod | null {
       return "wifi";
     case "stlink":
     case "st-link":
+    case "dfu":
       return "stlink";
     case "dir":
     case "stock":
@@ -71,7 +102,7 @@ function roleFromValue(value: unknown): OfficialTarget["role"] | null {
 }
 
 function roleFromPath(path: readonly string[]): OfficialTarget["role"] | null {
-  for (const part of path.toReversed()) {
+  for (const part of [...path].reverse()) {
     const normalized = part.toLocaleLowerCase("en-US");
     if (
       /^tx(?:_|-|$)/u.test(normalized) ||
@@ -86,12 +117,22 @@ function roleFromPath(path: readonly string[]): OfficialTarget["role"] | null {
   return null;
 }
 
+function radioKeyFromPath(path: readonly string[]): string | null {
+  for (const part of [...path].reverse()) {
+    const normalized = part.toLocaleLowerCase("en-US");
+    if (/^(?:tx|rx)(?:_|-|$)/u.test(normalized)) return part;
+  }
+  return (
+    [...path].reverse().find((part) => roleFromPath([part]) !== null) ?? null
+  );
+}
+
 function configFromRecord(
   value: Readonly<Record<string, unknown>>,
 ): OfficialTargetConfig | null {
-  const productName = safeKey(value.product_name);
-  const platform = safeKey(value.platform);
-  const firmware = safeKey(value.firmware);
+  const productName = safeDisplay(value.product_name);
+  const platform = safeIdentifier(value.platform);
+  const firmware = safeIdentifier(value.firmware);
   if (productName === null || platform === null || firmware === null)
     return null;
   const sourceMethods = Array.isArray(value.upload_methods)
@@ -100,6 +141,7 @@ function configFromRecord(
       ? [value.upload_method]
       : [];
   const methods = sourceMethods
+    .slice(0, 32)
     .map(normalizeMethod)
     .filter((method): method is ExpressLrsFlashMethod => method !== null);
   const uploadMethods = [...new Set(methods)];
@@ -108,11 +150,11 @@ function configFromRecord(
     productName,
     platform,
     firmware,
-    luaName: safeOptionalString(value.lua_name),
-    layoutFile: safeOptionalString(value.layout_file),
-    logoFile: safeOptionalString(value.logo_file),
+    luaName: safeArtifactName(value.lua_name),
+    layoutFile: safeArtifactName(value.layout_file),
+    logoFile: safeArtifactName(value.logo_file),
     uploadMethods: Object.freeze(uploadMethods),
-    minVersion: safeOptionalString(value.min_version),
+    minVersion: safeDisplay(value.min_version),
     customLayout: safeRecord(value.custom_layout),
     overlay: safeRecord(value.overlay),
     raw: Object.freeze({ ...value }),
@@ -140,8 +182,8 @@ export function parseOfficialTargetsFlexible(
     node: Readonly<Record<string, unknown>>,
     context: WalkContext,
     depth: number,
-  ) => {
-    if (depth > 6 || output.size > 4_096 || visited.has(node)) return;
+  ): void => {
+    if (depth > 7 || output.size >= 4096 || visited.has(node)) return;
     visited.add(node);
     const config = configFromRecord(node);
     if (config !== null) {
@@ -149,14 +191,9 @@ export function parseOfficialTargetsFlexible(
         roleFromValue(node.device_type) ??
         roleFromValue(node.role) ??
         roleFromPath(context.path);
-      const targetKey = safeKey(context.path.at(-1) ?? "");
-      const radioKey =
-        [...context.path]
-          .toReversed()
-          .find((part) => roleFromPath([part]) !== null) ??
-        safeKey(node.radio) ??
-        `${role ?? "unknown"}_unknown`;
-      if (role !== null && targetKey !== null && safeKey(radioKey) !== null) {
+      const targetKey = safeIdentifier(context.path.at(-1) ?? "");
+      const radioKey = radioKeyFromPath(context.path);
+      if (role !== null && targetKey !== null && radioKey !== null) {
         const id = `${context.vendorKey}/${radioKey}/${targetKey}`;
         output.set(
           id,
@@ -174,25 +211,26 @@ export function parseOfficialTargetsFlexible(
       return;
     }
 
-    for (const [keyValue, child] of Object.entries(node).slice(0, 1_024)) {
+    for (const [rawKey, child] of Object.entries(node).slice(0, 1024)) {
       if (
-        keyValue === "__proto__" ||
-        keyValue === "prototype" ||
-        keyValue === "constructor"
+        rawKey === "__proto__" ||
+        rawKey === "prototype" ||
+        rawKey === "constructor" ||
+        !isRecord(child)
       ) {
         continue;
       }
-      const key = safeKey(keyValue);
-      if (key === null || !isRecord(child)) continue;
-      const nextVendorKey = depth === 0 ? key : context.vendorKey;
-      const nextVendorName =
-        depth === 0 ? (safeKey(child.name) ?? key) : context.vendorName;
+      const key = safeIdentifier(rawKey);
+      if (key === null) continue;
+      const vendorKey = depth === 0 ? key : context.vendorKey;
+      const vendorName =
+        depth === 0 ? (safeDisplay(child.name) ?? key) : context.vendorName;
       walk(
         child,
         {
           path: Object.freeze([...context.path, key]),
-          vendorKey: nextVendorKey,
-          vendorName: nextVendorName,
+          vendorKey,
+          vendorName,
         },
         depth + 1,
       );
@@ -201,7 +239,11 @@ export function parseOfficialTargetsFlexible(
 
   walk(
     value,
-    { path: Object.freeze([]), vendorKey: "unknown", vendorName: "Unknown" },
+    {
+      path: Object.freeze([]),
+      vendorKey: "unknown",
+      vendorName: "Unknown",
+    },
     0,
   );
   if (output.size === 0) {

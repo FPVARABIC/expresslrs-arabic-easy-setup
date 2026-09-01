@@ -10,11 +10,12 @@ afterEach(() => {
 
 describe("official artifact compatibility adapter", () => {
   it("maps Artifactory paths to the trusted official-source request", async () => {
-    globalThis.fetch = vi.fn(async (input) =>
-      new Response("ok", {
-        status: 200,
-        headers: { "content-type": "application/octet-stream" },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("ok", {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+        }),
     ) as unknown as typeof fetch;
 
     const response = await officialArtifactFetch(

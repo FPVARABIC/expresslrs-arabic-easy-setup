@@ -6,6 +6,7 @@ import type {
   OfficialTarget,
 } from "./parity-types";
 
+import { isAbortRequested } from "./byte-utils";
 interface EspToolTransport {
   disconnect(): Promise<void>;
 }
@@ -96,7 +97,7 @@ export async function flashEspFirmware(input: {
   readonly onProgress?: FirmwareFlashProgressListener;
   readonly onLog?: (line: string) => void;
 }): Promise<Readonly<{ chipName: string; bytesWritten: number }>> {
-  if (input.signal?.aborted === true) {
+  if (isAbortRequested(input.signal)) {
     throw new EspFlashError("ABORTED", "Firmware flashing was cancelled");
   }
   if (input.segments.length === 0) {
@@ -154,7 +155,7 @@ export async function flashEspFirmware(input: {
         `Connected chip ${chipName} does not match ${input.target.config.platform}`,
       );
     }
-    if (input.signal?.aborted === true) {
+    if (isAbortRequested(input.signal)) {
       throw new EspFlashError("ABORTED", "Firmware flashing was cancelled");
     }
 
@@ -180,7 +181,7 @@ export async function flashEspFirmware(input: {
         eraseAll: input.eraseAll === true,
         compress: true,
         reportProgress(fileIndex, written, total) {
-          if (input.signal?.aborted === true) {
+          if (isAbortRequested(input.signal)) {
             throw new EspFlashError(
               "ABORTED",
               "Firmware flashing was cancelled",

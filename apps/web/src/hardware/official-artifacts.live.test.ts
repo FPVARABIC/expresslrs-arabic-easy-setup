@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { loadOfficialExpressLrsCatalog } from "./official-catalog";
 import { fetchOfficialExpressLrsResource } from "./official-source";
 
-const runLive = process.env.EXPRESSLRS_LIVE_CATALOG === "1";
+const runLive =
+  (
+    globalThis as {
+      readonly process?: {
+        readonly env?: Readonly<Record<string, string | undefined>>;
+      };
+    }
+  ).process?.env?.EXPRESSLRS_LIVE_CATALOG === "1";
 
 (runLive ? describe : describe.skip)(
   "live official ExpressLRS release artifacts",

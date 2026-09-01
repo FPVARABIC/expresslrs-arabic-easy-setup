@@ -15,7 +15,16 @@
     "OFL-1.1",
     "Python-2.0",
     "Unicode-3.0",
-    "Unlicense"
+    "Unlicense",
+    "Zlib"
   ],
-  "reviewedExceptions": []
+  "reviewedExceptions": [
+    {
+      "packageName": "pako",
+      "version": "2.2.0",
+      "observedLicenseExpression": "(MIT AND Zlib)",
+      "approvedLicenseExpression": "Zlib",
+      "reviewReference": "docs/security/pako-2.2.0-license-review.md"
+    }
+  ]
 }

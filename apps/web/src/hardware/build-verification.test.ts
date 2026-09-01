@@ -21,11 +21,9 @@ function info(name: string, value: string): CrsfParameter {
 
 describe("post-reconnect build verification", () => {
   it("extracts the bounded hexadecimal commit from CRSF info fields", () => {
-    expect(
-      observedExpressLrsCommit([
-        info("4.1.0 ISM2G4", "a9d4a9c"),
-      ]),
-    ).toBe("a9d4a9c");
+    expect(observedExpressLrsCommit([info("4.1.0 ISM2G4", "a9d4a9c")])).toBe(
+      "a9d4a9c",
+    );
   });
 
   it("requires the exact release version for stable releases", () => {
@@ -39,7 +37,9 @@ describe("post-reconnect build verification", () => {
         observedVersion: "4.1.0",
         parameters: [info("4.1.0", "a9d4a9c")],
       }),
-    ).toEqual(expect.objectContaining({ verified: true, reason: "EXACT_RELEASE" }));
+    ).toEqual(
+      expect.objectContaining({ verified: true, reason: "EXACT_RELEASE" }),
+    );
   });
 
   it("requires a branch commit prefix instead of accepting any parseable version", () => {

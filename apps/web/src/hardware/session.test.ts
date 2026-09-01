@@ -302,4 +302,21 @@ describe("real ExpressLRS CRSF hardware session", () => {
     });
     await outcome.session.close();
   });
+  it("rechecks the live CRSF identity before a bootloader or write boundary", async () => {
+    const hardware = fakeHardware();
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: "tx",
+      navigatorObject: { serial: { requestPort: hardware.requestPort } },
+      secureContext: true,
+    });
+    expect(outcome.status).toBe("CONNECTED");
+    if (outcome.status !== "CONNECTED") return;
+    const writesBefore = hardware.writes.length;
+
+    const observed = await outcome.session.verifyCurrentIdentity();
+
+    expect(observed).toEqual(outcome.identity);
+    expect(hardware.writes.length).toBe(writesBefore + 1);
+    await outcome.session.close();
+  });
 });

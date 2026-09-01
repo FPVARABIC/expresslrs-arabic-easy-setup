@@ -14,7 +14,9 @@ function officialRelativePath(input: RequestInfo | URL): string {
       return decodeURIComponent(url.pathname.slice(index + marker.length));
     }
   }
-  throw new TypeError("Artifact request is outside the official ExpressLRS roots");
+  throw new TypeError(
+    "Artifact request is outside the official ExpressLRS roots",
+  );
 }
 
 export const officialArtifactFetch: typeof fetch = async (
@@ -27,7 +29,7 @@ export const officialArtifactFetch: typeof fetch = async (
     ...(signal === null || signal === undefined ? {} : { signal }),
     accept:
       init?.headers instanceof Headers
-        ? init.headers.get("accept") ?? "application/octet-stream"
+        ? (init.headers.get("accept") ?? "application/octet-stream")
         : "application/octet-stream",
   });
 };

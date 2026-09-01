@@ -112,7 +112,8 @@ export class ExpressLrsHardwareError extends Error {
       | "BACKUP_MISMATCH"
       | "BACKUP_INCOMPLETE"
       | "BOOTLOADER_NOT_ACKNOWLEDGED"
-      | "BINDING_NOT_ACKNOWLEDGED",
+      | "BINDING_NOT_ACKNOWLEDGED"
+      | "IDENTITY_MISMATCH",
     message: string,
   ) {
     super(message);
@@ -153,6 +154,28 @@ function sameIdentity(
     expected.productName === actual.productName &&
     expected.softwareVersion === actual.softwareVersion &&
     expected.parameterVersion === actual.parameterVersion
+  );
+}
+
+function sameLiveIdentity(
+  expected: ExpressLrsIdentity,
+  actual: ExpressLrsIdentity,
+): boolean {
+  const sameUsb =
+    (expected.usb.usbVendorId === null ||
+      actual.usb.usbVendorId === null ||
+      expected.usb.usbVendorId === actual.usb.usbVendorId) &&
+    (expected.usb.usbProductId === null ||
+      actual.usb.usbProductId === null ||
+      expected.usb.usbProductId === actual.usb.usbProductId);
+  return (
+    expected.role === actual.role &&
+    expected.address === actual.address &&
+    expected.requestOrigin === actual.requestOrigin &&
+    expected.productName === actual.productName &&
+    expected.serialMarker === actual.serialMarker &&
+    expected.hardwareVersion === actual.hardwareVersion &&
+    sameUsb
   );
 }
 
@@ -341,6 +364,47 @@ export class ExpressLrsHardwareSession {
     );
   }
 
+  public async verifyCurrentIdentity(
+    signal?: AbortSignal,
+  ): Promise<ExpressLrsIdentity> {
+    this.#assertOpen();
+    const frame = await this.#link.request(
+      createDevicePing(this.#identity.requestOrigin),
+      (candidate) => {
+        const parsed = parseCrsfDeviceInfo(candidate);
+        return (
+          parsed !== null &&
+          parsed.expressLrsMarkerValid &&
+          parsed.origin === this.#identity.address
+        );
+      },
+      { timeoutMs: 1_500, signal },
+    );
+    const info = parseCrsfDeviceInfo(frame);
+    if (
+      info === null ||
+      !info.expressLrsMarkerValid ||
+      (info.role !== "unknown" && info.role !== this.#identity.role)
+    ) {
+      throw new ExpressLrsHardwareError(
+        "IDENTITY_MISMATCH",
+        "The connected device no longer reports the expected ExpressLRS identity",
+      );
+    }
+    const observed = identityFromDeviceInfo(
+      info,
+      this.#identity.role,
+      this.#identity.usb,
+    );
+    if (!sameLiveIdentity(this.#identity, observed)) {
+      throw new ExpressLrsHardwareError(
+        "IDENTITY_MISMATCH",
+        "The connected device identity changed before the write boundary",
+      );
+    }
+    return observed;
+  }
+
   public async refreshAllParameters(
     signal?: AbortSignal,
   ): Promise<readonly CrsfParameter[]> {
@@ -437,7 +501,10 @@ export class ExpressLrsHardwareSession {
       );
     }
     const values = this.parameters.flatMap((parameter) => {
-      if (parameter.kind !== "number" && parameter.kind !== "selection") {
+      if (
+        parameter.hidden ||
+        (parameter.kind !== "number" && parameter.kind !== "selection")
+      ) {
         return [];
       }
       return [
@@ -470,10 +537,13 @@ export class ExpressLrsHardwareSession {
         `Parameter ${parameterId} is not present in the current device table`,
       );
     }
-    if (known.kind !== "number" && known.kind !== "selection") {
+    if (
+      known.hidden ||
+      (known.kind !== "number" && known.kind !== "selection")
+    ) {
       throw new ExpressLrsHardwareError(
         "PARAMETER_NOT_WRITABLE",
-        `Parameter ${known.name} is not a numeric or selection setting`,
+        `Parameter ${known.name} is not an exposed numeric or selection setting`,
       );
     }
     const encoded = encodeParameterValue(known, value);
@@ -520,6 +590,7 @@ export class ExpressLrsHardwareSession {
       const current = this.#parameters.get(item.parameterId);
       if (
         current === undefined ||
+        current.hidden ||
         current.name !== item.name ||
         (current.kind !== "number" && current.kind !== "selection")
       ) {

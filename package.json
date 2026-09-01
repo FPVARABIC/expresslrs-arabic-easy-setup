@@ -26,7 +26,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "build": "pnpm --recursive --if-present run build",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm check:boundaries && pnpm check:security-headers && pnpm check:pwa-safety && pnpm check:visual-theme && pnpm check:links && pnpm check:master-plan && pnpm test && pnpm build"
+    "check": "pnpm check:ci-hygiene && pnpm format:check && pnpm lint && pnpm typecheck && pnpm check:boundaries && pnpm check:security-headers && pnpm check:pwa-safety && pnpm check:visual-theme && pnpm check:links && pnpm check:master-plan && pnpm test && pnpm build",
+    "check:ci-hygiene": "node scripts/check-ci-hygiene.mjs"
   },
   "dependencies": {
     "@fontsource-variable/cairo": "5.3.0",

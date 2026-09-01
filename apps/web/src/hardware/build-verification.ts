@@ -49,8 +49,14 @@ export function verifyObservedFirmwareBuild(input: {
       observedVersion: input.observedVersion,
     });
     return Object.freeze({
-      ...version,
+      verified: version.verified,
+      expected: version.expected,
+      observedVersion: version.observed,
       observedCommit: observedExpressLrsCommit(input.parameters),
+      reason:
+        version.reason === "BRANCH_VERSION_OBSERVED"
+          ? "VERSION_MISMATCH"
+          : version.reason,
     });
   }
 
