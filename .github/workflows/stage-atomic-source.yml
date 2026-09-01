@@ -1,0 +1,51 @@
+name: Stage atomic source payload
+
+on:
+  push:
+    branches:
+      - automation/atomic-ci-cleanup-2026-09-01
+    paths:
+      - .github/workflows/stage-atomic-source.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: atomic-source-stage
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: feat/m2-real-hardware-first-test
+  TARGET_HEAD: 84ce26dd49c2cffc0c8f4171f71673f2cfaa48df
+  HELPER_BRANCH: automation/atomic-ci-cleanup-2026-09-01
+  STAGE_BRANCH: automation/atomic-source-stage-2026-09-01
+  B64_SHA256: babc694c40bd3a673edd91c950f9c96d62610b52ca927f923cf6fb8794d6001f
+  GZIP_SHA256: e4d89a96073d7cb8b5dba30d95090db298f67d5f448b6d20f11c4e35332d3792
+  PATCH_SHA256: 966f33caed59a43936f2d42dacae0b41608a615bcb82de47a045f4113d87b87a
+
+jobs:
+  stage:
+    name: Commit source changes without workflow files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out exact target branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Fetch helper payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/heads/${HELPER_BRANCH}:refs/remotes/origin/${HELPER_BRANCH}"
+
+      - name: Create source-only staging commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "refs/remotes/origin/${HELPER_BRANCH}:.atomic-cleanup/stage-source.sh" > /tmp/stage-source.sh
+          chmod 0700 /tmp/stage-source.sh
+          /tmp/stage-source.sh
