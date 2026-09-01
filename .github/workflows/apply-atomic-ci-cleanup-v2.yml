@@ -1,0 +1,62 @@
+name: Apply atomic CI cleanup v2
+
+on:
+  push:
+    branches:
+      - automation/atomic-ci-cleanup-2026-09-01
+    paths:
+      - .github/workflows/apply-atomic-ci-cleanup-v2.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: atomic-ci-cleanup-v2
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: feat/m2-real-hardware-first-test
+  TARGET_HEAD: 84ce26dd49c2cffc0c8f4171f71673f2cfaa48df
+  HELPER_BRANCH: automation/atomic-ci-cleanup-2026-09-01
+  B64_SHA256: babc694c40bd3a673edd91c950f9c96d62610b52ca927f923cf6fb8794d6001f
+  GZIP_SHA256: e4d89a96073d7cb8b5dba30d95090db298f67d5f448b6d20f11c4e35332d3792
+  PATCH_SHA256: 966f33caed59a43936f2d42dacae0b41608a615bcb82de47a045f4113d87b87a
+
+jobs:
+  apply:
+    name: Validate and commit the license-reviewed atomic cleanup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out exact target branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Fetch helper payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/heads/${HELPER_BRANCH}:refs/remotes/origin/${HELPER_BRANCH}"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Apply, verify, commit, and push once
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "refs/remotes/origin/${HELPER_BRANCH}:.atomic-cleanup/apply-v2.sh" > /tmp/apply-v2.sh
+          chmod 0700 /tmp/apply-v2.sh
+          /tmp/apply-v2.sh
