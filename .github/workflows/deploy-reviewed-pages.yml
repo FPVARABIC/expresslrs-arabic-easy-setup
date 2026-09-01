@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  REVIEWED_SHA: bab88f6499335f4f92499a1ecb0180a3b1b53b54
+  REVIEWED_SHA: d3ff69b28e5387bbb208ca060df6842858eb3763
   PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
 
 concurrency:
@@ -66,6 +66,7 @@ jobs:
       - name: Build exact GitHub Pages artifact
         env:
           GITHUB_PAGES: "true"
+          VITE_BUILD_SHA: ${{ env.REVIEWED_SHA }}
         run: pnpm --filter @elrs-easy/web build
 
       - name: Verify GitHub Pages artifact
