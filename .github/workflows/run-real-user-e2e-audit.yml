@@ -1,0 +1,103 @@
+name: Run real-user pre-hardware audit
+
+on:
+  push:
+    branches:
+      - audit/real-user-e2e-runner-2026-09-01
+    paths:
+      - .github/workflows/run-real-user-e2e-audit.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-user-e2e-audit
+  cancel-in-progress: true
+
+env:
+  TARGET_HEAD: aebd19706c3321d5621b542bb83c9ce3821ff631
+  PUBLIC_APP_URL: https://fpvarabic.github.io/expresslrs-arabic-easy-setup/
+  PAYLOAD_SHA256: 5746872a4e09bd9fd08a545b809c6385125ff44309a8bd27fa571d5ee7f06c72
+
+jobs:
+  audit:
+    name: Exercise the application as a real user
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out audit runner
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify the audit source ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$TARGET_HEAD" HEAD
+          test -f .acceptance-stage/probe.txt
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install exact application dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install audit-only browser driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/audit-tools"
+          npm install --prefix "$RUNNER_TEMP/audit-tools" --ignore-scripts --no-audit --no-fund playwright-core@1.55.0
+          chrome="$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || true)"
+          test -n "$chrome"
+          echo "CHROME_BIN=$chrome" >> "$GITHUB_ENV"
+          echo "AUDIT_PLAYWRIGHT_ROOT=$RUNNER_TEMP/audit-tools" >> "$GITHUB_ENV"
+
+      - name: Build the exact production Pages candidate
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+          VITE_BUILD_SHA: ${{ env.TARGET_HEAD }}
+        run: pnpm --filter @elrs-easy/web build
+
+      - name: Reconstruct audited browser journey
+        shell: bash
+        run: |
+          set -euo pipefail
+          tr -d '\r\n' < .audit/real-user-e2e-part-00.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/real-user-e2e-audit.mjs"
+          printf '%s  %s\n' "$PAYLOAD_SHA256" "$RUNNER_TEMP/real-user-e2e-audit.mjs" | sha256sum -c -
+          node --check "$RUNNER_TEMP/real-user-e2e-audit.mjs"
+
+      - name: Run desktop, mobile, offline, recorder, CRSF, and firmware journeys
+        id: browser_audit
+        continue-on-error: true
+        env:
+          AUDIT_OUT: ${{ runner.temp }}/real-user-audit-output
+        run: node "$RUNNER_TEMP/real-user-e2e-audit.mjs"
+
+      - name: Record audit step outcome
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/real-user-audit-output"
+          printf 'browser_audit_outcome=%s\n' '${{ steps.browser_audit.outcome }}' > "$RUNNER_TEMP/real-user-audit-output/workflow-outcome.txt"
+
+      - name: Upload complete audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-user-pre-hardware-audit
+          path: ${{ runner.temp }}/real-user-audit-output
+          if-no-files-found: error
+          retention-days: 7
