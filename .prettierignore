@@ -1,0 +1,9 @@
+node_modules/
+pnpm-lock.yaml
+dist/
+coverage/
+.research-worktrees/
+artifacts/
+benchmarks/raw/
+docs/
+*.md

@@ -1,0 +1,222 @@
+.device-connection-host {
+  margin-block: 0 1rem;
+}
+
+.device-connection-panel {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.device-connection-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block-end: 0.9rem;
+  border-block-end: 1px solid var(--line);
+}
+
+.device-connection-heading h2 {
+  margin: 0.15rem 0 0;
+  font-size: 1.05rem;
+}
+
+.device-connection-heading p,
+.connection-method-panel > p,
+.connection-boundary-note p {
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.7;
+}
+
+.connection-transport-status {
+  flex: 0 0 auto;
+  padding: 0.38rem 0.58rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.connection-transport-status.status-connected {
+  border-color: rgb(63 185 80 / 38%);
+  color: var(--mint);
+}
+
+.connection-transport-status.status-open_failed,
+.connection-transport-status.status-close_failed,
+.connection-transport-status.status-permission_denied {
+  border-color: rgb(248 81 73 / 38%);
+  color: var(--danger);
+}
+
+.connection-role-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-block-start: 0.9rem;
+}
+
+.connection-role-row > span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.connection-role-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+}
+
+.connection-role-switch button,
+.connection-method-tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.connection-role-switch button {
+  min-height: 34px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 4px;
+}
+
+.connection-role-switch button.is-active {
+  background: var(--cyan-soft);
+  color: var(--cyan);
+}
+
+.connection-method-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-block-start: 0.85rem;
+}
+
+.connection-method-tabs button {
+  min-height: 44px;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+}
+
+.connection-method-tabs button.is-active {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.connection-method-panel {
+  margin-block-start: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+}
+
+.connection-method-panel > p:first-child {
+  margin-block-start: 0;
+}
+
+.connection-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-block-start: 0.75rem;
+}
+
+.connection-link-row a,
+.connection-link-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0.5rem 0.72rem;
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  background: var(--cyan);
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.73rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.connection-link-row button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.connection-port-info {
+  margin: 0.65rem 0 0;
+  color: var(--mint);
+  direction: ltr;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  text-align: start;
+}
+
+.connection-boundary-note {
+  margin-block-start: 0.8rem;
+  padding: 0.75rem;
+  border-inline-start: 3px solid var(--amber);
+  background: var(--surface-strong);
+}
+
+.connection-boundary-note strong {
+  color: var(--amber);
+  font-size: 0.74rem;
+}
+
+/* The previous Easy Mode card was driven by a synthetic scenario. Hide it
+   until a real identity-backed summary replaces it. */
+.simple-device-summary {
+  display: none;
+}
+
+.simple-workspace {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 760px) {
+  .device-connection-heading,
+  .connection-role-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .connection-transport-status {
+    align-self: flex-start;
+  }
+
+  .connection-method-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .connection-method-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .connection-link-row a,
+  .connection-link-row button {
+    width: 100%;
+  }
+}

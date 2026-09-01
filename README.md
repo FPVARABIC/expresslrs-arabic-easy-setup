@@ -4,9 +4,10 @@
 
 ## الحالة الحالية
 
-- المرحلة: `Milestone 1 — Foundation`
-- الفرع المحلي: `research/upstream-baseline`
-- السلوك المسموح حاليًا: Core/Workflow/Mock/RTL Web Foundation واختبارها محليًا
+- المرحلة: `Milestone 2A — Read-only real-device candidate`
+- معاينة GitHub Pages: `https://fpvarabic.github.io/expresslrs-arabic-easy-setup/`؛ معاينة عامة وليست Release أو دليل Hardware
+- الفرع المحلي: `feat/read-only-device-foundation`
+- السلوك المسموح حاليًا: Foundation وMock، إضافة إلى قراءة Wi-Fi حقيقية تجريبية ومحدودة يبدأها المستخدم عبر `GET /config` فقط
 - السلوك المحظور حاليًا: تعديل upstream، أو Flash أجهزة، أو ادعاء دعم Hardware/تحسين أداء
 - نمط الأجهزة: Model-agnostic عبر Evidence/Capabilities وTarget Catalog قابل للحقن، دون hard-coded models
 - الخط الأساسي للواجهة: Cairo ذاتي الاستضافة
@@ -19,6 +20,11 @@ ExpressLRS يبقى مصدر التقنية اللاسلكية الرسمي. ه�
 
 - واجهة عربية وRTL مصممة للمبتدئ، مع Advanced Mode للخبير.
 - Workflows للربط والإعداد والتحديث بدل عرض خيارات تقنية مبعثرة.
+- اختيار تلقائي لطريقة التحديث المناسبة من Catalog الجهاز؛ البنية تدعم
+  Wi-Fi وUART وpassthrough وXMODEM وSTLink وDFU دون تحويل الواجهة إلى قائمة
+  بروتوكولات.
+- التحديث التجريبي يتطلب Provenance متماسكًا وخطة تحقق يحددها Core؛ هذا لا
+  يمثل توقيعًا رقميًا أو ملف Firmware حقيقيًا أو سماحًا بالكتابة على جهاز.
 - اكتشاف الجهاز والـTarget والـBand عندما توجد أدلة كافية، والتوقف عند الغموض.
 - بوابات أمان تمنع Wrong Target ولا تعرض `SUCCESS` قبل Verification.
 - تشخيص واستعادة وسجلات عمليات مفهومة.
@@ -31,6 +37,12 @@ ExpressLRS يبقى مصدر التقنية اللاسلكية الرسمي. ه�
 
 لا توجد نسخة مستخدم أو Firmware خاص بالمشروع بعد. لا يوجد Hardware Validation بعد.
 
+معاينة GitHub Pages تعرض الواجهة العربية/English ومختبر Mock، وتبقي الكتابة
+كلها معطلة. قد يمنع المتصفح المستضاف قراءة عناوين أجهزة HTTP المحلية؛ نجاح
+هذا المسار غير معتمد إلى أن تكتمل مصفوفة المتصفح والعتاد. GitHub Pages لا
+يطبّق ملف `_headers` كرؤوس استجابة، لذلك تستخدم المعاينة CSP جزئيًا داخل HTML
+وتبقى بوابة الاستضافة الموثوقة مفتوحة.
+
 ## Foundation الحالية
 
 ```text
@@ -38,21 +50,25 @@ apps/web                 واجهة عربية RTL بخط Cairo
 packages/domain          الحقائق والأخطاء وحالات العمليات
 packages/device          الأدلة، حل الهوية، وملكية Device Session
 packages/compatibility   Target Catalog قابل للحقن وقرارات Fail-closed
-packages/workflows       State Machine وRead-only Discovery
-packages/platform-mock   أجهزة Synthetic متعددة وحالات الفشل
-packages/i18n            العربية وEnglish fallback
+packages/diagnostics     تقارير دعم ثابتة الفئات وخالية من قيم الجهاز
+packages/workflows       Discovery وEasy Binding وUpdate State Machines وModule API
+packages/platform-browser  موفر Local HTTP للقراءة فقط دون أي write API
+packages/platform-mock   أجهزة/Providers Synthetic ومصفوفة فشل واستعادة
+packages/i18n            العربية وEnglish fallback وربط الأخطاء المنظمة
 ```
 
-الموديلات ليست شروطًا داخل الواجهة أو الـCore. يضيف Adapter أدلة الجهاز، ويطابقها Catalog مثبت الإصدار، ثم يقرر Core مستوى الثقة والقدرات. بيانات العرض الحالية Synthetic فقط ولا تعني دعم أجهزة تجارية بعينها.
+الموديلات ليست شروطًا داخل الواجهة أو الـCore. يضيف Adapter أدلة الجهاز، ويطابقها Catalog مثبت الإصدار، ثم يقرر Core مستوى الثقة والقدرات. توجد الآن قراءة حقيقية تجريبية منفصلة عن مختبر Mock؛ حقائق `/config` ذاتية الإبلاغ و`UNVALIDATED`، ولا تدخل مسارات Binding/Update التجريبية ولا تؤكد Target أو دعم جهاز تجاري بعينه.
 
-بعد توليد `pnpm-lock.yaml` في بيئة تستطيع الوصول إلى npm، بوابة التطوير المطلوبة هي:
+المسار الحقيقي الحالي لا يفحص الشبكة تلقائيًا ولا يقرأ إلا من ثلاثة عناوين ExpressLRS محلية مثبتة. ويستبعد الاستجابة الخام وUID وخيارات Wi-Fi وSSID وكلمة المرور قبل عبور البيانات إلى Core. ويعرض تقدّمًا ولقطات قراءة يدوية، ويمكنه نسخ تقرير دعم ثابت الفئات بلا قيم الجهاز. لا توجد كتابة أو إعادة تشغيل أو Binding أو Firmware update في هذا المسار.
+
+الـlockfile مثبت. بوابة التطوير المطلوبة هي:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm check
 ```
 
-تفاصيل التحقق الحالي والبوابات المتبقية موجودة في [STATUS.md](STATUS.md).
+تفاصيل التحقق والبوابات المتبقية موجودة في [STATUS.md](STATUS.md)، وسجلا القبول في [Milestone 1](docs/testing/milestone-1-acceptance.md) و[مرشح Milestone 2A للقراءة فقط](docs/testing/milestone-2-read-only-acceptance.md).
 
 ## الوثائق الأساسية
 
@@ -62,8 +78,15 @@ pnpm check
 - [PHASE_0_DISCOVERY_REPORT.md](PHASE_0_DISCOVERY_REPORT.md): التقرير التنفيذي الموحّد وقرار البوابة.
 - [UPSTREAM.md](UPSTREAM.md): سياسة ومراجع upstream.
 - [STATUS.md](STATUS.md): الحالة المختصرة الحالية.
+- [CONTRIBUTING.md](CONTRIBUTING.md): قواعد المساهمة والاختبارات وسياسة الفروع.
 - [docs/upstream/baseline.md](docs/upstream/baseline.md): الـSHAs المثبتة وأدلة الفحص.
 - [docs/research/README.md](docs/research/README.md): مخرجات Milestone 0 المطلوبة.
+- [docs/architecture/core-api.md](docs/architecture/core-api.md): حدود Core/Host التجريبية.
+- [docs/architecture/milestone-2-read-only-device.md](docs/architecture/milestone-2-read-only-device.md): حدود أول اتصال حقيقي للقراءة فقط.
+- [docs/architecture/mock-workflows.md](docs/architecture/mock-workflows.md): Binding/Update والتحقق والاستعادة في Mock.
+- [ADR-0011](docs/adr/ADR-0011-github-pages-preview.md): حدود نشر معاينة GitHub Pages وأمانها.
+- [ADR-0012](docs/adr/ADR-0012-automatic-multi-method-update-selection.md): اختيار طريقة التحديث المتعددة تلقائيًا دون كتابة حقيقية.
+- [ADR-0013](docs/adr/ADR-0013-synthetic-artifact-provenance-and-verification-plan.md): ربط Provenance وخطة التحقق بالتنفيذ التجريبي دون ادعاء أصالة أو عتاد.
 
 ## الترخيص
 
