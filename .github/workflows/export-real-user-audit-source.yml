@@ -27,13 +27,19 @@ jobs:
           git status --short > AUDIT_SOURCE_STATUS.txt
 
       - name: Package source
+        shell: bash
         run: |
-          tar --exclude=.git --exclude=real-user-audit-source.tar.gz -czf real-user-audit-source.tar.gz .
+          set -euo pipefail
+          repository_dir="$(basename "$GITHUB_WORKSPACE")"
+          tar --exclude="${repository_dir}/.git" \
+            -C "$(dirname "$GITHUB_WORKSPACE")" \
+            -czf "$RUNNER_TEMP/real-user-audit-source.tar.gz" \
+            "$repository_dir"
 
       - name: Upload source archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: real-user-audit-source
-          path: real-user-audit-source.tar.gz
+          path: ${{ runner.temp }}/real-user-audit-source.tar.gz
           if-no-files-found: error
           retention-days: 3
