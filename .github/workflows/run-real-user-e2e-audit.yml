@@ -65,6 +65,15 @@ jobs:
           echo "CHROME_BIN=$chrome" >> "$GITHUB_ENV"
           echo "AUDIT_PLAYWRIGHT_ROOT=$RUNNER_TEMP/audit-tools" >> "$GITHUB_ENV"
 
+      - name: Make application-only fflate dependency visible to the audit module
+        shell: bash
+        run: |
+          set -euo pipefail
+          fflate_dir="$(find node_modules/.pnpm -maxdepth 3 -type d -path '*/node_modules/fflate' -print -quit)"
+          test -n "$fflate_dir"
+          ln -sfn "$(realpath --relative-to=node_modules "$fflate_dir")" node_modules/fflate
+          node -e "import('fflate').then(() => console.log('fflate audit dependency resolved'))"
+
       - name: Build the exact production Pages candidate
         env:
           GITHUB_PAGES: "true"
@@ -101,3 +110,8 @@ jobs:
           path: ${{ runner.temp }}/real-user-audit-output
           if-no-files-found: error
           retention-days: 7
+
+      - name: Fail when the browser audit did not complete successfully
+        if: always()
+        shell: bash
+        run: test '${{ steps.browser_audit.outcome }}' = 'success'
