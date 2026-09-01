@@ -1,0 +1,49 @@
+name: Export current source for repair
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/export-current-source.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: export-current-source-for-repair
+  cancel-in-progress: true
+
+jobs:
+  export:
+    name: Export exact branch source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 1
+
+      - name: Assemble source archive
+        run: |
+          mkdir -p /tmp/elrs-current-source
+          rsync -a \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '**/node_modules' \
+            --exclude 'dist' \
+            --exclude '**/dist' \
+            --exclude 'coverage' \
+            --exclude '**/coverage' \
+            ./ /tmp/elrs-current-source/
+
+      - name: Upload exact source
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: elrs-current-source
+          path: /tmp/elrs-current-source
+          if-no-files-found: error
+          retention-days: 1
