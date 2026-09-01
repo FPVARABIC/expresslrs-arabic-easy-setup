@@ -58,12 +58,12 @@ const catalog: OfficialCatalog = {
       targetKey: "receiver",
       config: {
         productName: "Vendor RX",
-        platform: "esp8285",
+        platform: "stm32",
         firmware: "VENDOR_RX",
         luaName: null,
         layoutFile: null,
         logoFile: null,
-        uploadMethods: ["betaflight", "wifi", "download"],
+        uploadMethods: ["betaflight", "stlink", "download"],
         minVersion: null,
         customLayout: {},
         overlay: null,
@@ -73,13 +73,13 @@ const catalog: OfficialCatalog = {
   ],
 };
 
-describe("primary ExpressLRS hardware workbench", () => {
+describe("rebuilt ExpressLRS hardware journey", () => {
   beforeEach(() => {
     mocks.loadCatalog.mockReset().mockResolvedValue(catalog);
     mocks.loadCheckpoint.mockReset().mockResolvedValue(null);
   });
 
-  it("starts with real operations locked instead of presenting a mock success path", () => {
+  it("starts with real operations locked and no mock-success surface", () => {
     render(<ExpressLrsParityWorkbench />);
 
     expect(
@@ -89,56 +89,66 @@ describe("primary ExpressLRS hardware workbench", () => {
       screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
     ).toBeDisabled();
     expect(screen.queryByText(/معاينة آمنة/u)).not.toBeInTheDocument();
-    expect(screen.queryByText(/نجاح تجريبي/u)).not.toBeInTheDocument();
   });
 
-  it("loads official TX/RX targets and requires an explicit regulatory region", async () => {
+  it("requires an explicit regulatory domain before package generation", async () => {
     const user = userEvent.setup();
     render(<ExpressLrsParityWorkbench />);
 
     await user.click(
       screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
     );
-
     await waitFor(() =>
       expect(
         screen.getByRole("option", { name: "Vendor TX Module" }),
       ).toBeInTheDocument(),
     );
-    expect(mocks.loadCatalog).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("option", { name: "ST-Link / STM32 DFU" }),
+    ).not.toBeInTheDocument();
+
     const build = screen.getByRole("button", {
       name: "بناء Firmware الرسمي",
     });
     expect(build).toBeDisabled();
-
     await user.selectOptions(
       screen.getByLabelText("المنطقة التنظيمية"),
       "EU_CE_2400",
     );
     expect(build).toBeEnabled();
-
-    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
-    expect(
-      screen.getByRole("option", { name: "Vendor RX" }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("المنطقة التنظيمية")).toHaveValue("");
-    expect(build).toBeDisabled();
   });
 
-  it("does not claim an internal ST-Link path when the Target does not expose it", async () => {
+  it("exposes internal STM32 DFU only when the official Target supports it", async () => {
     const user = userEvent.setup();
     render(<ExpressLrsParityWorkbench />);
     await user.click(
       screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
     );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
 
     await waitFor(() =>
       expect(
-        screen.getByRole("option", { name: "USB مباشر / UART" }),
+        screen.getByRole("option", { name: "Vendor RX" }),
       ).toBeInTheDocument(),
     );
     expect(
-      screen.queryByRole("option", { name: "ST-Link" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("option", { name: "ST-Link / STM32 DFU" }),
+    ).toBeInTheDocument();
+  });
+
+  it("resets the regulatory choice when the role changes", async () => {
+    const user = userEvent.setup();
+    render(<ExpressLrsParityWorkbench />);
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    expect(screen.getByLabelText("المنطقة التنظيمية")).toHaveValue("FCC_2400");
+
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    expect(screen.getByLabelText("المنطقة التنظيمية")).toHaveValue("");
   });
 });

@@ -1,6 +1,7 @@
 import { gunzipSync, strFromU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 
+import { copyToArrayBuffer } from "./byte-utils";
 import { prepareOfficialFirmwarePackage } from "./firmware-package";
 import type {
   ExpressLrsFirmwareOptions,
@@ -92,9 +93,11 @@ describe("official firmware package preparation", () => {
     const fetchImplementation = vi.fn(
       async (url: string | URL | Request) =>
         new Response(
-          String(url).endsWith("hardware.zip")
-            ? files.hardware
-            : files.firmware,
+          copyToArrayBuffer(
+            String(url).endsWith("hardware.zip")
+              ? files.hardware
+              : files.firmware,
+          ),
         ),
     ) as unknown as typeof fetch;
 
@@ -137,7 +140,7 @@ describe("official firmware package preparation", () => {
       "firmware/FCC/EXAMPLE_RX_2400/firmware.bin": espImage(),
     });
     const fetchImplementation = vi.fn(
-      async () => new Response(firmware),
+      async () => new Response(copyToArrayBuffer(firmware)),
     ) as unknown as typeof fetch;
     const rxTarget: OfficialTarget = {
       ...target,
@@ -173,9 +176,11 @@ describe("official firmware package preparation", () => {
     const fetchImplementation = vi.fn(
       async () =>
         new Response(
-          zipSync({
-            "firmware/EU/OTHER/firmware.bin": espImage(),
-          }),
+          copyToArrayBuffer(
+            zipSync({
+              "firmware/EU/OTHER/firmware.bin": espImage(),
+            }),
+          ),
         ),
     ) as unknown as typeof fetch;
 

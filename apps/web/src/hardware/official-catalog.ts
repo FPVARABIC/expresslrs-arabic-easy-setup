@@ -1,11 +1,10 @@
 import { unzipSync } from "fflate";
 
+import { parseOfficialTargetsFlexible } from "./official-target-index";
 import type {
-  ExpressLrsFlashMethod,
   OfficialCatalog,
   OfficialRelease,
   OfficialTarget,
-  OfficialTargetConfig,
 } from "./parity-types";
 
 export const EXPRESSLRS_ARTIFACT_BASE =
@@ -39,15 +38,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function safeKey(value: unknown): string | null {
   return typeof value === "string" && SAFE_KEY.test(value) ? value : null;
-}
-
-function safeOptionalString(value: unknown): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  return safeKey(value);
-}
-
-function safeRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return isRecord(value) ? Object.freeze({ ...value }) : null;
 }
 
 function abortBridge(
@@ -235,122 +225,19 @@ export function parseOfficialReleaseIndex(
   return Object.freeze(releases);
 }
 
-function normalizeUploadMethod(value: unknown): ExpressLrsFlashMethod | null {
-  if (typeof value !== "string") return null;
-  switch (value.toLocaleLowerCase("en-US")) {
-    case "uart":
-      return "uart";
-    case "bf":
-    case "betaflight":
-      return "betaflight";
-    case "etx":
-    case "edgetx":
-      return "edgetx";
-    case "passthru":
-    case "passthrough":
-      return "passthru";
-    case "wifi":
-      return "wifi";
-    case "stlink":
-      return "stlink";
-    case "dir":
-    case "stock":
-    case "download":
-      return "download";
-    default:
-      return null;
-  }
-}
-
-function parseTargetConfig(value: unknown): OfficialTargetConfig | null {
-  if (!isRecord(value)) return null;
-  const productName = safeKey(value.product_name);
-  const platform = safeKey(value.platform);
-  const firmware = safeKey(value.firmware);
-  if (productName === null || platform === null || firmware === null)
-    return null;
-  const methods = Array.isArray(value.upload_methods)
-    ? value.upload_methods
-        .map(normalizeUploadMethod)
-        .filter((method): method is ExpressLrsFlashMethod => method !== null)
-    : [];
-  const deduplicated = [...new Set(methods)];
-  if (!deduplicated.includes("download")) deduplicated.push("download");
-  return Object.freeze({
-    productName,
-    platform,
-    firmware,
-    luaName: safeOptionalString(value.lua_name),
-    layoutFile: safeOptionalString(value.layout_file),
-    logoFile: safeOptionalString(value.logo_file),
-    uploadMethods: Object.freeze(deduplicated),
-    minVersion: safeOptionalString(value.min_version),
-    customLayout: safeRecord(value.custom_layout),
-    overlay: safeRecord(value.overlay),
-    raw: Object.freeze({ ...value }),
-  });
-}
-
 export function parseOfficialTargets(
   value: unknown,
 ): readonly OfficialTarget[] {
-  if (!isRecord(value)) {
+  try {
+    return parseOfficialTargetsFlexible(value);
+  } catch (error: unknown) {
     throw new OfficialCatalogError(
       "INVALID_SCHEMA",
-      "Target catalog is not an object",
+      error instanceof Error
+        ? error.message
+        : "Official target catalog could not be decoded",
     );
   }
-  const targets: OfficialTarget[] = [];
-  for (const [vendorKeyValue, vendorValue] of Object.entries(value)) {
-    const vendorKey = safeKey(vendorKeyValue);
-    if (vendorKey === null || !isRecord(vendorValue)) continue;
-    const vendorName = safeKey(vendorValue.name) ?? vendorKey;
-    for (const [radioKeyValue, radioValue] of Object.entries(vendorValue)) {
-      const radioKey = safeKey(radioKeyValue);
-      if (radioKey === null || !isRecord(radioValue)) continue;
-      const role = radioKey.startsWith("tx_")
-        ? "tx"
-        : radioKey.startsWith("rx_")
-          ? "rx"
-          : null;
-      if (role === null) continue;
-      for (const [targetKeyValue, configValue] of Object.entries(radioValue)) {
-        const targetKey = safeKey(targetKeyValue);
-        const config = parseTargetConfig(configValue);
-        if (targetKey === null || config === null) continue;
-        targets.push(
-          Object.freeze({
-            id: `${vendorKey}/${radioKey}/${targetKey}`,
-            role,
-            vendorKey,
-            vendorName,
-            radioKey,
-            targetKey,
-            config,
-          }),
-        );
-        if (targets.length > 4_096) {
-          throw new OfficialCatalogError(
-            "INVALID_SCHEMA",
-            "Target catalog exceeds the bounded target count",
-          );
-        }
-      }
-    }
-  }
-  if (targets.length === 0) {
-    throw new OfficialCatalogError(
-      "INVALID_SCHEMA",
-      "Target catalog contains no TX/RX definitions",
-    );
-  }
-  targets.sort((left, right) =>
-    `${left.role}/${left.vendorName}/${left.radioKey}/${left.config.productName}`.localeCompare(
-      `${right.role}/${right.vendorName}/${right.radioKey}/${right.config.productName}`,
-      "en",
-    ),
-  );
-  return Object.freeze(targets);
 }
 
 function targetJsonFromHardwareArchive(archive: Uint8Array): Uint8Array {

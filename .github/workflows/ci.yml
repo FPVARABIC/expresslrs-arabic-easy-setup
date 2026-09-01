@@ -17,11 +17,13 @@ jobs:
   check:
     name: Quality, license, and security gates
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Require committed dependency lockfile
         run: test -f pnpm-lock.yaml
@@ -41,27 +43,13 @@ jobs:
       - name: Install dependencies from lockfile
         run: pnpm install --frozen-lockfile
 
+      - name: Enforce repository and workflow hygiene
+        run: pnpm check:ci-hygiene
+
       - name: Check formatting
-        id: formatting
-        continue-on-error: true
         run: pnpm format:check
 
-      - name: Generate formatter patch
-        if: steps.formatting.outcome == 'failure'
-        run: |
-          pnpm format
-          git diff --binary > prettier.patch
-
-      - name: Preserve formatter patch for review
-        if: steps.formatting.outcome == 'failure'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: prettier-fix-${{ github.run_attempt }}
-          path: prettier.patch
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Run lint, typecheck, test, and build
+      - name: Run lint, typecheck, tests, and production build
         run: |
           pnpm lint
           pnpm typecheck
@@ -98,9 +86,3 @@ jobs:
 
       - name: Audit dependencies for high-severity advisories
         run: pnpm security:audit
-
-      - name: Enforce formatting gate
-        if: always() && steps.formatting.outcome == 'failure'
-        run: |
-          echo "::error::Formatting changes are required; review the prettier-fix artifact."
-          exit 1

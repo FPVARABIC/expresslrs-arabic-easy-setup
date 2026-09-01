@@ -46,7 +46,6 @@ const noMatch: TargetMatchResult = {
   confidence: "NOT_FOUND",
   selected: null,
   candidates: [],
-  reasons: ["No Target matched"],
 };
 
 describe("reconnect Target verification", () => {
@@ -59,8 +58,9 @@ describe("reconnect Target verification", () => {
         match: {
           confidence: "EXACT",
           selected: target,
-          candidates: [target],
-          reasons: ["Exact"],
+          candidates: [
+            { target, score: 100, evidence: ["product-name-exact"] },
+          ],
         },
         manualTargetConfirmed: false,
       }),

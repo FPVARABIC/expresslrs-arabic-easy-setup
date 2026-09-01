@@ -1,6 +1,8 @@
 import { gzipSync, strToU8, unzipSync, zipSync } from "fflate";
+import { copyToArrayBuffer } from "./byte-utils";
 
 import { expressLrsBindingUid } from "./bind-phrase";
+import { validateFirmwareOptions } from "./firmware-options";
 import {
   EXPRESSLRS_ARTIFACT_BASE,
   OfficialCatalogError,
@@ -527,7 +529,7 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   }
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    copyToArrayBuffer(bytes),
   );
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
@@ -649,6 +651,10 @@ export async function prepareOfficialFirmwarePackage(input: {
   readonly fetchImplementation?: typeof fetch;
   readonly onProgress?: FirmwareBuildProgressListener;
 }): Promise<PreparedFirmwarePackage> {
+  const validatedOptions = validateFirmwareOptions({
+    target: input.target,
+    options: input.options,
+  });
   const revision = encodeURIComponent(input.release.revision);
   const firmwareArchive = await fetchArchive({
     url: `${EXPRESSLRS_ARTIFACT_BASE}/${revision}/firmware.zip`,
@@ -684,12 +690,12 @@ export async function prepareOfficialFirmwarePackage(input: {
     maximumEntryBytes: MAX_FIRMWARE_ENTRY_BYTES,
     maximumTotalBytes: MAX_FIRMWARE_UNCOMPRESSED_BYTES,
     include: (name) =>
-      targetPathMatch(name, input.target, input.options.region),
+      targetPathMatch(name, input.target, validatedOptions.region),
   });
   if (Object.keys(firmwareEntries).length === 0) {
     throw new FirmwarePackageError(
       "REGION_NOT_FOUND",
-      `No firmware files matched ${input.options.region}/${input.target.config.firmware}`,
+      `No firmware files matched ${validatedOptions.region}/${input.target.config.firmware}`,
     );
   }
   const hardwareEntries =
@@ -727,12 +733,12 @@ export async function prepareOfficialFirmwarePackage(input: {
           application,
           release: input.release,
           target: input.target,
-          options: input.options,
+          options: validatedOptions,
         })
       : configuredEspApplication({
           application,
           target: input.target,
-          options: input.options,
+          options: validatedOptions,
           layout: targetLayout(input.target, hardwareEntries),
           logo: targetLogo(input.target, hardwareEntries),
         });
@@ -819,7 +825,7 @@ export async function prepareOfficialFirmwarePackage(input: {
       "manifest.json": recoveryManifest(
         input.release,
         input.target,
-        input.options,
+        validatedOptions,
         segments,
       ),
       ...Object.fromEntries(
@@ -834,12 +840,12 @@ export async function prepareOfficialFirmwarePackage(input: {
     release: input.release,
     target: input.target,
     optionsSummary: Object.freeze({
-      region: input.options.region,
-      domain: input.options.domain,
-      bindingConfigured: input.options.bindPhrase.length > 0,
+      region: validatedOptions.region,
+      domain: validatedOptions.domain,
+      bindingConfigured: validatedOptions.bindPhrase.length > 0,
       wifiConfigured:
-        input.options.wifiSsid.length > 0 ||
-        input.options.wifiPassword.length > 0,
+        validatedOptions.wifiSsid.length > 0 ||
+        validatedOptions.wifiPassword.length > 0,
     }),
     segments,
     primaryFileName,
@@ -856,7 +862,7 @@ export function downloadPreparedBytes(
   fileName: string,
   mimeType: string,
 ): void {
-  const blob = new Blob([bytes], { type: mimeType });
+  const blob = new Blob([copyToArrayBuffer(bytes)], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

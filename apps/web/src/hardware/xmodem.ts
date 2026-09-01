@@ -1,6 +1,7 @@
 import type { HardwareSerialPort } from "./serial";
 import type { FirmwareFlashProgressListener } from "./parity-types";
 
+import { isAbortRequested } from "./byte-utils";
 const SOH = 0x01;
 const EOT = 0x04;
 const ACK = 0x06;
@@ -71,7 +72,7 @@ class ByteInbox {
   }): Promise<number> {
     const deadline = Date.now() + input.timeoutMs;
     while (this.#bytes.length === 0) {
-      if (input.signal?.aborted === true) {
+      if (isAbortRequested(input.signal)) {
         throw new XmodemError("ABORTED", "XMODEM transfer was cancelled");
       }
       const remaining = deadline - Date.now();
@@ -82,13 +83,12 @@ class ByteInbox {
         );
       }
       await new Promise<void>((resolve) => {
-        let timer: ReturnType<typeof setTimeout>;
         const wake = () => {
           clearTimeout(timer);
           this.#waiters.delete(wake);
           resolve();
         };
-        timer = setTimeout(wake, Math.min(remaining, 250));
+        const timer = setTimeout(wake, Math.min(remaining, 250));
         this.#waiters.add(wake);
       });
     }
@@ -111,7 +111,7 @@ export async function flashXmodemFirmware(input: {
       "XMODEM firmware size is outside the 1-byte to 4-MiB limit",
     );
   }
-  if (input.signal?.aborted === true) {
+  if (isAbortRequested(input.signal)) {
     throw new XmodemError("ABORTED", "XMODEM transfer was cancelled");
   }
   try {
@@ -218,7 +218,7 @@ export async function flashXmodemFirmware(input: {
 
     const blockCount = Math.ceil(input.firmware.byteLength / BLOCK_BYTES);
     for (let blockIndex = 0; blockIndex < blockCount; blockIndex += 1) {
-      if (input.signal?.aborted === true) {
+      if (isAbortRequested(input.signal)) {
         await writer.write(new Uint8Array([CAN, CAN]));
         throw new XmodemError("ABORTED", "XMODEM transfer was cancelled");
       }

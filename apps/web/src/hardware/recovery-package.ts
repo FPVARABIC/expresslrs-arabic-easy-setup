@@ -1,5 +1,6 @@
 import { strFromU8, unzipSync } from "fflate";
 
+import { copyToArrayBuffer } from "./byte-utils";
 import type { FirmwareSegment, OfficialTarget } from "./parity-types";
 
 const MAX_RECOVERY_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -61,7 +62,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    copyToArrayBuffer(bytes),
   );
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),

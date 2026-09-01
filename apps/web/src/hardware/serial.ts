@@ -81,7 +81,9 @@ function errorName(error: unknown): string {
 }
 
 function safeIdentifier(value: unknown): number | null {
-  return Number.isSafeInteger(value) && (value as number) >= 0
+  return Number.isSafeInteger(value) &&
+    (value as number) >= 0 &&
+    (value as number) <= 0xffff
     ? (value as number)
     : null;
 }
@@ -223,6 +225,9 @@ export class CrsfSerialLink {
   #reader: HardwareSerialReader | null = null;
   #writer: HardwareSerialWriter | null = null;
   #readTask: Promise<void> | null = null;
+  #cleanupTask: Promise<void> | null = null;
+  #portCloseTask: Promise<boolean> | null = null;
+  #portClosed = false;
   #closed = false;
 
   public constructor(port: HardwareSerialPort) {
@@ -255,8 +260,33 @@ export class CrsfSerialLink {
         "The selected serial port does not expose readable and writable streams",
       );
     }
-    this.#reader = readable.getReader();
-    this.#writer = writable.getWriter();
+    let reader: HardwareSerialReader;
+    try {
+      reader = readable.getReader();
+    } catch {
+      throw new HardwareSerialError(
+        "CLOSED",
+        "The selected serial reader could not be acquired",
+      );
+    }
+
+    let writer: HardwareSerialWriter;
+    try {
+      writer = writable.getWriter();
+    } catch {
+      try {
+        reader.releaseLock();
+      } catch {
+        // The reader acquisition is rolled back on a best-effort basis.
+      }
+      throw new HardwareSerialError(
+        "CLOSED",
+        "The selected serial writer could not be acquired",
+      );
+    }
+
+    this.#reader = reader;
+    this.#writer = writer;
     this.#readTask = this.#readLoop();
   }
 
@@ -294,6 +324,7 @@ export class CrsfSerialLink {
       await this.write(bytes);
     } catch (error: unknown) {
       waiting.cancel();
+      await waiting.promise.catch(() => undefined);
       throw error;
     }
     return waiting.promise;
@@ -371,49 +402,68 @@ export class CrsfSerialLink {
   public async close(
     input: { readonly closePort?: boolean } = {},
   ): Promise<boolean> {
-    if (this.#closed) {
-      return true;
-    }
     this.#closed = true;
     this.#rejectAll(
       new HardwareSerialError("CLOSED", "The serial link was closed"),
     );
 
+    await this.#cleanupResources();
+
+    if (input.closePort === false || this.#portClosed) {
+      return true;
+    }
+    if (this.#portCloseTask === null) {
+      const closeTask = this.#port
+        .close()
+        .then(() => {
+          this.#portClosed = true;
+          return true;
+        })
+        .catch(() => false)
+        .finally(() => {
+          if (!this.#portClosed && this.#portCloseTask === closeTask) {
+            this.#portCloseTask = null;
+          }
+        });
+      this.#portCloseTask = closeTask;
+    }
+    return this.#portCloseTask;
+  }
+
+  #cleanupResources(): Promise<void> {
+    if (this.#cleanupTask !== null) {
+      return this.#cleanupTask;
+    }
     const reader = this.#reader;
     const writer = this.#writer;
+    const readTask = this.#readTask;
     this.#reader = null;
     this.#writer = null;
-    try {
-      await reader?.cancel();
-    } catch {
-      // Reader cancellation is best effort; locks are still released below.
-    }
-    try {
-      await this.#readTask;
-    } catch {
-      // The read loop already mapped the failure to pending operations.
-    }
     this.#readTask = null;
-    try {
-      reader?.releaseLock();
-    } catch {
-      // A browser may already have released a disconnected reader lock.
-    }
-    try {
-      writer?.releaseLock();
-    } catch {
-      // A browser may already have released a disconnected writer lock.
-    }
 
-    if (input.closePort === false) {
-      return true;
-    }
-    try {
-      await this.#port.close();
-      return true;
-    } catch {
-      return false;
-    }
+    this.#cleanupTask = (async () => {
+      try {
+        await reader?.cancel();
+      } catch {
+        // Reader cancellation is best effort; locks are still released below.
+      }
+      try {
+        await readTask;
+      } catch {
+        // The read loop already mapped the failure to pending operations.
+      }
+      try {
+        reader?.releaseLock();
+      } catch {
+        // A browser may already have released a disconnected reader lock.
+      }
+      try {
+        writer?.releaseLock();
+      } catch {
+        // A browser may already have released a disconnected writer lock.
+      }
+    })();
+    return this.#cleanupTask;
   }
 
   async #readLoop(): Promise<void> {
@@ -449,6 +499,9 @@ export class CrsfSerialLink {
             "The device serial stream ended unexpectedly",
           ),
         );
+        queueMicrotask(() => {
+          void this.close();
+        });
       }
     } catch {
       if (!this.#closed) {
@@ -459,6 +512,9 @@ export class CrsfSerialLink {
             "Reading from the serial port failed",
           ),
         );
+        queueMicrotask(() => {
+          void this.close();
+        });
       }
     }
   }

@@ -18,8 +18,8 @@ import type {
 class Queue {
   readonly #items: Uint8Array[] = [];
   #waiting:
-    | ((value: Readonly<{ done: boolean; value?: Uint8Array }>) => void)
-    | null = null;
+    ((value: Readonly<{ done: boolean; value?: Uint8Array }>) => void) | null =
+    null;
   #closed = false;
 
   push(value: Uint8Array): void {
@@ -58,8 +58,7 @@ function deviceInfo(role: "tx" | "rx", parameterCount = 1): Uint8Array {
     address: CrsfAddress.radio,
     type: CrsfFrameType.deviceInfo,
     destination: CrsfAddress.usb,
-    origin:
-      role === "tx" ? CrsfAddress.transmitter : CrsfAddress.receiver,
+    origin: role === "tx" ? CrsfAddress.transmitter : CrsfAddress.receiver,
     data: concatBytes(
       terminated(role === "tx" ? "Audit TX" : "Audit RX"),
       new Uint8Array([

@@ -31,11 +31,7 @@ const target: OfficialTarget = {
 };
 
 function dataView(bytes: Uint8Array): DataView {
-  return new DataView(
-    bytes.slice().buffer,
-    0,
-    bytes.byteLength,
-  );
+  return new DataView(bytes.slice().buffer, 0, bytes.byteLength);
 }
 
 function fakeDfuDevice(): {
@@ -94,7 +90,9 @@ function fakeDfuDevice(): {
           : new Uint8Array(
               ArrayBuffer.isView(source) ? source.buffer : source,
               ArrayBuffer.isView(source) ? source.byteOffset : 0,
-              ArrayBuffer.isView(source) ? source.byteLength : source.byteLength,
+              ArrayBuffer.isView(source)
+                ? source.byteLength
+                : source.byteLength,
             ).slice();
       if (setup.request === 4 || setup.request === 6) {
         state = 2;
@@ -196,7 +194,10 @@ describe("STM32 WebUSB DFU", () => {
       },
     });
 
-    expect(result).toEqual({ bytesWritten: firmware.byteLength, baseAddress: 0x0800_0000 });
+    expect(result).toEqual({
+      bytesWritten: firmware.byteLength,
+      baseAddress: 0x0800_0000,
+    });
     expect(hardware.erasedPages).toEqual([0x0800_0000]);
     expect(hardware.memory.slice(0, firmware.byteLength)).toEqual(firmware);
     expect(progress).toContain("ERASE");

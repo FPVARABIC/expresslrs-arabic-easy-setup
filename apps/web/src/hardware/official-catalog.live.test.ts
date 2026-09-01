@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { loadOfficialExpressLrsCatalog } from "./official-catalog";
 
-const runLive = process.env.EXPRESSLRS_LIVE_CATALOG === "1";
+const runLive =
+  (
+    globalThis as {
+      readonly process?: {
+        readonly env?: Readonly<Record<string, string | undefined>>;
+      };
+    }
+  ).process?.env?.EXPRESSLRS_LIVE_CATALOG === "1";
 
 (runLive ? describe : describe.skip)("live official ExpressLRS catalog", () => {
   it("parses the current official release index and target archive", async () => {

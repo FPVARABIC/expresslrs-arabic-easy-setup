@@ -1,6 +1,7 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 
+import { copyToArrayBuffer } from "./byte-utils";
 import { validateRecoveryPackage } from "./recovery-package";
 import type { OfficialTarget } from "./parity-types";
 
@@ -27,7 +28,10 @@ const target: OfficialTarget = {
 };
 
 async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    copyToArrayBuffer(bytes),
+  );
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");

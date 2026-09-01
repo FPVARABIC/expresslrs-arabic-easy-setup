@@ -1,6 +1,7 @@
 import { zipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 
+import { copyToArrayBuffer } from "./byte-utils";
 import {
   loadOfficialExpressLrsCatalog,
   parseOfficialReleaseIndex,
@@ -93,7 +94,7 @@ describe("official ExpressLRS catalog", () => {
           { status: 200 },
         );
       }
-      return new Response(hardwareZip, { status: 200 });
+      return new Response(copyToArrayBuffer(hardwareZip), { status: 200 });
     }) as unknown as typeof fetch;
 
     const catalog = await loadOfficialExpressLrsCatalog({
