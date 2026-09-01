@@ -1,0 +1,137 @@
+name: M2 hardware user-journey audit repair
+
+on:
+  push:
+    branches:
+      - feat/m2-real-hardware-first-test
+    paths:
+      - .github/workflows/m2-user-journey-audit-repair.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: m2-user-journey-audit-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Repair, verify, and commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out hardware branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply audited repairs
+        run: python scripts/m2-user-journey-audit-repair.py
+
+      - name: Format repaired source
+        run: pnpm format
+
+      - name: Run source and user-journey gates
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm check:hardware-journey
+
+      - name: Run targeted hardware regressions
+        run: pnpm --filter @elrs-easy/web test -- transport-hardening.test.ts
+
+      - name: Run complete test suite
+        run: pnpm test | tee /tmp/tests.log
+
+      - name: Build production and Pages artifacts
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+        run: |
+          pnpm build
+          pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+
+      - name: Run license and security gates
+        run: |
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Write audit record
+        run: |
+          mkdir -p docs/testing
+          TEST_FILES=$(sed -nE 's/.*Test Files[[:space:]]+([0-9]+) passed.*/\1/p' /tmp/tests.log | tail -n1)
+          TESTS=$(sed -nE 's/.*Tests[[:space:]]+([0-9]+) passed.*/\1/p' /tmp/tests.log | tail -n1)
+          cat > docs/testing/hardware-user-journey-deep-audit.md <<EOF
+          # Hardware user-journey deep audit
+
+          - Automated result: \`PASS\`
+          - Test files passed: \`${TEST_FILES:-not-parsed}\`
+          - Tests passed: \`${TESTS:-not-parsed}\`
+          - Physical hardware observation: \`NONE\`
+
+          ## Corrected findings
+
+          1. Cancellable normalization replaces synchronous dependent form-state cascades.
+          2. Connection timing is isolated from React render purity.
+          3. CRSF input allocation is bounded before copying.
+          4. Malformed device-controlled Device Info fails closed.
+          5. Legacy Bind and Bootloader keys cannot exceed one CRSF frame.
+          6. Partial stream-lock acquisition rolls back safely.
+          7. EOF and read failures release Reader, Writer, and browser-port resources.
+          8. Concurrent close requests serialize one browser-port close.
+          9. Failed writes consume the cancelled frame waiter before propagating the write failure.
+          10. Impossible USB VID/PID values are discarded as invalid evidence.
+          11. Arabic and English copy now separates verified CRSF operations from still-gated firmware flashing.
+          12. CI permanently checks the production user journey against transport-open-only regressions.
+
+          ## Evidence boundary
+
+          Protocol emulators and browser tests validate software behavior, cleanup, bounds, and failure semantics. They do not prove a commercial TX/RX electrical path, RF binding, bootloader entry, firmware write, or recovery on physical hardware. Those remain \`HARDWARE_OBSERVED\` only after the first device session.
+          EOF
+          pnpm format
+          pnpm format:check
+
+      - name: Remove one-shot repair machinery
+        run: |
+          rm -f scripts/m2-user-journey-audit-repair.py
+          rm -f .github/workflows/m2-user-journey-audit-repair.yml
+          rm -f .github/workflows/m2-audit-format-export.yml
+
+      - name: Commit verified repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No repair changes were required."
+            exit 0
+          fi
+          git commit -m "fix(hardware): harden real user journey and transport cleanup"
+          git push origin HEAD:feat/m2-real-hardware-first-test
