@@ -1,0 +1,39 @@
+name: Export real-user audit source
+
+on:
+  push:
+    branches:
+      - audit/real-user-e2e-export-trigger-2026-09-01
+    paths:
+      - .github/workflows/export-real-user-audit-source.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact audit source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Record exact source identity
+        run: |
+          git rev-parse HEAD > AUDIT_SOURCE_SHA.txt
+          git status --short > AUDIT_SOURCE_STATUS.txt
+
+      - name: Package source
+        run: |
+          tar --exclude=.git --exclude=real-user-audit-source.tar.gz -czf real-user-audit-source.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-user-audit-source
+          path: real-user-audit-source.tar.gz
+          if-no-files-found: error
+          retention-days: 3
