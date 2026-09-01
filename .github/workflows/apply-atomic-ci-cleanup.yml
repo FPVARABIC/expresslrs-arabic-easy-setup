@@ -145,12 +145,13 @@ jobs:
 
       - name: Run the complete pre-commit quality gate
         shell: bash
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
         run: |
           set -euo pipefail
           pnpm check
-          GITHUB_PAGES=true \
-            PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ \
-            pnpm --filter @elrs-easy/web build
+          pnpm --filter @elrs-easy/web build
           pnpm check:pages-build
           pnpm licenses:report
           pnpm licenses:check
