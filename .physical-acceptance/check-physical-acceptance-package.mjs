@@ -36,12 +36,12 @@ const [model, panel, workbench, main, packageJson] = await Promise.all([
   readFile(path.join(root, "package.json"), "utf8"),
 ]);
 
-const stepIds = [
-  ...model.matchAll(/^\s*\| "([a-z0-9_]+)";$/gmu),
-].map((match) => match[1]);
+const stepIds = [...model.matchAll(/^\s+id: "([a-z0-9_]+)",$/gmu)].map(
+  (match) => match[1],
+);
 if (stepIds.length !== 19 || new Set(stepIds).size !== 19) {
   failures.push(
-    `physical acceptance step union must contain 19 unique IDs, found ${stepIds.length}`,
+    `physical acceptance definitions must contain 19 unique IDs, found ${stepIds.length}`,
   );
 }
 
