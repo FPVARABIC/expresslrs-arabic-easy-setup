@@ -11,6 +11,7 @@ import "./pwa/pwa.css";
 import "./reference-theme.css";
 import "./connection-hub.css";
 import "./parity-workbench.css";
+import "./physical-acceptance.css";
 
 document.documentElement.lang = defaultLocale;
 document.documentElement.dir = getDirection(defaultLocale);

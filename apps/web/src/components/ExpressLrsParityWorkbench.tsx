@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
+import type { PhysicalAcceptanceContextSnapshot } from "../acceptance/physical-acceptance";
+import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
+
 import { verifyObservedFirmwareBuild } from "../hardware/build-verification";
 import { copyToArrayBuffer } from "../hardware/byte-utils";
 import type { CrsfParameter } from "../hardware/crsf";
@@ -972,6 +975,47 @@ export function ExpressLrsParityWorkbench() {
     resetPreparedState();
   }
 
+  const physicalAcceptanceContext: PhysicalAcceptanceContextSnapshot =
+    Object.freeze({
+      capturedAt: nowIso(),
+      secureContext: window.isSecureContext,
+      webSerialSupported: "serial" in navigator,
+      connectionState: identity === null ? "DISCONNECTED" : "CRSF_CONNECTED",
+      selectedRole: role,
+      observedRole: identity?.role ?? null,
+      productName: identity?.productName ?? null,
+      firmwareVersion: identity?.firmwareVersion ?? null,
+      hardwareVersion: identity?.hardwareVersion ?? null,
+      parameterCount: identity?.parameterCount ?? null,
+      usbVendorId: identity?.usb.usbVendorId ?? null,
+      usbProductId: identity?.usb.usbProductId ?? null,
+      targetId: selectedTarget?.id ?? null,
+      targetKey: selectedTarget?.targetKey ?? null,
+      targetName: selectedTarget?.config.productName ?? null,
+      targetPlatform: selectedTarget?.config.platform ?? null,
+      targetConfidence: targetMatch?.confidence ?? null,
+      releaseLabel: selectedRelease?.label ?? null,
+      releaseRevision: selectedRelease?.revision ?? null,
+      flashMethod: method,
+      settingsBackupAvailable: settingsBackup !== null,
+      writableParameterCount: writableParameters.length,
+      bindCommandAvailable: parameters.some(
+        (parameter) =>
+          parameter.kind === "command" && /\bbind\b/iu.test(parameter.name),
+      ),
+      bootloaderCommandAvailable: commandForBootloader(parameters) !== null,
+      packageFileName: prepared?.primaryFileName ?? null,
+      recoveryFileName: prepared?.recoveryFileName ?? null,
+      packageSegmentCount: prepared?.segments.length ?? 0,
+      packageSegmentHashes: Object.freeze(
+        prepared?.segments.map((segment) => segment.sha256) ?? [],
+      ),
+      recoveryDownloaded,
+      checkpointStage: checkpoint?.stage ?? null,
+      flashStage: flashProgress?.stage ?? null,
+      statusMessage: status,
+    });
+
   return (
     <main className="parity-shell" dir="rtl">
       <header className="parity-header">
@@ -1769,6 +1813,8 @@ export function ExpressLrsParityWorkbench() {
           </div>
         )}
       </section>
+
+      <PhysicalAcceptancePanel context={physicalAcceptanceContext} />
 
       <footer className="parity-footer">
         <span>المصدر: ExpressLRS الرسمي</span>
