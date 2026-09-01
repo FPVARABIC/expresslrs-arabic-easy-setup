@@ -72,20 +72,20 @@ jobs:
           VITE_BUILD_SHA: ${{ env.TARGET_HEAD }}
         run: pnpm --filter @elrs-easy/web build
 
-      - name: Reconstruct audited browser journey
+      - name: Reconstruct audited browser journey inside the repository
         shell: bash
         run: |
           set -euo pipefail
-          tr -d '\r\n' < .audit/real-user-e2e-part-00.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/real-user-e2e-audit.mjs"
-          printf '%s  %s\n' "$PAYLOAD_SHA256" "$RUNNER_TEMP/real-user-e2e-audit.mjs" | sha256sum -c -
-          node --check "$RUNNER_TEMP/real-user-e2e-audit.mjs"
+          tr -d '\r\n' < .audit/real-user-e2e-part-00.b64 | base64 --decode | gzip --decompress > scripts/real-user-e2e-audit.runtime.mjs
+          printf '%s  %s\n' "$PAYLOAD_SHA256" scripts/real-user-e2e-audit.runtime.mjs | sha256sum -c -
+          node --check scripts/real-user-e2e-audit.runtime.mjs
 
       - name: Run desktop, mobile, offline, recorder, CRSF, and firmware journeys
         id: browser_audit
         continue-on-error: true
         env:
           AUDIT_OUT: ${{ runner.temp }}/real-user-audit-output
-        run: node "$RUNNER_TEMP/real-user-e2e-audit.mjs"
+        run: node scripts/real-user-e2e-audit.runtime.mjs
 
       - name: Record audit step outcome
         shell: bash
