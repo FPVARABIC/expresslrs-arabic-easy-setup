@@ -1,0 +1,178 @@
+name: Publish audited physical-test candidate
+
+on:
+  push:
+    branches:
+      - automation/publish-audited-candidate-2026-09-01
+    paths:
+      - .github/workflows/publish-audited-candidate.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-audited-physical-candidate
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: feat/m2-real-hardware-first-test
+  HELPER_BRANCH: automation/publish-audited-candidate-2026-09-01
+  PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+
+jobs:
+  verify-and-pin:
+    name: Re-test current candidate and pin reviewed deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out current physical-test candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Fetch focused browser audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/heads/${HELPER_BRANCH}:refs/remotes/origin/${HELPER_BRANCH}"
+
+      - name: Capture candidate and require successful canonical CI
+        id: candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate="$(git rev-parse HEAD)"
+          message="$(git log -1 --format=%s)"
+          test "$message" = 'fix(hardware): harden physical recorder persistence'
+          test ! -e .acceptance-stage/probe.txt
+          python3 - "$candidate" <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          sha = sys.argv[1]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/actions/runs?head_sha={sha}&per_page=100",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              runs = json.load(response).get("workflow_runs", [])
+          successful = [
+              run
+              for run in runs
+              if run.get("name") == "CI"
+              and run.get("head_sha") == sha
+              and run.get("status") == "completed"
+              and run.get("conclusion") == "success"
+          ]
+          if not successful:
+              raise SystemExit(f"No successful canonical CI run exists for {sha}")
+          print(f"Canonical CI verified: run #{successful[0].get('run_number')}")
+          PY
+          echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Re-run complete source qualification
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Build exact Pages candidate
+        env:
+          GITHUB_PAGES: "true"
+          VITE_BUILD_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+          mkdir -p /tmp/e2e-site/expresslrs-arabic-easy-setup
+          cp -a apps/web/dist/. /tmp/e2e-site/expresslrs-arabic-easy-setup/
+
+      - name: Install isolated browser test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/focused-browser-audit
+          cd /tmp/focused-browser-audit
+          npm init -y >/dev/null
+          npm install --no-save @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+          git --git-dir="$GITHUB_WORKSPACE/.git" show "refs/remotes/origin/${HELPER_BRANCH}:.publish-audit/focused-browser-audit.mjs" > focused-browser-audit.mjs
+
+      - name: Run focused production-browser gate
+        shell: bash
+        env:
+          AUDIT_URL: http://127.0.0.1:4173/expresslrs-arabic-easy-setup/
+          EXPECTED_SHA: ${{ steps.candidate.outputs.sha }}
+          AUDIT_OUTPUT: /tmp/focused-browser-audit/evidence
+        run: |
+          set -euo pipefail
+          python3 -m http.server 4173 --directory /tmp/e2e-site > /tmp/e2e-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            curl -fsS "$AUDIT_URL" >/dev/null && break
+            sleep 0.25
+          done
+          cd /tmp/focused-browser-audit
+          node focused-browser-audit.mjs
+
+      - name: Pin main deployment to the browser-audited candidate
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          rm -rf /tmp/publish-main
+          git worktree add /tmp/publish-main origin/main
+          cd /tmp/publish-main
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path(".github/workflows/deploy-reviewed-pages.yml")
+          text = path.read_text(encoding="utf-8")
+          updated, count = re.subn(
+              r"(?m)^  REVIEWED_SHA: [0-9a-f]{40}$",
+              f"  REVIEWED_SHA: {os.environ['CANDIDATE_SHA']}",
+              text,
+          )
+          if count != 1:
+              raise SystemExit(f"Expected one REVIEWED_SHA entry, found {count}")
+          path.write_text(updated, encoding="utf-8")
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/deploy-reviewed-pages.yml
+          git diff --cached --quiet && {
+            echo 'Reviewed candidate is already pinned.'
+            exit 0
+          }
+          git commit -m 'chore(pages): publish browser-audited hardware candidate'
+          git push origin HEAD:main
