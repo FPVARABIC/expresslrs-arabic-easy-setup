@@ -1,0 +1,107 @@
+name: Extended real-user browser audit
+
+on:
+  push:
+    branches:
+      - audit/real-user-e2e-runner-2026-09-01
+    paths:
+      - .github/workflows/extended-real-user-audit.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-real-user-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Exercise published and local production applications
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out current physical-test candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: feat/m2-real-hardware-first-test
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch audit harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin refs/heads/audit/real-user-e2e-runner-2026-09-01:refs/remotes/origin/audit/real-user-e2e-runner-2026-09-01
+          mkdir -p /tmp/extended-audit
+          git show refs/remotes/origin/audit/real-user-e2e-runner-2026-09-01:audit/extended-browser-audit.mjs > /tmp/extended-audit/extended-browser-audit.mjs
+          git rev-parse HEAD > /tmp/extended-audit/candidate-sha.txt
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install and qualify exact source
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Build production Pages candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$(cat /tmp/extended-audit/candidate-sha.txt)"
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ VITE_BUILD_SHA="$candidate" pnpm --filter @elrs-easy/web build
+          GITHUB_PAGES=true PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ pnpm check:pages-build
+          mkdir -p /tmp/extended-site/expresslrs-arabic-easy-setup
+          cp -a apps/web/dist/. /tmp/extended-site/expresslrs-arabic-easy-setup/
+
+      - name: Install isolated Chromium automation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/extended-audit
+          npm init -y >/dev/null
+          npm install --no-save @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run extended real-user scenarios
+        shell: bash
+        env:
+          LOCAL_URL: http://127.0.0.1:4173/expresslrs-arabic-easy-setup/
+          PUBLIC_URL: https://fpvarabic.github.io/expresslrs-arabic-easy-setup/
+          AUDIT_OUTPUT: /tmp/extended-audit/evidence
+        run: |
+          set -euo pipefail
+          export EXPECTED_SHA="$(cat /tmp/extended-audit/candidate-sha.txt)"
+          python3 -m http.server 4173 --directory /tmp/extended-site > /tmp/extended-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            curl -fsS "$LOCAL_URL" >/dev/null && break
+            sleep 0.25
+          done
+          cd /tmp/extended-audit
+          node extended-browser-audit.mjs
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: extended-real-user-audit
+          path: |
+            /tmp/extended-audit/evidence
+            /tmp/extended-server.log
+          if-no-files-found: warn
+          retention-days: 14
