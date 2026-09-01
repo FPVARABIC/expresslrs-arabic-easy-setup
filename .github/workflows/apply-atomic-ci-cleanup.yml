@@ -1,0 +1,167 @@
+name: Apply atomic CI cleanup
+
+on:
+  push:
+    branches:
+      - automation/atomic-ci-cleanup-2026-09-01
+    paths:
+      - .github/workflows/apply-atomic-ci-cleanup.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: atomic-ci-cleanup
+  cancel-in-progress: false
+
+env:
+  TARGET_BRANCH: feat/m2-real-hardware-first-test
+  TARGET_HEAD: 84ce26dd49c2cffc0c8f4171f71673f2cfaa48df
+  HELPER_BRANCH: automation/atomic-ci-cleanup-2026-09-01
+  B64_SHA256: babc694c40bd3a673edd91c950f9c96d62610b52ca927f923cf6fb8794d6001f
+  GZIP_SHA256: e4d89a96073d7cb8b5dba30d95090db298f67d5f448b6d20f11c4e35332d3792
+  PATCH_SHA256: 966f33caed59a43936f2d42dacae0b41608a615bcb82de47a045f4113d87b87a
+
+jobs:
+  apply:
+    name: Validate and commit one atomic cleanup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out exact target branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Verify target head has not changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$TARGET_HEAD" || {
+            echo "::error::Target branch moved from $TARGET_HEAD to $actual; refusing a non-reviewed update."
+            exit 1
+          }
+
+      - name: Fetch staged patch and canonical workflow templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin \
+            "refs/heads/${HELPER_BRANCH}:refs/remotes/origin/${HELPER_BRANCH}"
+
+      - name: Reconstruct and apply the reviewed source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="refs/remotes/origin/${HELPER_BRANCH}"
+          : > /tmp/atomic-source.patch.gz.b64.with-breaks
+          for part in 01 02 03 04 05; do
+            git show "${helper}:.atomic-cleanup/part-${part}.txt" \
+              >> /tmp/atomic-source.patch.gz.b64.with-breaks
+          done
+          tr -d '\r\n' \
+            < /tmp/atomic-source.patch.gz.b64.with-breaks \
+            > /tmp/atomic-source.patch.gz.b64
+          printf '%s  %s\n' "$B64_SHA256" /tmp/atomic-source.patch.gz.b64 \
+            | sha256sum -c -
+          base64 --decode /tmp/atomic-source.patch.gz.b64 \
+            > /tmp/atomic-source.patch.gz
+          printf '%s  %s\n' "$GZIP_SHA256" /tmp/atomic-source.patch.gz \
+            | sha256sum -c -
+          gzip --decompress --stdout /tmp/atomic-source.patch.gz \
+            > /tmp/atomic-source.patch
+          printf '%s  %s\n' "$PATCH_SHA256" /tmp/atomic-source.patch \
+            | sha256sum -c -
+          git apply --check /tmp/atomic-source.patch
+          git apply /tmp/atomic-source.patch
+
+      - name: Replace CI workflows and remove every temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="refs/remotes/origin/${HELPER_BRANCH}"
+          mkdir -p .github/workflows
+          git show "${helper}:.atomic-cleanup/ci.yml" \
+            > .github/workflows/ci.yml
+          git show "${helper}:.atomic-cleanup/deploy-pages.yml" \
+            > .github/workflows/deploy-pages.yml
+          find .github/workflows -maxdepth 1 -type f \
+            \( -name '*.yml' -o -name '*.yaml' \) \
+            ! -name 'ci.yml' \
+            ! -name 'deploy-pages.yml' \
+            -delete
+          rm -f .github/patches/foundation-repair.patch
+          rmdir .github/patches 2>/dev/null || true
+
+      - name: Verify atomic cleanup shape before installing dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t workflows < <(
+            find .github/workflows -maxdepth 1 -type f \
+              \( -name '*.yml' -o -name '*.yaml' \) \
+              -printf '%f\n' \
+              | sort
+          )
+          test "${#workflows[@]}" -eq 2
+          test "${workflows[0]}" = 'ci.yml'
+          test "${workflows[1]}" = 'deploy-pages.yml'
+          test ! -e .github/patches/foundation-repair.patch
+          test ! -e apps/web/src/main-v2.tsx
+          test ! -e apps/web/src/components/ExpressLrsParityWorkbenchV2.tsx
+          test ! -e apps/web/src/components/ExpressLrsParityWorkbenchV2.test.tsx
+          test ! -e apps/web/src/hardware/official-catalog-v2.ts
+          test ! -e apps/web/src/hardware/official-target-index-v2.ts
+          test ! -e apps/web/src/hardware/official-target-index-v2.test.ts
+          grep -Fq \
+            'from "./components/ExpressLrsParityWorkbench"' \
+            apps/web/src/main.tsx
+          test -f apps/web/src/hardware/stm32-dfu.ts
+          test -f scripts/check-ci-hygiene.mjs
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install exact locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the complete pre-commit quality gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm check
+          GITHUB_PAGES=true \
+            PAGES_BASE_PATH=/expresslrs-arabic-easy-setup/ \
+            pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+          pnpm licenses:report
+          pnpm licenses:check
+          pnpm security:audit
+
+      - name: Commit and push exactly one target-branch commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_HEAD"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          test -n "$(git status --short)" || {
+            echo '::error::The reviewed atomic cleanup produced no changes.'
+            exit 1
+          }
+          git commit \
+            -m 'fix(ci): atomically consolidate hardware path and quality gates'
+          git push origin "HEAD:${TARGET_BRANCH}"
