@@ -58,7 +58,13 @@ jobs:
           set -euo pipefail
           helper="refs/remotes/origin/${HELPER_BRANCH}"
           : > /tmp/atomic-source.patch.gz.b64.with-breaks
-          for part in 01 02 03 04 05; do
+          git show "${helper}:.atomic-cleanup/part-01.txt" \
+            >> /tmp/atomic-source.patch.gz.b64.with-breaks
+          for part in 0 1 2 3 4 5; do
+            git show "${helper}:.atomic-cleanup/part-02-${part}.txt" \
+              >> /tmp/atomic-source.patch.gz.b64.with-breaks
+          done
+          for part in 03 04 05; do
             git show "${helper}:.atomic-cleanup/part-${part}.txt" \
               >> /tmp/atomic-source.patch.gz.b64.with-breaks
           done
