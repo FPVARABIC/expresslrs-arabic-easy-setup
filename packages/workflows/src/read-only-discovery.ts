@@ -1,0 +1,164 @@
+import type { TargetCatalog } from "@elrs-easy/compatibility";
+import {
+  resolveDeviceIdentity,
+  type DeviceSessionManager,
+  type DiscoveryProvider,
+} from "@elrs-easy/device";
+import {
+  CoreOperationError,
+  type CancellationSignal,
+  type DeviceIdentityResolution,
+  type DeviceSnapshot,
+  type OperationError,
+  type OperationRecord,
+} from "@elrs-easy/domain";
+
+import {
+  VerifiedOperationMachine,
+  type OperationObserver,
+  type WorkflowClock,
+} from "./operation-machine.js";
+
+export interface DiscoveredDevice {
+  readonly snapshot: DeviceSnapshot;
+  readonly identity: DeviceIdentityResolution;
+}
+
+export interface ReadOnlyDiscoveryResult {
+  readonly providerId: string;
+  readonly devices: readonly DiscoveredDevice[];
+}
+
+function safeError(error: unknown): OperationError {
+  if (error instanceof CoreOperationError) {
+    return error.operationError;
+  }
+  return {
+    code: "INTERNAL_ERROR",
+    reason: "DISCOVERY_PROVIDER_FAILED",
+    details: {},
+    retryable: true,
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
+}
+
+/**
+ * Provider support is not sufficient: every provider is untrusted and may
+ * ignore cancellation. Check at the workflow boundary before and after each
+ * asynchronous provider call so stale results cannot be promoted to SUCCESS.
+ */
+function assertNotAborted(signal?: CancellationSignal): void {
+  if (signal?.aborted === true) {
+    const error = new Error("The discovery operation was cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
+}
+
+/** Connect → identify → resolve → display facts. This workflow cannot write. */
+export async function runReadOnlyDiscovery(input: {
+  readonly operationId: string;
+  readonly provider: DiscoveryProvider;
+  readonly sessions: DeviceSessionManager;
+  readonly catalog: TargetCatalog;
+  readonly clock?: WorkflowClock;
+  readonly observer?: OperationObserver<ReadOnlyDiscoveryResult>;
+  readonly signal?: CancellationSignal;
+}): Promise<OperationRecord<ReadOnlyDiscoveryResult>> {
+  // Capture the invocation boundary before the machine constructor notifies an
+  // observer and before any provider await. A caller mutating the input object
+  // must not be able to swap safety-critical collaborators mid-operation.
+  const operationId = input.operationId;
+  const provider = input.provider;
+  const providerId = provider.id;
+  const sessions = input.sessions;
+  const catalog = input.catalog;
+  const clock = input.clock;
+  const observer = input.observer;
+  const signal = input.signal;
+
+  const machine = new VerifiedOperationMachine<ReadOnlyDiscoveryResult>({
+    id: operationId,
+    type: "READ_ONLY_DISCOVERY",
+    ...(clock === undefined ? {} : { clock }),
+    ...(observer === undefined ? {} : { observer }),
+  });
+
+  try {
+    assertNotAborted(signal);
+    machine.transition("PREPARING");
+    assertNotAborted(signal);
+    machine.transition("DISCOVERING");
+    assertNotAborted(signal);
+    const descriptors = await provider.discover(signal);
+    assertNotAborted(signal);
+    if (descriptors.length === 0) {
+      return machine.fail({
+        code: "DEVICE_NOT_FOUND",
+        reason: "DISCOVERY_RETURNED_NO_DEVICES",
+        details: { providerId },
+        retryable: true,
+      });
+    }
+
+    machine.transition("IDENTIFYING");
+    const devices: DiscoveredDevice[] = [];
+
+    for (const descriptor of descriptors) {
+      assertNotAborted(signal);
+      const session = sessions.acquire({
+        deviceId: descriptor.id,
+        owner: { id: operationId, kind: "WORKFLOW" },
+      });
+      try {
+        sessions.assertHeld(session);
+        assertNotAborted(signal);
+        const evidence = await provider.readIdentity(session, signal);
+        assertNotAborted(signal);
+        sessions.assertHeld(session);
+        const capabilities = await provider.readCapabilities(session, signal);
+        assertNotAborted(signal);
+        const candidates = catalog.match(evidence);
+        devices.push(
+          Object.freeze({
+            snapshot: Object.freeze({
+              descriptor,
+              evidence: Object.freeze([...evidence]),
+              capabilities: Object.freeze([...capabilities]),
+            }),
+            identity: resolveDeviceIdentity({ evidence, candidates }),
+          }),
+        );
+      } finally {
+        sessions.release(session);
+      }
+    }
+
+    assertNotAborted(signal);
+    machine.transition("VERIFYING", {
+      messageCode: "DISCOVERY_FACTS_COLLECTED",
+    });
+    assertNotAborted(signal);
+    return machine.verificationSucceeded(
+      Object.freeze({
+        providerId,
+        devices: Object.freeze(devices),
+      }),
+    );
+  } catch (error: unknown) {
+    if (isAbortError(error)) {
+      return machine.transition("CANCELLED", {
+        messageCode: "OPERATION_CANCELLED",
+      });
+    }
+    return machine.fail(safeError(error));
+  }
+}

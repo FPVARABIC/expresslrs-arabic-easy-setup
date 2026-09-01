@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Quality, license, and security gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Require committed dependency lockfile
+        run: test -f pnpm-lock.yaml
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        id: formatting
+        continue-on-error: true
+        run: pnpm format:check
+
+      - name: Generate formatter patch
+        if: steps.formatting.outcome == 'failure'
+        run: |
+          pnpm format
+          git diff --binary > prettier.patch
+
+      - name: Preserve formatter patch for review
+        if: steps.formatting.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prettier-fix-${{ github.run_attempt }}
+          path: prettier.patch
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Run lint, typecheck, test, and build
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm test
+          pnpm build
+
+      - name: Generate dependency license inventory
+        run: pnpm licenses:report
+
+      - name: Preserve dependency license inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-licenses-${{ github.run_attempt }}
+          path: dependency-licenses.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce dependency license policy
+        run: pnpm licenses:check
+
+      - name: Audit dependencies for high-severity advisories
+        run: pnpm security:audit
+
+      - name: Enforce formatting gate
+        if: always() && steps.formatting.outcome == 'failure'
+        run: |
+          echo "::error::Formatting changes are required; review the prettier-fix artifact."
+          exit 1

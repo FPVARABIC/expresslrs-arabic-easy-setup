@@ -6,7 +6,7 @@
 
 - المرحلة: `Milestone 1 — Foundation`
 - الفرع المحلي: `research/upstream-baseline`
-- السلوك المسموح حاليًا: Core/Workflow/Mock/RTL Web Foundation واختبارها محليًا
+- السلوك المسموح حاليًا: Core/Workflow/Mock/RTL Web Foundation واختبارها محليًا؛ مرشح قبول M1 ينتظر CI
 - السلوك المحظور حاليًا: تعديل upstream، أو Flash أجهزة، أو ادعاء دعم Hardware/تحسين أداء
 - نمط الأجهزة: Model-agnostic عبر Evidence/Capabilities وTarget Catalog قابل للحقن، دون hard-coded models
 - الخط الأساسي للواجهة: Cairo ذاتي الاستضافة
@@ -38,21 +38,21 @@ apps/web                 واجهة عربية RTL بخط Cairo
 packages/domain          الحقائق والأخطاء وحالات العمليات
 packages/device          الأدلة، حل الهوية، وملكية Device Session
 packages/compatibility   Target Catalog قابل للحقن وقرارات Fail-closed
-packages/workflows       State Machine وRead-only Discovery
-packages/platform-mock   أجهزة Synthetic متعددة وحالات الفشل
-packages/i18n            العربية وEnglish fallback
+packages/workflows       Discovery وEasy Binding وUpdate State Machines وModule API
+packages/platform-mock   أجهزة/Providers Synthetic ومصفوفة فشل واستعادة
+packages/i18n            العربية وEnglish fallback وربط الأخطاء المنظمة
 ```
 
 الموديلات ليست شروطًا داخل الواجهة أو الـCore. يضيف Adapter أدلة الجهاز، ويطابقها Catalog مثبت الإصدار، ثم يقرر Core مستوى الثقة والقدرات. بيانات العرض الحالية Synthetic فقط ولا تعني دعم أجهزة تجارية بعينها.
 
-بعد توليد `pnpm-lock.yaml` في بيئة تستطيع الوصول إلى npm، بوابة التطوير المطلوبة هي:
+الـlockfile مثبت. بوابة التطوير المطلوبة هي:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm check
 ```
 
-تفاصيل التحقق الحالي والبوابات المتبقية موجودة في [STATUS.md](STATUS.md).
+تفاصيل التحقق والبوابات المتبقية موجودة في [STATUS.md](STATUS.md)، وخريطة القبول في [docs/testing/milestone-1-acceptance.md](docs/testing/milestone-1-acceptance.md).
 
 ## الوثائق الأساسية
 
@@ -62,8 +62,11 @@ pnpm check
 - [PHASE_0_DISCOVERY_REPORT.md](PHASE_0_DISCOVERY_REPORT.md): التقرير التنفيذي الموحّد وقرار البوابة.
 - [UPSTREAM.md](UPSTREAM.md): سياسة ومراجع upstream.
 - [STATUS.md](STATUS.md): الحالة المختصرة الحالية.
+- [CONTRIBUTING.md](CONTRIBUTING.md): قواعد المساهمة والاختبارات وسياسة الفروع.
 - [docs/upstream/baseline.md](docs/upstream/baseline.md): الـSHAs المثبتة وأدلة الفحص.
 - [docs/research/README.md](docs/research/README.md): مخرجات Milestone 0 المطلوبة.
+- [docs/architecture/core-api.md](docs/architecture/core-api.md): حدود Core/Host التجريبية.
+- [docs/architecture/mock-workflows.md](docs/architecture/mock-workflows.md): Binding/Update والتحقق والاستعادة في Mock.
 
 ## الترخيص
 
