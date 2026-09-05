@@ -22,7 +22,7 @@
     "check:master-plan": "node scripts/check-master-plan.mjs",
     "licenses:report": "pnpm licenses list --recursive --json > dependency-licenses.json",
     "licenses:check": "node scripts/check-license-policy.mjs",
-    "security:audit": "pnpm audit --audit-level high",
+    "security:audit": "pnpm audit --audit-level moderate",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "build": "pnpm --recursive --if-present run build",

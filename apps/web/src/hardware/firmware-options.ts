@@ -109,10 +109,10 @@ export function validateFirmwareOptions(input: {
     receiverAsTransmitter: options.receiverAsTransmitter === true,
   });
 
-  if (input.target.role === "tx" && validated.receiverAsTransmitter) {
+  if (validated.receiverAsTransmitter) {
     throw new FirmwareOptionsError(
       "receiverAsTransmitter",
-      "Receiver-as-transmitter mode is invalid for a TX Target",
+      "Receiver-as-transmitter packaging is disabled until its TX binary and hardware-layout transformations are implemented and verified",
     );
   }
   return validated;

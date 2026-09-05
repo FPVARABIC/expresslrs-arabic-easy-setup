@@ -10,6 +10,9 @@ const STM32_DFU_PRODUCT_ID = 0xdf11;
 const DEFAULT_TRANSFER_SIZE = 2_048;
 const MAX_FIRMWARE_BYTES = 4 * 1024 * 1024;
 const TRANSFER_TIMEOUT_MS = 10_000;
+const CLEANUP_TIMEOUT_MS = 2_000;
+const STM32_FLASH_BASE_ADDRESS = 0x0800_0000;
+const VERIFIED_APPLICATION_OFFSETS = new Set([0x1000, 0x4000, 0x8000]);
 
 const DfuRequest = Object.freeze({
   download: 1,
@@ -120,6 +123,8 @@ interface NavigatorWithUsbLike {
 }
 
 export class Stm32DfuError extends Error {
+  public cleanupVerified = true;
+
   public constructor(
     public readonly code:
       | "UNSUPPORTED"
@@ -137,11 +142,58 @@ export class Stm32DfuError extends Error {
   }
 }
 
+function markCleanupUnverified(error: unknown): void {
+  if (error instanceof Stm32DfuError) {
+    error.cleanupVerified = false;
+    return;
+  }
+  if (
+    error === null ||
+    typeof error !== "object" ||
+    !Object.isExtensible(error)
+  )
+    return;
+  try {
+    Object.defineProperty(error, "cleanupVerified", {
+      value: false,
+      enumerable: true,
+    });
+  } catch {
+    // The primary failure still causes the caller to enter recovery mode.
+  }
+}
+
 function errorName(error: unknown): string {
   if (typeof DOMException !== "undefined" && error instanceof DOMException) {
     return error.name;
   }
   return error instanceof Error ? error.name : "";
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function expectedApplicationAddress(target: OfficialTarget): number {
+  const metadata = target.config.raw.stlink;
+  const rawOffset = isRecord(metadata) ? metadata.offset : null;
+  if (
+    typeof rawOffset !== "string" ||
+    !/^0[xX][0-9A-Fa-f]{1,8}$/u.test(rawOffset)
+  ) {
+    throw new Stm32DfuError(
+      "DEVICE_INVALID",
+      "Selected Target does not declare a verified STM32 application offset",
+    );
+  }
+  const offset = Number.parseInt(rawOffset.slice(2), 16);
+  if (!VERIFIED_APPLICATION_OFFSETS.has(offset)) {
+    throw new Stm32DfuError(
+      "DEVICE_INVALID",
+      "Selected Target declares an unsupported STM32 application offset",
+    );
+  }
+  return STM32_FLASH_BASE_ADDRESS + offset;
 }
 
 function assertNotAborted(signal: AbortSignal | undefined): void {
@@ -168,6 +220,32 @@ async function withTimeout<T>(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+function settleCleanupWithin(
+  operation: () => Promise<unknown>,
+  timeoutMs = CLEANUP_TIMEOUT_MS,
+): Promise<boolean> {
+  let task: Promise<unknown>;
+  try {
+    task = operation();
+  } catch {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (verified: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(verified);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    void task.then(
+      () => finish(true),
+      () => finish(false),
+    );
+  });
 }
 
 function safeNumber(value: string): number {
@@ -515,6 +593,12 @@ function pagesForRange(
       "Firmware range crosses an unmapped DfuSe gap",
     );
   }
+  if (start !== coveredStart) {
+    throw new Stm32DfuError(
+      "RANGE_INVALID",
+      "STM32 application offset is not aligned to the connected device erase geometry",
+    );
+  }
   if (
     pages.some((page) => !page.readable || !page.writable || !page.erasable)
   ) {
@@ -542,7 +626,13 @@ export async function flashStm32DfuFirmware(input: {
   readonly signal?: AbortSignal;
   readonly navigatorObject?: unknown;
   readonly onProgress?: FirmwareFlashProgressListener;
-}): Promise<Readonly<{ bytesWritten: number; baseAddress: number }>> {
+}): Promise<
+  Readonly<{
+    bytesWritten: number;
+    baseAddress: number;
+    cleanupVerified: boolean;
+  }>
+> {
   const platform = input.target.config.platform.toLocaleLowerCase("en-US");
   if (!platform.startsWith("stm32")) {
     throw new Stm32DfuError(
@@ -563,6 +653,13 @@ export async function flashStm32DfuFirmware(input: {
     throw new Stm32DfuError(
       "RANGE_INVALID",
       "STM32 firmware size is outside the 1-byte to 4-MiB limit",
+    );
+  }
+  const expectedAddress = expectedApplicationAddress(input.target);
+  if (input.segment.address !== expectedAddress) {
+    throw new Stm32DfuError(
+      "RANGE_INVALID",
+      "STM32 firmware address does not match the selected Target application offset",
     );
   }
   assertNotAborted(input.signal);
@@ -603,6 +700,7 @@ export async function flashStm32DfuFirmware(input: {
       "The STM32 DFU device chooser failed",
     );
   }
+  assertNotAborted(input.signal);
 
   if (
     device === null ||
@@ -618,8 +716,7 @@ export async function flashStm32DfuFirmware(input: {
 
   const alternate = findDfuAlternate(device);
   const memory = parseDfuSeMemoryDescriptor(alternate.descriptor);
-  const baseAddress =
-    input.segment.address === 0 ? memory.baseAddress : input.segment.address;
+  const baseAddress = input.segment.address;
   const affectedPages = pagesForRange(
     memory,
     baseAddress,
@@ -627,6 +724,12 @@ export async function flashStm32DfuFirmware(input: {
   );
 
   let claimed = false;
+  let completion: {
+    bytesWritten: number;
+    baseAddress: number;
+    cleanupVerified: boolean;
+  } | null = null;
+  let operationFailure: unknown = null;
   try {
     if (!device.opened) {
       await withTimeout(
@@ -808,22 +911,37 @@ export async function flashStm32DfuFirmware(input: {
       input.segment.bytes.byteLength,
       "STM32 DFU leave/reset requested",
     );
-    return Object.freeze({
+    completion = {
       bytesWritten: input.segment.bytes.byteLength,
       baseAddress,
-    });
+      cleanupVerified: true,
+    };
+    return completion;
+  } catch (error: unknown) {
+    operationFailure = error;
+    throw error;
   } finally {
     if (claimed) {
-      try {
-        await device.releaseInterface(alternate.interfaceNumber);
-      } catch {
-        // Device may already have reset and disappeared.
+      const releaseVerified = await settleCleanupWithin(() =>
+        device.releaseInterface(alternate.interfaceNumber),
+      );
+      if (!releaseVerified) {
+        if (completion !== null) {
+          completion.cleanupVerified = false;
+        } else {
+          markCleanupUnverified(operationFailure);
+        }
       }
     }
-    try {
-      if (device.opened) await device.close();
-    } catch {
-      // Device may already have reset and disappeared.
+    const closeVerified =
+      !device.opened || (await settleCleanupWithin(() => device.close()));
+    if (!closeVerified) {
+      if (completion !== null) {
+        completion.cleanupVerified = false;
+      } else {
+        markCleanupUnverified(operationFailure);
+      }
     }
+    if (completion !== null) Object.freeze(completion);
   }
 }

@@ -127,8 +127,13 @@ function statusClass(status: PhysicalAcceptanceStepStatus): string {
   return `acceptance-step is-${status.toLocaleLowerCase("en-US").replace("_", "-")}`;
 }
 
+function isExactCandidateSha(value: string): boolean {
+  return /^[0-9a-f]{40}$/u.test(value);
+}
+
 export interface PhysicalAcceptancePanelProps {
   readonly context: PhysicalAcceptanceContextSnapshot;
+  readonly deviceChangesEnabled?: boolean;
   readonly storage?: PhysicalAcceptanceStorage | null;
   readonly now?: () => Date;
   readonly initialCandidateSha?: string;
@@ -136,6 +141,7 @@ export interface PhysicalAcceptancePanelProps {
 
 export function PhysicalAcceptancePanel({
   context,
+  deviceChangesEnabled = false,
   storage = browserPhysicalAcceptanceStorage(),
   now = systemNow,
   initialCandidateSha = detectedCandidateSha(),
@@ -144,18 +150,34 @@ export function PhysicalAcceptancePanel({
     () => browserRuntime(initialCandidateSha),
     [initialCandidateSha],
   );
-  const [session, setSession] = useState<PhysicalAcceptanceSession>(() => {
-    return (
-      loadPhysicalAcceptanceSession(storage) ??
-      createPhysicalAcceptanceSession({ runtime, now })
-    );
+  const [initialState] = useState(() => {
+    const loaded = loadPhysicalAcceptanceSession(storage);
+    const runtimeSha = runtime.candidateSha.trim();
+    const matchingLoaded =
+      loaded !== null &&
+      loaded.candidateSha === runtimeSha &&
+      (runtimeSha.length === 0 || isExactCandidateSha(runtimeSha));
+    return Object.freeze({
+      session: matchingLoaded
+        ? loaded
+        : createPhysicalAcceptanceSession({ runtime, now }),
+      rejectedPersistedSession: loaded !== null && !matchingLoaded,
+    });
   });
+  const [session, setSession] = useState<PhysicalAcceptanceSession>(
+    initialState.session,
+  );
   const [message, setMessage] = useState(
-    "سجل محلي جاهز. كل خطوة متاحة من البداية ولا توجد تبعية إجبارية بين الخطوات.",
+    initialState.rejectedPersistedSession
+      ? "بدأ سجل جديد لأن Candidate SHA المحفوظ لا يطابق SHA هذه النسخة."
+      : "سجل محلي جاهز. كل خطوة متاحة من البداية ولا توجد تبعية إجبارية بين الخطوات.",
   );
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const groups = useMemo(() => groupedSteps(), []);
   const summary = summarizePhysicalAcceptance(session);
+  const candidateBound =
+    isExactCandidateSha(runtime.candidateSha) &&
+    session.candidateSha === runtime.candidateSha;
 
   useEffect(() => {
     savePhysicalAcceptanceSession(session, storage);
@@ -214,6 +236,12 @@ export function PhysicalAcceptancePanel({
   }
 
   function exportJson(): void {
+    if (!candidateBound) {
+      setMessage(
+        "لا يمكن التصدير: هذه النسخة غير مرتبطة بـCandidate SHA صالح.",
+      );
+      return;
+    }
     const stem = physicalAcceptanceFileStem(session);
     downloadTextFile(
       serializePhysicalAcceptanceJson(session),
@@ -224,6 +252,12 @@ export function PhysicalAcceptancePanel({
   }
 
   function exportMarkdown(): void {
+    if (!candidateBound) {
+      setMessage(
+        "لا يمكن التصدير: هذه النسخة غير مرتبطة بـCandidate SHA صالح.",
+      );
+      return;
+    }
     const stem = physicalAcceptanceFileStem(session);
     downloadTextFile(
       serializePhysicalAcceptanceMarkdown(session),
@@ -247,6 +281,15 @@ export function PhysicalAcceptancePanel({
       const parsed = parsePhysicalAcceptanceJson(await file.text());
       if (parsed === null) {
         setMessage("ملف النتائج غير صالح أو لا يطابق مخطط القبول الفيزيائي.");
+        return;
+      }
+      if (
+        !isExactCandidateSha(runtime.candidateSha) ||
+        parsed.candidateSha !== runtime.candidateSha
+      ) {
+        setMessage(
+          "رُفض الاستيراد لأن Candidate SHA في الملف لا يطابق SHA هذه النسخة.",
+        );
         return;
       }
       setSession(parsed);
@@ -277,11 +320,12 @@ export function PhysicalAcceptancePanel({
         </span>
       </div>
 
-      <p className="success-note acceptance-unlocked-note">
-        لا يوجد قفل مرحلي على أداة التسجيل أو الاختبارات. تبقى فقط شروط السلامة
-        داخل عمليات الكتابة نفسها: هوية Target، حزمة Recovery، ثبات الطاقة،
-        وهوائي TX. هذه الشروط تمنع الكتابة على جهاز خاطئ ولا تمنع التجربة
-        الفيزيائية.
+      <p
+        className={`${deviceChangesEnabled ? "success-note" : "danger-note"} acceptance-unlocked-note`}
+      >
+        {deviceChangesEnabled
+          ? "أداة التسجيل غير مقفلة، كما أن نسخة القبول المراجعة فعّلت عمليات تغيير الجهاز مع بقاء بوابات Target وRecovery والطاقة والهوائي إلزامية."
+          : "أداة التسجيل وكل حقول النتائج متاحة، لكن تغيير الإعدادات والربط والتفليش والاستعادة مقفلة في هذه النسخة. لا تسجل نجاحًا ماديًا قبل تشغيل نسخة قبول مخصصة ومراجعة."}
       </p>
 
       <div className="acceptance-toolbar">
@@ -292,12 +336,18 @@ export function PhysicalAcceptancePanel({
         >
           التقاط الحالة الحالية
         </button>
-        <button type="button" className="secondary-button" onClick={exportJson}>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!candidateBound}
+          onClick={exportJson}
+        >
           تصدير JSON
         </button>
         <button
           type="button"
           className="secondary-button"
+          disabled={!candidateBound}
           onClick={exportMarkdown}
         >
           تصدير تقرير Markdown
@@ -384,9 +434,7 @@ export function PhysicalAcceptancePanel({
             maxLength={80}
             dir="ltr"
             placeholder="Commit SHA للنسخة المختبرة"
-            onChange={(event) =>
-              updateMetadata({ candidateSha: event.currentTarget.value })
-            }
+            readOnly
           />
         </label>
       </div>

@@ -19,6 +19,7 @@ export interface OfficialTargetConfig {
   readonly productName: string;
   readonly platform: string;
   readonly firmware: string;
+  /** Upstream `lua_name`: the device label embedded in Firmware, not a script filename. */
   readonly luaName: string | null;
   readonly layoutFile: string | null;
   readonly logoFile: string | null;
@@ -40,7 +41,7 @@ export interface OfficialTarget {
 }
 
 export interface OfficialCatalog {
-  readonly source: "EXPRESSLRS_ARTIFACTORY";
+  readonly source: "EXPRESSLRS_WEB_FLASHER_MIRROR";
   readonly loadedAt: string;
   readonly releases: readonly OfficialRelease[];
   readonly targets: readonly OfficialTarget[];

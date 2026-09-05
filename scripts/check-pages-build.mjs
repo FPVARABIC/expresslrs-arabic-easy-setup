@@ -9,10 +9,11 @@ const repositoryRoot = path.resolve(
 const distPath = path.join(repositoryRoot, "apps/web/dist");
 const indexPath = path.join(distPath, "index.html");
 const expectedBase = process.env.PAGES_BASE_PATH;
+const expectedBuildSha = process.env.VITE_BUILD_SHA;
 const expectedPolicy = [
   "default-src 'none'",
   "base-uri 'none'",
-  "connect-src 'self' http://10.0.0.1 http://elrs_rx.local http://elrs_tx.local",
+  "connect-src 'self' https://expresslrs.github.io http://10.0.0.1 http://elrs_rx.local http://elrs_tx.local",
   "font-src 'self'",
   "form-action 'none'",
   "img-src 'self' data:",
@@ -45,6 +46,12 @@ if (
   !/^\/[a-zA-Z0-9._-]+\/$/u.test(expectedBase)
 ) {
   fail("PAGES_BASE_PATH must name one repository path and end with /");
+}
+if (
+  expectedBuildSha === undefined ||
+  !/^[0-9a-f]{40}$/u.test(expectedBuildSha)
+) {
+  fail("VITE_BUILD_SHA must be the exact 40-character candidate commit SHA");
 }
 
 await rejectLinks(distPath);
@@ -115,7 +122,16 @@ if (/url\(["']?https?:\/\//u.test(css) || /@import\s/u.test(css)) {
 if (!assetFiles.some((name) => name.endsWith(".woff2"))) {
   fail("the self-hosted Cairo font assets are missing");
 }
+const javascriptFiles = assetFiles.filter((name) => name.endsWith(".js"));
+const javascriptBundles = await Promise.all(
+  javascriptFiles.map((name) =>
+    readFile(path.join(assetDirectory, name), "utf8"),
+  ),
+);
+if (!javascriptBundles.some((bundle) => bundle.includes(expectedBuildSha))) {
+  fail("the physical acceptance recorder is not bound to VITE_BUILD_SHA");
+}
 
 console.log(
-  `GitHub Pages artifact verified for ${expectedBase} with a partial meta CSP and self-hosted assets.`,
+  `GitHub Pages artifact verified for ${expectedBase} at ${expectedBuildSha} with a partial meta CSP and self-hosted assets.`,
 );

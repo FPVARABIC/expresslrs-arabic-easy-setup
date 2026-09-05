@@ -7,6 +7,24 @@ import type {
 } from "./serial";
 import { crc16Xmodem, flashXmodemFirmware } from "./xmodem";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushUntil(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  throw new Error("Async XMODEM step did not become ready");
+}
+
 class Queue {
   readonly #values: Uint8Array[] = [];
   #resolve:
@@ -40,6 +58,10 @@ class Queue {
 function fakePort(): {
   readonly port: HardwareSerialPort;
   readonly writes: Uint8Array[];
+  readonly writer: HardwareSerialWriter & {
+    readonly write: ReturnType<typeof vi.fn>;
+    readonly abort: ReturnType<typeof vi.fn>;
+  };
 } {
   const queue = new Queue();
   const writes: Uint8Array[] = [];
@@ -49,17 +71,19 @@ function fakePort(): {
     cancel: async () => queue.close(),
     releaseLock: vi.fn(),
   };
-  const writer: HardwareSerialWriter = {
-    write: async (data) => {
+  const writer = {
+    write: vi.fn(async (data: Uint8Array) => {
       writes.push(data.slice());
       if (data[0] === 0x01 || data[0] === 0x04) {
         queue.push(new Uint8Array([0x06]));
       }
-    },
+    }),
+    abort: vi.fn().mockResolvedValue(undefined),
     releaseLock: vi.fn(),
   };
   return {
     writes,
+    writer,
     port: {
       readable: { getReader: () => reader },
       writable: { getWriter: () => writer },
@@ -88,5 +112,42 @@ describe("XMODEM-CRC flasher", () => {
     expect(hardware.writes[0]?.byteLength).toBe(133);
     expect(hardware.writes[1]?.byteLength).toBe(133);
     expect(hardware.writes[2]).toEqual(new Uint8Array([0x04]));
+  });
+
+  it("aborts a hanging serial write and still confirms port cleanup", async () => {
+    const hardware = fakePort();
+    const pendingWrite = deferred<void>();
+    hardware.writer.write.mockImplementation(() => pendingWrite.promise);
+    const controller = new AbortController();
+    const operation = flashXmodemFirmware({
+      port: hardware.port,
+      firmware: new Uint8Array([1]),
+      signal: controller.signal,
+    });
+    const rejection = expect(operation).rejects.toMatchObject({
+      code: "ABORTED",
+    });
+
+    await flushUntil(() => hardware.writer.write.mock.calls.length === 1);
+    controller.abort();
+
+    await rejection;
+    expect(hardware.writer.abort).toHaveBeenCalledTimes(1);
+    expect(hardware.port.close).toHaveBeenCalledTimes(1);
+
+    pendingWrite.reject(new Error("late write failure"));
+    await Promise.resolve();
+  });
+
+  it("fails closed when the serial port cannot be confirmed closed", async () => {
+    const hardware = fakePort();
+    vi.mocked(hardware.port.close).mockRejectedValue(new Error("close failed"));
+
+    await expect(
+      flashXmodemFirmware({
+        port: hardware.port,
+        firmware: new Uint8Array([1]),
+      }),
+    ).rejects.toMatchObject({ code: "CLEANUP_UNCONFIRMED" });
   });
 });

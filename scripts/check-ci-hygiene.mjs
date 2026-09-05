@@ -1,12 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-const allowedWorkflows = new Set([
-  "ci.yml",
-  "deploy-pages.yml",
-  "deploy-reviewed-pages.yml",
-]);
+const allowedWorkflows = new Set(["ci.yml", "deploy-pages.yml"]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
+  ".acceptance-stage",
   ".github/patches/foundation-repair.patch",
   "scripts/m2-final-audit-correction.py",
   "scripts/m2-final-audit-repair.py",
@@ -52,6 +49,60 @@ if (!existsSync(mainPath) || !existsSync(canonicalWorkbenchPath)) {
   }
   if (/WorkbenchV2|main-v2/u.test(main)) {
     fail("main.tsx still references a V2-only entrypoint");
+  }
+}
+
+const canonicalCiPath = ".github/workflows/ci.yml";
+if (!existsSync(canonicalCiPath)) {
+  fail(`${canonicalCiPath} is missing`);
+} else {
+  const canonicalCi = readFileSync(canonicalCiPath, "utf8");
+  if (!/^\s*run:\s*pnpm check:physical-acceptance\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce the physical acceptance package gate");
+  }
+  if (!canonicalCi.includes("VITE_BUILD_SHA: ${{ github.sha }}")) {
+    fail("ci.yml does not bind the Pages artifact to github.sha");
+  }
+  if (!/^\s*pnpm check:pages-build\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not verify the exact Pages artifact");
+  }
+  if (
+    /actions\/deploy-pages|pages:\s*write|id-token:\s*write/u.test(canonicalCi)
+  ) {
+    fail("ci.yml must remain a read-only PR workflow without deploy authority");
+  }
+}
+
+const pagesWorkflowPath = ".github/workflows/deploy-pages.yml";
+if (!existsSync(pagesWorkflowPath)) {
+  fail(`${pagesWorkflowPath} is missing`);
+} else {
+  const pagesWorkflow = readFileSync(pagesWorkflowPath, "utf8");
+  const triggerBlock = /\non:\n([\s\S]*?)\npermissions:/u.exec(
+    pagesWorkflow,
+  )?.[1];
+  const triggerNames = [
+    ...(triggerBlock ?? "").matchAll(/^\s{2}([a-z_]+):/gmu),
+  ].map((match) => match[1]);
+  if (
+    triggerBlock === undefined ||
+    !/^\s{2}push:\n\s{4}branches:\n\s{6}- main\s*$/mu.test(triggerBlock) ||
+    triggerNames.length !== 2 ||
+    triggerNames[0] !== "push" ||
+    triggerNames[1] !== "workflow_dispatch"
+  ) {
+    fail(
+      "deploy-pages.yml must be limited to main pushes or manual main dispatch, never a PR",
+    );
+  }
+  if (!pagesWorkflow.includes("if: github.ref == 'refs/heads/main'")) {
+    fail("deploy-pages.yml build job is not fail-closed to refs/heads/main");
+  }
+  if (!pagesWorkflow.includes("VITE_BUILD_SHA: ${{ github.sha }}")) {
+    fail("deploy-pages.yml does not bind the artifact to github.sha");
+  }
+  if (!/^\s*run:\s*pnpm check:pages-build\s*$/mu.test(pagesWorkflow)) {
+    fail("deploy-pages.yml does not verify the exact artifact before upload");
   }
 }
 

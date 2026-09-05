@@ -55,6 +55,64 @@ describe("official target matching", () => {
     expect(result.selected?.id).toBe(exact.id);
   });
 
+  it("authorizes only one exact firmware-key match", () => {
+    const exact = target("vendor/tx_2400/super", "Different product name");
+    const exactFirmware = "UNIFIED_ESP32_2400_TX";
+    const result = matchHardwareIdentityToOfficialTargets({
+      identity: { ...identity, productName: exactFirmware },
+      targets: [
+        {
+          ...exact,
+          config: { ...exact.config, firmware: exactFirmware },
+        },
+        target("vendor/tx_2400/other", "Vendor Other TX"),
+      ],
+    });
+
+    expect(result.confidence).toBe("EXACT");
+    expect(result.selected?.id).toBe(exact.id);
+  });
+
+  it("does not authorize duplicate exact-equality matches", () => {
+    const result = matchHardwareIdentityToOfficialTargets({
+      identity,
+      targets: [
+        target("vendor/tx_2400/super-a", identity.productName),
+        target("vendor/tx_2400/super-b", identity.productName),
+      ],
+    });
+
+    expect(result.confidence).toBe("AMBIGUOUS");
+    expect(result.selected).toBeNull();
+  });
+
+  it("keeps contained firmware keys plus token overlap heuristic", () => {
+    const heuristic = target(
+      "vendor/tx_2400/special-module",
+      "Acme Special Model",
+    );
+    const result = matchHardwareIdentityToOfficialTargets({
+      identity: {
+        ...identity,
+        productName: "Unified ESP32 2400 TX Special Model",
+      },
+      targets: [
+        {
+          ...heuristic,
+          config: {
+            ...heuristic.config,
+            firmware: "Unified_ESP32_2400_TX",
+          },
+        },
+      ],
+    });
+
+    expect(result.candidates[0]?.score).toBeGreaterThanOrEqual(100);
+    expect(result.candidates[0]?.evidence).toContain("firmware-key-contained");
+    expect(result.confidence).toBe("LIKELY");
+    expect(result.selected).toBeNull();
+  });
+
   it("does not silently authorize a likely or ambiguous match", () => {
     const result = matchHardwareIdentityToOfficialTargets({
       identity,

@@ -7,6 +7,7 @@ import {
   type ExpressLrsIdentity,
   type HardwareConnectOutcome,
   type ParameterWriteResult,
+  type ReceiverBootloaderResult,
 } from "./session";
 import { HardwareSerialError, type HardwareSerialPort } from "./serial";
 
@@ -65,6 +66,12 @@ export interface HardwareSessionDriver {
     commandName: string,
     signal?: AbortSignal,
   ): Promise<CommandExecutionResult>;
+  verifyCurrentIdentity?(signal?: AbortSignal): Promise<ExpressLrsIdentity>;
+  enterReceiverBootloader?(input?: {
+    readonly targetKey?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<ReceiverBootloaderResult>;
+  detachPortForBootloader?(): Promise<HardwareSerialPort>;
   close(): Promise<boolean>;
 }
 
@@ -97,6 +104,7 @@ export type UserHardwareConnectFailureStatus =
   | "CANCELLED"
   | "TIMED_OUT"
   | "INVALID_PARAMETER_TABLE"
+  | "CLEANUP_UNCONFIRMED"
   | "CONNECT_FAILED";
 
 export type UserHardwareConnectOutcome =
@@ -119,6 +127,7 @@ export interface UserHardwareConnectInput {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly connector?: HardwareDriverConnector;
+  readonly onCleanupUnconfirmed?: (message: string) => void;
 }
 
 function normalizedName(value: string): string {
@@ -145,6 +154,20 @@ function parameterValue(parameter: CrsfParameter): number | null {
   return isWritableParameter(parameter) ? parameter.value : null;
 }
 
+function isExactWritableReadback(
+  expected: WritableCrsfParameter,
+  actual: CrsfParameter,
+  expectedValue: number,
+): actual is WritableCrsfParameter {
+  return (
+    actual.id === expected.id &&
+    !actual.hidden &&
+    actual.kind === expected.kind &&
+    normalizedName(actual.name) === normalizedName(expected.name) &&
+    parameterValue(actual) === expectedValue
+  );
+}
+
 function safeUsbMatch(expected: number | null, actual: number | null): boolean {
   return expected === null || actual === null || expected === actual;
 }
@@ -168,11 +191,75 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function assertHardwareOperationActive(
+  signal: AbortSignal | undefined,
+  message: string,
+): void {
+  if (signal?.aborted === true) {
+    throw new HardwareSerialError("ABORTED", message);
+  }
+}
+
 function connectFailure(
   status: UserHardwareConnectFailureStatus,
   message: string,
 ): UserHardwareConnectOutcome {
   return Object.freeze({ status, message });
+}
+
+async function rejectOpenedHardwareConnection(input: {
+  readonly driver: HardwareSessionDriver;
+  readonly status: UserHardwareConnectFailureStatus;
+  readonly message: string;
+}): Promise<UserHardwareConnectOutcome> {
+  let closed = false;
+  try {
+    closed = await input.driver.close();
+  } catch {
+    // The caller must latch an uncertain close regardless of the native error.
+  }
+  if (!closed) {
+    return connectFailure(
+      "CLEANUP_UNCONFIRMED",
+      `${input.message}. The opened hardware connection could not be confirmed closed; safely disconnect the device and reload this page before trying again`,
+    );
+  }
+  return connectFailure(input.status, input.message);
+}
+
+function closeLateHardwareConnection(
+  connectorPromise: Promise<HardwareDriverConnectOutcome>,
+  onCleanupUnconfirmed: ((message: string) => void) | undefined,
+): void {
+  void connectorPromise
+    .then(async (lateOutcome) => {
+      if (lateOutcome.status === "CLEANUP_UNCONFIRMED") {
+        try {
+          onCleanupUnconfirmed?.(lateOutcome.message);
+        } catch {
+          // A UI observer cannot interrupt the detached cleanup report.
+        }
+        return;
+      }
+      if (lateOutcome.status === "CONNECTED") {
+        let closed = false;
+        try {
+          closed = await lateOutcome.driver.close();
+        } catch {
+          // Report the same fail-closed state as an explicit false result.
+        }
+        if (!closed) {
+          try {
+            onCleanupUnconfirmed?.(
+              "A hardware connection completed after cancellation or timeout, but its port could not be confirmed closed",
+            );
+          } catch {
+            // A UI observer cannot interrupt the detached cleanup task.
+          }
+        }
+      }
+    })
+    .catch(() => undefined);
 }
 
 async function defaultHardwareConnector(input: {
@@ -256,6 +343,7 @@ export async function connectUserHardwareSession(
   const timeoutMs = clampTimeout(input.timeoutMs);
   let timedOut = false;
   let raceCompleted = false;
+  let connectorPromise: Promise<HardwareDriverConnectOutcome> | null = null;
 
   const onExternalAbort = () => controller.abort(input.signal?.reason);
   input.signal?.addEventListener("abort", onExternalAbort, { once: true });
@@ -266,36 +354,37 @@ export async function connectUserHardwareSession(
     );
   }, timeoutMs);
 
-  const connectorPromise = connector({
-    role: input.role,
-    ...(input.navigatorObject === undefined
-      ? {}
-      : { navigatorObject: input.navigatorObject }),
-    ...(input.secureContext === undefined
-      ? {}
-      : { secureContext: input.secureContext }),
-    signal: controller.signal,
-  });
-
+  let resolveAborted!: (value: "ABORTED") => void;
   const abortedPromise = new Promise<"ABORTED">((resolve) => {
-    controller.signal.addEventListener("abort", () => resolve("ABORTED"), {
-      once: true,
-    });
+    resolveAborted = resolve;
+  });
+  const onConnectionAbort = () => resolveAborted("ABORTED");
+  controller.signal.addEventListener("abort", onConnectionAbort, {
+    once: true,
   });
 
   try {
+    connectorPromise = connector({
+      role: input.role,
+      ...(input.navigatorObject === undefined
+        ? {}
+        : { navigatorObject: input.navigatorObject }),
+      ...(input.secureContext === undefined
+        ? {}
+        : { secureContext: input.secureContext }),
+      signal: controller.signal,
+    });
     const raced = await Promise.race([connectorPromise, abortedPromise]);
     raceCompleted = true;
     if (raced === "ABORTED") {
-      void connectorPromise.then(async (lateOutcome) => {
-        if (lateOutcome.status === "CONNECTED") {
-          await lateOutcome.driver.close();
-        }
-      });
+      closeLateHardwareConnection(connectorPromise, input.onCleanupUnconfirmed);
       return createAbortOutcome(input.signal, timedOut);
     }
 
     if (raced.status !== "CONNECTED") {
+      if (raced.status === "CLEANUP_UNCONFIRMED") {
+        return raced;
+      }
       if (controller.signal.aborted) {
         return createAbortOutcome(input.signal, timedOut);
       }
@@ -306,11 +395,11 @@ export async function connectUserHardwareSession(
       raced.identity.parameterCount < 0 ||
       raced.identity.parameterCount > MAX_EXPRESSLRS_CRSF_PARAMETERS
     ) {
-      await raced.driver.close();
-      return connectFailure(
-        "INVALID_PARAMETER_TABLE",
-        `The device reported ${raced.identity.parameterCount} CRSF parameters; the supported maximum is ${MAX_EXPRESSLRS_CRSF_PARAMETERS}`,
-      );
+      return rejectOpenedHardwareConnection({
+        driver: raced.driver,
+        status: "INVALID_PARAMETER_TABLE",
+        message: `The device reported ${raced.identity.parameterCount} CRSF parameters; the supported maximum is ${MAX_EXPRESSLRS_CRSF_PARAMETERS}`,
+      });
     }
 
     const parameterTableError = validateParameterTable(
@@ -318,15 +407,30 @@ export async function connectUserHardwareSession(
       raced.parameters,
     );
     if (parameterTableError !== null) {
-      await raced.driver.close();
-      return connectFailure("PARAMETER_READ_FAILED", parameterTableError);
+      return rejectOpenedHardwareConnection({
+        driver: raced.driver,
+        status: "PARAMETER_READ_FAILED",
+        message: parameterTableError,
+      });
     }
 
-    const session = createUserHardwareSessionFromDriver({
-      driver: raced.driver,
-      identity: raced.identity,
-      parameters: raced.parameters,
-    });
+    let session: UserHardwareSession;
+    try {
+      session = createUserHardwareSessionFromDriver({
+        driver: raced.driver,
+        identity: raced.identity,
+        parameters: raced.parameters,
+      });
+    } catch (error: unknown) {
+      return rejectOpenedHardwareConnection({
+        driver: raced.driver,
+        status: "CONNECT_FAILED",
+        message:
+          error instanceof Error
+            ? error.message
+            : "The hardware session could not be initialized",
+      });
+    }
     return Object.freeze({
       status: "CONNECTED",
       session,
@@ -346,12 +450,13 @@ export async function connectUserHardwareSession(
   } finally {
     clearTimeout(timer);
     input.signal?.removeEventListener("abort", onExternalAbort);
-    if (!raceCompleted && controller.signal.aborted) {
-      void connectorPromise.then(async (lateOutcome) => {
-        if (lateOutcome.status === "CONNECTED") {
-          await lateOutcome.driver.close();
-        }
-      });
+    controller.signal.removeEventListener("abort", onConnectionAbort);
+    if (
+      connectorPromise !== null &&
+      !raceCompleted &&
+      controller.signal.aborted
+    ) {
+      closeLateHardwareConnection(connectorPromise, input.onCleanupUnconfirmed);
     }
   }
 }
@@ -478,6 +583,10 @@ export class UserHardwareSession {
         "The selected setting is hidden, sensitive, unsupported, or unavailable",
       );
     }
+    assertHardwareOperationActive(
+      signal,
+      "The settings write was cancelled before any device command was sent",
+    );
 
     try {
       const result = await this.#driver.writeParameter(
@@ -485,8 +594,43 @@ export class UserHardwareSession {
         value,
         signal,
       );
-      this.#replaceParameter(result.parameter);
-      return result;
+      this.#assertOpen();
+      assertHardwareOperationActive(
+        signal,
+        "The settings write was cancelled before its result could be verified",
+      );
+      if (
+        !result.verified ||
+        result.requestedValue !== value ||
+        !isExactWritableReadback(parameter, result.parameter, value)
+      ) {
+        throw new ExpressLrsHardwareError(
+          "WRITE_NOT_VERIFIED",
+          "The hardware driver did not return an exact read-back for the requested setting",
+        );
+      }
+      assertHardwareOperationActive(
+        signal,
+        "The independent settings read-back was cancelled",
+      );
+      const readback = await this.#driver.readParameter(parameterId, signal);
+      this.#assertOpen();
+      assertHardwareOperationActive(
+        signal,
+        "The independent settings read-back was cancelled before it could be accepted",
+      );
+      if (!isExactWritableReadback(parameter, readback, value)) {
+        throw new ExpressLrsHardwareError(
+          "WRITE_NOT_VERIFIED",
+          "The independent settings read-back did not match the requested setting",
+        );
+      }
+      this.#replaceParameter(readback);
+      return Object.freeze({
+        parameter: readback,
+        requestedValue: value,
+        verified: true,
+      });
     } catch (error: unknown) {
       const retryReadback =
         (error instanceof HardwareSerialError && error.code === "TIMEOUT") ||
@@ -504,13 +648,23 @@ export class UserHardwareSession {
           );
         }
         await sleep(delay);
+        this.#assertOpen();
+        assertHardwareOperationActive(
+          signal,
+          "The settings write verification was cancelled before the next read-back",
+        );
         try {
           const readback = await this.#driver.readParameter(
             parameterId,
             signal,
           );
-          this.#replaceParameter(readback);
-          if (parameterValue(readback) === value) {
+          this.#assertOpen();
+          assertHardwareOperationActive(
+            signal,
+            "The settings write verification was cancelled before its read-back could be accepted",
+          );
+          if (isExactWritableReadback(parameter, readback, value)) {
+            this.#replaceParameter(readback);
             return Object.freeze({
               parameter: readback,
               requestedValue: value,
@@ -544,6 +698,10 @@ export class UserHardwareSession {
         "Restoring settings requires explicit user confirmation",
       );
     }
+    assertHardwareOperationActive(
+      input.signal,
+      "Settings restoration was cancelled before any device command was sent",
+    );
     if (
       backup.schemaVersion !== 2 ||
       !compatibleBackupIdentity(backup.identity, this.#identity)
@@ -553,23 +711,49 @@ export class UserHardwareSession {
         "The backup product and hardware identity do not match the connected device",
       );
     }
+    await this.verifyCurrentIdentity(input.signal);
 
     const results: ParameterWriteResult[] = [];
     for (const item of backup.values) {
-      const current = this.writableParameters.find(
+      assertHardwareOperationActive(
+        input.signal,
+        "Settings restoration was cancelled before the next live read-back",
+      );
+      const declared = this.writableParameters.find(
         (parameter) => parameter.id === item.parameterId,
       );
       if (
-        current === undefined ||
-        current.kind !== item.kind ||
-        normalizedName(current.name) !== normalizedName(item.name)
+        declared === undefined ||
+        declared.kind !== item.kind ||
+        normalizedName(declared.name) !== normalizedName(item.name)
       ) {
         throw new ExpressLrsHardwareError(
           "BACKUP_MISMATCH",
           `Backup setting ${item.parameterId} no longer matches the connected device`,
         );
       }
-      if (current.value === item.value) {
+      const current = await this.#driver.readParameter(
+        item.parameterId,
+        input.signal,
+      );
+      this.#assertOpen();
+      assertHardwareOperationActive(
+        input.signal,
+        "Settings restoration was cancelled before its live read-back could be accepted",
+      );
+      if (
+        current.id !== declared.id ||
+        current.hidden ||
+        current.kind !== declared.kind ||
+        normalizedName(current.name) !== normalizedName(declared.name)
+      ) {
+        throw new ExpressLrsHardwareError(
+          "BACKUP_MISMATCH",
+          `Live setting ${item.parameterId} no longer matches the captured backup`,
+        );
+      }
+      this.#replaceParameter(current);
+      if (parameterValue(current) === item.value) {
         results.push(
           Object.freeze({
             parameter: current,
@@ -597,14 +781,33 @@ export class UserHardwareSession {
         "Binding requires explicit confirmation that the other device is ready",
       );
     }
+    assertHardwareOperationActive(
+      input.signal,
+      "Binding was cancelled before any device command was sent",
+    );
     const result = await this.#driver.startBinding(input.signal);
+    this.#assertOpen();
+    assertHardwareOperationActive(
+      input.signal,
+      "Binding was cancelled before the device response could be accepted",
+    );
+    if (result.stage === "TX_BIND_COMMAND_ACKNOWLEDGED" && !result.verified) {
+      throw new ExpressLrsHardwareError(
+        "COMMAND_NOT_ACKNOWLEDGED",
+        "The TX Bind command did not return a verified acknowledgement",
+      );
+    }
+    const information =
+      result.stage === "TX_BIND_COMMAND_ACKNOWLEDGED"
+        ? "The TX acknowledged its Bind command; this does not verify an RF link"
+        : result.stage === "RX_BIND_COMMAND_TRANSMITTED"
+          ? "The RX transport responded after the Bind command; this does not verify an RF link"
+          : "The RX Bind commands were transmitted without independent RF-link verification";
     return Object.freeze({
       stage: result.stage,
       commandCompleted: true,
       linkVerified: false,
-      information:
-        result.information ||
-        "The bind command completed, but a usable RF link has not been independently verified",
+      information,
     });
   }
 
@@ -637,6 +840,158 @@ export class UserHardwareSession {
         result.information ||
         `${command.name} completed on the connected device`,
     });
+  }
+
+  public async verifyCurrentIdentity(
+    signal?: AbortSignal,
+  ): Promise<ExpressLrsIdentity> {
+    this.#assertOpen();
+    assertHardwareOperationActive(
+      signal,
+      "Device identity verification was cancelled before the live read",
+    );
+    const verify = this.#driver.verifyCurrentIdentity;
+    if (verify === undefined) {
+      throw new ExpressLrsHardwareError(
+        "IDENTITY_MISMATCH",
+        "The connected device cannot be re-identified at the firmware write boundary",
+      );
+    }
+    const observed = await Reflect.apply(verify, this.#driver, [signal]);
+    this.#assertOpen();
+    assertHardwareOperationActive(
+      signal,
+      "Device identity verification was cancelled before the live identity could be accepted",
+    );
+    if (!compatibleBackupIdentity(this.#identity, observed)) {
+      throw new ExpressLrsHardwareError(
+        "IDENTITY_MISMATCH",
+        "The connected device identity changed before the firmware write boundary",
+      );
+    }
+    return Object.freeze({
+      ...observed,
+      usb: Object.freeze({ ...observed.usb }),
+    });
+  }
+
+  public async enterReceiverBootloader(input: {
+    readonly expectedFirmwareTarget: string;
+    readonly confirmedByUser: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<ReceiverBootloaderResult> {
+    this.#assertOpen();
+    if (!input.confirmedByUser || this.#identity.role !== "rx") {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "Receiver bootloader entry requires an identified RX and explicit user confirmation",
+      );
+    }
+    const enterBootloader = this.#driver.enterReceiverBootloader;
+    if (enterBootloader === undefined) {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "The connected RX does not expose a verified direct bootloader transition",
+      );
+    }
+    assertHardwareOperationActive(
+      input.signal,
+      "Receiver bootloader entry was cancelled before any device command was sent",
+    );
+    const result = await Reflect.apply(enterBootloader, this.#driver, [
+      {
+        targetKey: input.expectedFirmwareTarget,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      },
+    ]);
+    if (
+      !result.responseObserved ||
+      normalizedName(result.target) !==
+        normalizedName(input.expectedFirmwareTarget)
+    ) {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "The receiver bootloader did not confirm the exact selected target",
+      );
+    }
+    return Object.freeze({ ...result });
+  }
+
+  public async enterTransmitterBootloader(input: {
+    readonly commandName: string;
+    readonly confirmedByUser: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<UserCommandResult> {
+    this.#assertOpen();
+    if (!input.confirmedByUser || this.#identity.role !== "tx") {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "Transmitter bootloader entry requires an identified TX and explicit user confirmation",
+      );
+    }
+    const command = this.commands.find(
+      (candidate) =>
+        normalizedName(candidate.name) === normalizedName(input.commandName) &&
+        /(?:serial\s*update|bootloader|update\s*mode)/iu.test(candidate.name),
+    );
+    if (command === undefined) {
+      throw new ExpressLrsHardwareError(
+        "COMMAND_NOT_FOUND",
+        "The connected TX does not expose the selected bootloader command",
+      );
+    }
+    assertHardwareOperationActive(
+      input.signal,
+      "Transmitter bootloader entry was cancelled before any device command was sent",
+    );
+    const result = await this.#driver.executeCommand(
+      command.name,
+      input.signal,
+    );
+    if (!result.acknowledged) {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "The connected TX did not acknowledge its bootloader command",
+      );
+    }
+    return Object.freeze({
+      commandName: command.name,
+      commandCompleted: true,
+      information:
+        result.information ||
+        `${command.name} completed on the connected device`,
+    });
+  }
+
+  public async detachPortForBootloader(input: {
+    readonly confirmedByUser: boolean;
+  }): Promise<HardwareSerialPort> {
+    this.#assertOpen();
+    if (!input.confirmedByUser) {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "Releasing the identified device for firmware writing requires explicit user confirmation",
+      );
+    }
+    const detach = this.#driver.detachPortForBootloader;
+    if (detach === undefined) {
+      throw new ExpressLrsHardwareError(
+        "BOOTLOADER_NOT_ACKNOWLEDGED",
+        "The connected device cannot safely release its direct serial port for firmware writing",
+      );
+    }
+    try {
+      return await Reflect.apply(detach, this.#driver, []);
+    } finally {
+      this.#closed = true;
+      try {
+        this.#driver.port.ondisconnect =
+          this.#previousDisconnectHandler ?? null;
+      } catch {
+        // A transitioning browser port may reject handler changes.
+      }
+      this.#disconnectListeners.clear();
+    }
   }
 
   public async close(): Promise<boolean> {

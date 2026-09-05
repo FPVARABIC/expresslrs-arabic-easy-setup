@@ -85,6 +85,9 @@ if (!panel.includes("serializePhysicalAcceptanceMarkdown")) {
 if (!panel.includes("capturePhysicalAcceptanceContext")) {
   failures.push("live application context capture is not wired");
 }
+if (!panel.includes("const value = import.meta.env.VITE_BUILD_SHA;")) {
+  failures.push("the recorder is not bound directly to VITE_BUILD_SHA");
+}
 if (!workbench.includes("<PhysicalAcceptancePanel")) {
   failures.push(
     "the physical acceptance recorder is absent from production UI",
@@ -95,6 +98,14 @@ if (!workbench.includes("physicalAcceptanceContext")) {
 }
 if (!main.includes('import "./physical-acceptance.css";')) {
   failures.push("physical acceptance styles are absent from the entrypoint");
+}
+if (
+  !main.includes("<ExpressLrsParityWorkbench />") ||
+  main.includes("allowDestructiveWrites")
+) {
+  failures.push(
+    "the public entrypoint must mount the workbench with device-changing operations locked",
+  );
 }
 if (!packageJson.includes('"check:physical-acceptance"')) {
   failures.push("package.json does not expose the permanent acceptance gate");
@@ -107,5 +118,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Physical acceptance package verified (${required.length} files, ${stepIds.length} unlocked test steps, JSON + Markdown export).`,
+  `Physical acceptance package verified (${required.length} files, ${stepIds.length} available recorder steps, JSON + Markdown export).`,
 );

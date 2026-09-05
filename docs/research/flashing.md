@@ -16,6 +16,12 @@ Baseline sources: ExpressLRS 4.1.0, Configurator 1.8.3, and Web Flasher at their
 
 `ExpressLRS/Targets` metadata lists the allowed methods per product. At the inspected snapshot, common values include `uart`, `wifi`, `betaflight`, `etx`, `stlink`, `stock`, and `dfu`. These are candidate capabilities, not proof that a given browser/device combination has been validated by our product.
 
+Current implementation erratum (2026-09-04): the browser writer implements
+STM32 ROM DFU/DfuSe only when upstream declares `dfu`. Upstream `stlink` is the
+separate debug-probe route described in this historical trace and remains
+unsupported; the internal legacy method token must not be read as ST-Link
+support.
+
 ## Official source traces
 
 ### Wi-Fi OTA

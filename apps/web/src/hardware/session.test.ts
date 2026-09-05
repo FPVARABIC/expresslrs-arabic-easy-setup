@@ -67,7 +67,7 @@ function terminated(value: string): Uint8Array {
 function parameterEntry(
   id: number,
   data: Uint8Array,
-  origin = CrsfAddress.transmitter,
+  origin: number = CrsfAddress.transmitter,
 ): Uint8Array {
   return encodeCrsfExtendedFrame({
     address: CrsfAddress.radio,
@@ -105,12 +105,12 @@ function infoParameter(): Uint8Array {
   );
 }
 
-function deviceInfo(): Uint8Array {
+function deviceInfo(origin: number = CrsfAddress.transmitter): Uint8Array {
   return encodeCrsfExtendedFrame({
     address: CrsfAddress.radio,
     type: CrsfFrameType.deviceInfo,
     destination: CrsfAddress.usb,
-    origin: CrsfAddress.transmitter,
+    origin,
     data: concatBytes(
       terminated("Example TX 2.4GHz"),
       new Uint8Array([0x45, 0x4c, 0x52, 0x53, 0, 0, 0, 0, 0, 4, 1, 0, 3, 0]),
@@ -118,7 +118,12 @@ function deviceInfo(): Uint8Array {
   });
 }
 
-function fakeHardware(): {
+function fakeHardware(
+  input: {
+    readonly role?: "tx" | "rx";
+    readonly close?: () => Promise<void>;
+  } = {},
+): {
   readonly port: HardwareSerialPort;
   readonly requestPort: ReturnType<typeof vi.fn>;
   readonly writes: readonly Uint8Array[];
@@ -127,6 +132,8 @@ function fakeHardware(): {
   const parser = new CrsfStreamParser();
   const writes: Uint8Array[] = [];
   let selectedRate = 1;
+  const deviceAddress =
+    input.role === "rx" ? CrsfAddress.receiver : CrsfAddress.transmitter;
 
   const reader: HardwareSerialReader = {
     read: () => queue.read(),
@@ -139,21 +146,33 @@ function fakeHardware(): {
       for (const frame of parser.push(data)) {
         const extended = asExtendedFrame(frame);
         if (frame.type === CrsfFrameType.devicePing) {
-          queue.push(deviceInfo());
+          queue.push(deviceInfo(deviceAddress));
         } else if (
           frame.type === CrsfFrameType.parameterRead &&
           extended !== null
         ) {
           const id = extended.data[0];
           if (id === 1) {
-            queue.push(parameterEntry(1, selectionParameter(selectedRate)));
+            queue.push(
+              parameterEntry(
+                1,
+                selectionParameter(selectedRate),
+                deviceAddress,
+              ),
+            );
           }
           if (id === 2) {
             queue.push(
-              parameterEntry(2, commandParameter(CrsfCommandStep.idle)),
+              parameterEntry(
+                2,
+                commandParameter(CrsfCommandStep.idle),
+                deviceAddress,
+              ),
             );
           }
-          if (id === 3) queue.push(parameterEntry(3, infoParameter()));
+          if (id === 3) {
+            queue.push(parameterEntry(3, infoParameter(), deviceAddress));
+          }
         } else if (
           frame.type === CrsfFrameType.parameterWrite &&
           extended !== null
@@ -166,6 +185,7 @@ function fakeHardware(): {
               parameterEntry(
                 2,
                 commandParameter(CrsfCommandStep.executing, "Binding..."),
+                deviceAddress,
               ),
             );
           }
@@ -174,6 +194,7 @@ function fakeHardware(): {
               parameterEntry(
                 2,
                 commandParameter(CrsfCommandStep.idle, "Bind mode active"),
+                deviceAddress,
               ),
             );
           }
@@ -186,7 +207,7 @@ function fakeHardware(): {
     readable: { getReader: () => reader },
     writable: { getWriter: () => writer },
     open: vi.fn().mockResolvedValue(undefined),
-    close: vi.fn().mockResolvedValue(undefined),
+    close: input.close ?? vi.fn().mockResolvedValue(undefined),
     getInfo: () => ({ usbVendorId: 0x303a, usbProductId: 0x1001 }),
   };
   return {
@@ -197,6 +218,55 @@ function fakeHardware(): {
 }
 
 describe("real ExpressLRS CRSF hardware session", () => {
+  it("reports unconfirmed cleanup when stream acquisition fails after opening", async () => {
+    const close = vi.fn().mockRejectedValue(new Error("port remained open"));
+    const port: HardwareSerialPort = {
+      readable: {
+        getReader: () => {
+          throw new Error("reader unavailable");
+        },
+      },
+      writable: {
+        getWriter: () => {
+          throw new Error("writer unavailable");
+        },
+      },
+      open: vi.fn().mockResolvedValue(undefined),
+      close,
+    };
+
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: "tx",
+      navigatorObject: {
+        serial: { requestPort: vi.fn().mockResolvedValue(port) },
+      },
+      secureContext: true,
+    });
+
+    expect(outcome).toMatchObject({
+      status: "CLEANUP_UNCONFIRMED",
+      message: expect.stringMatching(/could not be confirmed closed/u),
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hide an unconfirmed close behind a role mismatch", async () => {
+    const close = vi.fn().mockRejectedValue(new Error("port remained open"));
+    const hardware = fakeHardware({ close });
+
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: "rx",
+      navigatorObject: { serial: { requestPort: hardware.requestPort } },
+      secureContext: true,
+    });
+
+    expect(outcome).toMatchObject({
+      status: "CLEANUP_UNCONFIRMED",
+      message: expect.stringMatching(/could not be confirmed closed/u),
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("requires DEVICE_INFO, enumerates every parameter, and creates a complete backup", async () => {
     const hardware = fakeHardware();
 
@@ -278,6 +348,26 @@ describe("real ExpressLRS CRSF hardware session", () => {
     await outcome.session.close();
   });
 
+  it("does not transmit an RX Bind command when cancellation is already requested", async () => {
+    const hardware = fakeHardware({ role: "rx" });
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: "rx",
+      navigatorObject: { serial: { requestPort: hardware.requestPort } },
+      secureContext: true,
+    });
+    expect(outcome.status).toBe("CONNECTED");
+    if (outcome.status !== "CONNECTED") return;
+    const writesBeforeBinding = hardware.writes.length;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      outcome.session.startBinding(controller.signal),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect(hardware.writes).toHaveLength(writesBeforeBinding);
+    await outcome.session.close();
+  });
+
   it("rejects a settings backup belonging to another device identity", async () => {
     const hardware = fakeHardware();
     const outcome = await ExpressLrsHardwareSession.connect({
@@ -318,5 +408,54 @@ describe("real ExpressLRS CRSF hardware session", () => {
     expect(observed).toEqual(outcome.identity);
     expect(hardware.writes.length).toBe(writesBefore + 1);
     await outcome.session.close();
+  });
+
+  it("does not write receiver bootloader bytes when already cancelled", async () => {
+    const hardware = fakeHardware({ role: "rx" });
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: "rx",
+      navigatorObject: { serial: { requestPort: hardware.requestPort } },
+      secureContext: true,
+    });
+    expect(outcome.status).toBe("CONNECTED");
+    if (outcome.status !== "CONNECTED") return;
+    const writesBefore = hardware.writes.length;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      outcome.session.enterReceiverBootloader({ signal: controller.signal }),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect(hardware.writes).toHaveLength(writesBefore);
+    await outcome.session.close();
+  });
+
+  it("cancels receiver bootloader response waiting and clears its deadline", async () => {
+    const hardware = fakeHardware({ role: "rx" });
+    const outcome = await ExpressLrsHardwareSession.connect({
+      role: "rx",
+      navigatorObject: { serial: { requestPort: hardware.requestPort } },
+      secureContext: true,
+    });
+    expect(outcome.status).toBe("CONNECTED");
+    if (outcome.status !== "CONNECTED") return;
+    const writesBefore = hardware.writes.length;
+    const controller = new AbortController();
+    vi.useFakeTimers();
+    try {
+      const pending = outcome.session.enterReceiverBootloader({
+        signal: controller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(hardware.writes).toHaveLength(writesBefore + 3);
+
+      controller.abort();
+
+      await expect(pending).rejects.toMatchObject({ code: "ABORTED" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      await outcome.session.close();
+    }
   });
 });

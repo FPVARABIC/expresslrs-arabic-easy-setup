@@ -10,6 +10,7 @@ const sourcePath = path.join(repositoryRoot, "apps/web/public/_headers");
 const builtPath = path.join(repositoryRoot, "apps/web/dist/_headers");
 const expectedConnectSources = new Set([
   "'self'",
+  "https://expresslrs.github.io",
   "http://10.0.0.1",
   "http://elrs_rx.local",
   "http://elrs_tx.local",
@@ -143,7 +144,7 @@ function validate(source, label) {
     connectSources.some((source) => !expectedConnectSources.has(source))
   ) {
     fail(
-      "connect-src must contain only self and the three reviewed ExpressLRS origins",
+      "connect-src must contain only self, the official Web Flasher mirror, and the three reviewed local ExpressLRS origins",
     );
   }
   return headers;

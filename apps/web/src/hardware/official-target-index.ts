@@ -80,10 +80,14 @@ function normalizeMethod(value: unknown): ExpressLrsFlashMethod | null {
       return "passthru";
     case "wifi":
       return "wifi";
+    case "dfu":
+      // The local `stlink` value is the legacy name for the implemented
+      // STM32 ROM DfuSe writer. Upstream ST-Link requires a debug probe and
+      // must not authorize that distinct transport.
+      return "stlink";
     case "stlink":
     case "st-link":
-    case "dfu":
-      return "stlink";
+      return null;
     case "dir":
     case "stock":
     case "download":

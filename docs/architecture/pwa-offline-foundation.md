@@ -64,10 +64,17 @@ The notice is Arabic-first with English fallback and states only that some previ
 The reviewed CSP changes only the Worker boundary needed by this checkpoint:
 
 - `worker-src` changes from `'none'` to `'self'`;
-- `connect-src` remains limited to self plus the three reviewed ExpressLRS Local HTTP origins;
+- `connect-src` is limited to self, the CORS-capable official ExpressLRS Web
+  Flasher mirror used for the global catalog/Targets/layout inputs,
+  revision-bound Firmware/boot/Lua assets, and revision-first logo with a
+  global fallback, plus the three reviewed ExpressLRS Local HTTP origins;
 - scripts, styles, fonts, images, forms, frames, objects, and permissions retain their existing restrictions.
 
-GitHub Pages still cannot prove deployment of response-only headers. The meta-CSP remains a partial Pages preview control, not production-host evidence.
+GitHub Pages still cannot prove deployment of response-only headers. The
+meta-CSP remains a partial Pages preview control, not production-host evidence.
+The global catalog, Target, layout, and fallback-logo paths are mutable and
+unsigned; only the assets whose URL contains the selected full revision are
+commit-addressed.
 
 ## Deterministic PWA gate
 

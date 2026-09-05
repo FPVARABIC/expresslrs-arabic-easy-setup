@@ -15,7 +15,7 @@ const runLive =
   it("parses the current official release index and target archive", async () => {
     const catalog = await loadOfficialExpressLrsCatalog();
 
-    expect(catalog.source).toBe("EXPRESSLRS_ARTIFACTORY");
+    expect(catalog.source).toBe("EXPRESSLRS_WEB_FLASHER_MIRROR");
     expect(catalog.releases.length).toBeGreaterThan(0);
     expect(catalog.targets.length).toBeGreaterThan(0);
     expect(catalog.targets.some((target) => target.role === "tx")).toBe(true);
@@ -26,6 +26,25 @@ const runLive =
           target.config.productName.length > 0 &&
           target.config.platform.length > 0 &&
           target.config.firmware.length > 0,
+      ),
+    ).toBe(true);
+    const upstreamMethods = (target: (typeof catalog.targets)[number]) =>
+      Array.isArray(target.config.raw.upload_methods)
+        ? target.config.raw.upload_methods
+        : [];
+    expect(
+      catalog.targets.every(
+        (target) =>
+          !target.config.uploadMethods.includes("stlink") ||
+          upstreamMethods(target).includes("dfu"),
+      ),
+    ).toBe(true);
+    expect(
+      catalog.targets.some(
+        (target) =>
+          upstreamMethods(target).includes("stlink") &&
+          !upstreamMethods(target).includes("dfu") &&
+          !target.config.uploadMethods.includes("stlink"),
       ),
     ).toBe(true);
   }, 120_000);

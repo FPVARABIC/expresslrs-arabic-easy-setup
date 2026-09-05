@@ -4,10 +4,11 @@ import type { Plugin } from "vite";
 
 const pagesBuild = process.env.GITHUB_PAGES === "true";
 const configuredBase = process.env.PAGES_BASE_PATH ?? "/";
+const configuredBuildSha = process.env.VITE_BUILD_SHA?.trim() ?? "";
 const pagesContentSecurityPolicy = [
   "default-src 'none'",
   "base-uri 'none'",
-  "connect-src 'self' http://10.0.0.1 http://elrs_rx.local http://elrs_tx.local",
+  "connect-src 'self' https://expresslrs.github.io http://10.0.0.1 http://elrs_rx.local http://elrs_tx.local",
   "font-src 'self'",
   "form-action 'none'",
   "img-src 'self' data:",
@@ -29,6 +30,16 @@ function normalizeBase(value: string): string {
   }
   return value;
 }
+
+function validatePagesBuildSha(value: string): void {
+  if (pagesBuild && !/^[0-9a-f]{40}$/u.test(value)) {
+    throw new Error(
+      "VITE_BUILD_SHA must be the exact 40-character commit SHA for a GitHub Pages build",
+    );
+  }
+}
+
+validatePagesBuildSha(configuredBuildSha);
 
 function pagesSecurityMetaPlugin(): Plugin {
   return {

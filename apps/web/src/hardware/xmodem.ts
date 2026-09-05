@@ -1,4 +1,4 @@
-import type { HardwareSerialPort } from "./serial";
+import type { HardwareSerialPort, HardwareSerialWriter } from "./serial";
 import type { FirmwareFlashProgressListener } from "./parity-types";
 
 import { isAbortRequested } from "./byte-utils";
@@ -11,6 +11,8 @@ const CRC_REQUEST = 0x43;
 const PAD = 0x1a;
 const BLOCK_BYTES = 128;
 const MAX_RETRIES = 10;
+const WRITE_TIMEOUT_MS = 5_000;
+const CLEANUP_TIMEOUT_MS = 1_000;
 
 export class XmodemError extends Error {
   public constructor(
@@ -20,12 +22,94 @@ export class XmodemError extends Error {
       | "HANDSHAKE_TIMEOUT"
       | "TRANSFER_REJECTED"
       | "TRANSFER_TIMEOUT"
+      | "CLEANUP_UNCONFIRMED"
       | "ABORTED",
     message: string,
   ) {
     super(message);
     this.name = "XmodemError";
   }
+}
+
+function writeWithDeadline(
+  writer: HardwareSerialWriter,
+  bytes: Uint8Array,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (isAbortRequested(signal)) {
+    throw new XmodemError("ABORTED", "XMODEM transfer was cancelled");
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const resolveOnce = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () =>
+      rejectOnce(new XmodemError("ABORTED", "XMODEM transfer was cancelled"));
+    const timer = setTimeout(
+      () =>
+        rejectOnce(
+          new XmodemError(
+            "TRANSFER_TIMEOUT",
+            "XMODEM serial write did not settle before the deadline",
+          ),
+        ),
+      WRITE_TIMEOUT_MS,
+    );
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted === true) {
+      onAbort();
+      return;
+    }
+
+    let task: Promise<void>;
+    try {
+      task = writer.write(bytes);
+    } catch (error: unknown) {
+      rejectOnce(error);
+      return;
+    }
+    // Keep handlers attached if timeout/Abort wins so late stream settlement
+    // cannot become an unhandled rejection.
+    void task.then(resolveOnce, rejectOnce);
+  });
+}
+
+function cleanupWithin(operation: () => Promise<unknown>): Promise<boolean> {
+  let task: Promise<unknown>;
+  try {
+    task = operation();
+  } catch {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (confirmed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(confirmed);
+    };
+    const timer = setTimeout(() => finish(false), CLEANUP_TIMEOUT_MS);
+    void task.then(
+      () => finish(true),
+      () => finish(false),
+    );
+  });
 }
 
 export function crc16Xmodem(bytes: Uint8Array): number {
@@ -132,10 +216,11 @@ export async function flashXmodemFirmware(input: {
   const readable = input.port.readable;
   const writable = input.port.writable;
   if (readable == null || writable == null) {
-    try {
-      await input.port.close();
-    } catch {
-      // Preserve stream failure.
+    if (!(await cleanupWithin(() => input.port.close()))) {
+      throw new XmodemError(
+        "CLEANUP_UNCONFIRMED",
+        "XMODEM streams were unavailable and the serial port could not be confirmed closed",
+      );
     }
     throw new XmodemError(
       "STREAMS_UNAVAILABLE",
@@ -146,6 +231,8 @@ export async function flashXmodemFirmware(input: {
   const writer = writable.getWriter();
   const inbox = new ByteInbox();
   let reading = true;
+  let writerNeedsAbort = false;
+  let writerAbortReason: unknown;
   const readTask = (async () => {
     try {
       while (reading) {
@@ -158,18 +245,30 @@ export async function flashXmodemFirmware(input: {
     }
   })();
 
-  const close = async () => {
+  const write = async (bytes: Uint8Array): Promise<void> => {
+    try {
+      await writeWithDeadline(writer, bytes, input.signal);
+    } catch (error: unknown) {
+      writerNeedsAbort = true;
+      writerAbortReason = error;
+      throw error;
+    }
+  };
+
+  const close = async (): Promise<boolean> => {
     reading = false;
-    try {
-      await reader.cancel();
-    } catch {
-      // Best effort.
-    }
-    try {
-      await readTask;
-    } catch {
-      // Best effort.
-    }
+    const abortWriter = (
+      writer as HardwareSerialWriter & {
+        abort?(reason?: unknown): Promise<void>;
+      }
+    ).abort;
+    await Promise.all([
+      cleanupWithin(() => reader.cancel()),
+      writerNeedsAbort && typeof abortWriter === "function"
+        ? cleanupWithin(() => abortWriter.call(writer, writerAbortReason))
+        : Promise.resolve(true),
+    ]);
+    await cleanupWithin(() => readTask);
     try {
       reader.releaseLock();
     } catch {
@@ -180,11 +279,7 @@ export async function flashXmodemFirmware(input: {
     } catch {
       // Best effort.
     }
-    try {
-      await input.port.close();
-    } catch {
-      // Device may reboot after EOT.
-    }
+    return cleanupWithin(() => input.port.close());
   };
 
   try {
@@ -219,7 +314,6 @@ export async function flashXmodemFirmware(input: {
     const blockCount = Math.ceil(input.firmware.byteLength / BLOCK_BYTES);
     for (let blockIndex = 0; blockIndex < blockCount; blockIndex += 1) {
       if (isAbortRequested(input.signal)) {
-        await writer.write(new Uint8Array([CAN, CAN]));
         throw new XmodemError("ABORTED", "XMODEM transfer was cancelled");
       }
       const payload = new Uint8Array(BLOCK_BYTES).fill(PAD);
@@ -228,7 +322,7 @@ export async function flashXmodemFirmware(input: {
       const frame = packet((blockIndex + 1) & 0xff, payload);
       let accepted = false;
       for (let attempt = 0; attempt < MAX_RETRIES && !accepted; attempt += 1) {
-        await writer.write(frame);
+        await write(frame);
         const answer = await inbox.next({
           timeoutMs: 3_000,
           signal: input.signal,
@@ -248,7 +342,7 @@ export async function flashXmodemFirmware(input: {
         }
       }
       if (!accepted) {
-        await writer.write(new Uint8Array([CAN, CAN]));
+        await write(new Uint8Array([CAN, CAN]));
         throw new XmodemError(
           "TRANSFER_REJECTED",
           `Receiver rejected XMODEM block ${blockIndex + 1} after ${MAX_RETRIES} attempts`,
@@ -267,7 +361,7 @@ export async function flashXmodemFirmware(input: {
 
     let eotAccepted = false;
     for (let attempt = 0; attempt < MAX_RETRIES && !eotAccepted; attempt += 1) {
-      await writer.write(new Uint8Array([EOT]));
+      await write(new Uint8Array([EOT]));
       const answer = await inbox.next({
         timeoutMs: 3_000,
         signal: input.signal,
@@ -297,6 +391,11 @@ export async function flashXmodemFirmware(input: {
       blocks: blockCount,
     });
   } finally {
-    await close();
+    if (!(await close())) {
+      throw new XmodemError(
+        "CLEANUP_UNCONFIRMED",
+        "XMODEM ended, but the serial port could not be confirmed closed",
+      );
+    }
   }
 }

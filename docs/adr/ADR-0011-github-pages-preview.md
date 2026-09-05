@@ -1,6 +1,6 @@
 # ADR-0011: GitHub Pages Public Development Preview
 
-- Status: Accepted for the M2A public preview only
+- Status: Accepted for the public preview; amended for the M2 physical candidate
 - Date: 2026-08-20
 
 ## Context
@@ -29,7 +29,7 @@ The deployment must:
 - build against the fixed canonical repository base path, verify every emitted
   asset against it, and compare it with the configured Pages path before deploy;
 - run the frozen install, complete source checks, dependency-license policy,
-  and high-severity advisory audit before packaging;
+  and moderate-or-higher advisory audit before packaging;
 - inject a reviewed Pages-only CSP meta policy before executable resources and
   include a `no-referrer` meta policy;
 - keep the fuller `_headers` artifact for a future compatible host while
@@ -38,16 +38,17 @@ The deployment must:
   immutable Commit SHAs;
 - grant `pages: write` and `id-token: write` only to the deployment job;
 - ship the notices required by the self-hosted Cairo font and runtime packages;
-- label the UI `PREVIEW · HARDWARE NONE`, keep all real writes absent, and avoid
-  Offline/PWA, real-device support, or trusted-host claims.
+- state that Hardware validation is absent, keep all device-changing controls
+  locked at the public entry point, and avoid real-device support,
+  offline-Firmware, or trusted-host claims.
 
-The repository's protected `github-pages` environment permits deployment only
-from `main`. Before merge, a minimal workflow committed on `main` may check out
-one full, reviewed candidate SHA, rerun the complete quality gate, and publish
-that exact artifact. The feature workflow itself remains restricted to `main`,
-so feature pushes cannot bypass the environment rule or create repeated failed
-deployments. This is not a separate PR environment: it replaces the single
-Pages preview.
+The deployment workflow responds only to a push to `main` or a manual dispatch,
+and its build job additionally requires `refs/heads/main`. It checks out that
+triggering commit, reruns the complete quality gate, and publishes only the
+artifact bound to the same full SHA. Pull requests run a separate read-only CI
+artifact check and never enter the deployment workflow. This is not a separate
+PR environment: a successful main deployment replaces the single Pages
+preview.
 
 ## Real-device boundary
 
@@ -70,6 +71,44 @@ that this path works. It may never proxy device data through a cloud service.
   prohibited.
 - A future production host must enforce and verify real response headers before
   the hosting security gate can pass.
+
+## M2 physical-candidate amendment — 2026-09-04
+
+The later TX/RX candidate adds one HTTPS `connect-src` origin:
+`https://expresslrs.github.io`. It is used only for the official Web Flasher's
+CORS-capable mirror: the global release index and Target JSON; revision/region/
+Firmware-family Firmware and boot assets; global hardware layouts; a
+revision-first logo with global fallback; and the revision-bound Lua script.
+Requests are bounded, use fixed HTTPS origin/path construction, and reject a
+final URL that differs from the requested mirror path. The three local-device
+origins remain unchanged, direct Artifactory access is not admitted by the
+browser policy. This amendment supersedes the earlier “all real writes absent”
+implementation description: device-changing code now exists, but the current
+public entry point keeps settings writes, Binding, flashing, Wi-Fi handoff, and
+recovery locked. Enabling them requires a separately reviewed entry point; it
+is not a public build switch. Every Pages build must inject and verify its exact
+40-character candidate SHA so a physical-acceptance export can be bound to the
+tested code.
+
+Pull requests run the read-only CI workflow and build a non-deployed Pages
+artifact for verification. The deployment workflow has no `pull_request`
+trigger, its build job is additionally restricted to `refs/heads/main`, and
+only its deployment job receives Pages and OIDC write permissions. Therefore a
+Draft PR push cannot publish or replace the public preview.
+
+This amendment also supersedes the original `GET /config`-only real-device
+description. The current public entry point permits explicit CRSF connection,
+identity inspection, and parameter reads. Those paths remain unvalidated on
+Hardware, and the entry point does not enable settings writes, Binding,
+flashing, Wi-Fi handoff, or recovery.
+
+The revision paths for Firmware, boot assets, Lua, and the first logo attempt
+provide commit-addressed provenance, not a publisher signature. The global
+catalog, Target, layout, and fallback-logo inputs are mutable and unsigned;
+HTTPS plus an exact final URL identifies their delivery source but does not bind
+them to the selected revision. Per-segment hashes in the locally generated
+recovery manifest detect later package corruption; they do not authenticate
+upstream publication.
 
 ## References
 

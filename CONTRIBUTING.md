@@ -12,11 +12,17 @@ experiment branches and submit changes through Pull Requests.
 4. Do not copy upstream code or Target data whose reuse has not passed the
    documented license gate.
 
-M2A additionally permits only the isolated Local HTTP read defined by ADR-0010:
-an explicit `GET /config` to one fixed official origin. It does not permit any
-other endpoint, network scan, Binding/configuration/reboot/update request, real
-device write, Firmware/RF change, Hardware support claim, release publishing,
-or performance claim.
+The current M2 branch contains a software candidate for real CRSF identity,
+reversible settings, Binding commands, package preparation, update transports,
+recovery, and physical-acceptance recording. This is not Hardware evidence.
+Keep read-only identity usable without a remote catalog, keep destructive
+writers fail-closed in ordinary builds, and do not convert an acknowledgement
+or Mock result into a Hardware, RF-link, recovery, or performance claim.
+
+The isolated Local HTTP read remains limited by ADR-0010 to explicit requests
+to reviewed ExpressLRS local origins. Do not add network scanning, unreviewed
+origins, automatic release publishing, Firmware/RF changes, or performance
+claims outside their documented gates.
 
 ## Branches and commits
 
@@ -38,19 +44,17 @@ Experiment branches until their evidence and promotion gates are satisfied.
 
 Run the checks supported by the selected stack before requesting review:
 
-```text
-pnpm format:check
-pnpm lint
-pnpm typecheck
-pnpm check:boundaries
-pnpm check:links
-pnpm check:master-plan
-pnpm test
-pnpm build
+```bash
+pnpm check
 pnpm licenses:report
 pnpm licenses:check
 pnpm security:audit
 ```
+
+`pnpm check` includes repository hygiene, the permanent physical-acceptance
+package gate, formatting, lint, strict TypeScript, policy checks, tests, and the
+production build. A GitHub Pages candidate must additionally be built with its
+exact 40-character `VITE_BUILD_SHA` and pass `pnpm check:pages-build`.
 
 If the environment cannot run an official dependency-backed check, state that
 explicitly. A custom/local smoke runner is supporting evidence, not a substitute

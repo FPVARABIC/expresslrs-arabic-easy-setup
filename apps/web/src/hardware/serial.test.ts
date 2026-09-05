@@ -4,6 +4,7 @@ import {
   CrsfSerialLink,
   HardwareSerialError,
   readHardwareSerialPortInfo,
+  requestAndOpenHardwareSerial,
   type HardwareSerialPort,
   type HardwareSerialReader,
   type HardwareSerialWriter,
@@ -31,6 +32,57 @@ describe("hardware serial resource safety", () => {
       usbVendorId: null,
       usbProductId: null,
     });
+  });
+
+  it("reports unconfirmed cleanup when an opened port has no streams and close rejects", async () => {
+    const close = vi.fn().mockRejectedValue(new Error("port remained busy"));
+    const port: HardwareSerialPort = {
+      readable: null,
+      writable: null,
+      open: vi.fn().mockResolvedValue(undefined),
+      close,
+    };
+
+    const outcome = await requestAndOpenHardwareSerial({
+      navigatorObject: {
+        serial: { requestPort: vi.fn().mockResolvedValue(port) },
+      },
+      secureContext: true,
+    });
+
+    expect(outcome).toEqual({ status: "CLEANUP_UNCONFIRMED" });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds an unconfirmed close when an opened streamless port never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const closeDeferred = deferred<void>();
+      const close = vi.fn(() => closeDeferred.promise);
+      const port: HardwareSerialPort = {
+        readable: null,
+        writable: null,
+        open: vi.fn().mockResolvedValue(undefined),
+        close,
+      };
+      const operation = requestAndOpenHardwareSerial({
+        navigatorObject: {
+          serial: { requestPort: vi.fn().mockResolvedValue(port) },
+        },
+        secureContext: true,
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(operation).resolves.toEqual({
+        status: "CLEANUP_UNCONFIRMED",
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+      closeDeferred.reject(new Error("late close failure"));
+      await Promise.resolve();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("releases a reader when writer acquisition fails", () => {

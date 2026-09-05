@@ -63,7 +63,10 @@ export function matchHardwareIdentityToOfficialTargets(input: {
       score += 90;
       evidence.push("target-key-exact");
     }
-    if (product.includes(firmware) || firmware.includes(product)) {
+    if (product === firmware && product.length > 0) {
+      score += 95;
+      evidence.push("firmware-key-exact");
+    } else if (product.includes(firmware) || firmware.includes(product)) {
       if (Math.min(product.length, firmware.length) >= 8) {
         score += 70;
         evidence.push("firmware-key-contained");
@@ -97,10 +100,24 @@ export function matchHardwareIdentityToOfficialTargets(input: {
       candidates: Object.freeze([]),
     });
   }
-  if (top.score >= 100 && (second === undefined || second.score < 100)) {
+  const exactCandidates = candidates.filter((candidate) =>
+    candidate.evidence.some((item) =>
+      ["product-name-exact", "target-key-exact", "firmware-key-exact"].includes(
+        item,
+      ),
+    ),
+  );
+  if (exactCandidates.length === 1 && exactCandidates[0] !== undefined) {
     return Object.freeze({
       confidence: "EXACT",
-      selected: top.target,
+      selected: exactCandidates[0].target,
+      candidates: Object.freeze(candidates.slice(0, 8)),
+    });
+  }
+  if (exactCandidates.length > 1) {
+    return Object.freeze({
+      confidence: "AMBIGUOUS",
+      selected: null,
       candidates: Object.freeze(candidates.slice(0, 8)),
     });
   }

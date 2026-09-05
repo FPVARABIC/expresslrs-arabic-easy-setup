@@ -29,6 +29,8 @@ import {
   type HardwareSerialPortInfo,
 } from "./serial";
 
+const FAILED_CONNECTION_CLEANUP_TIMEOUT_MS = 1_000;
+
 export interface ExpressLrsIdentity {
   readonly validation: "CRSF_DEVICE_INFO";
   readonly role: CrsfRole;
@@ -121,8 +123,140 @@ export class ExpressLrsHardwareError extends Error {
   }
 }
 
+function failedConnection(
+  status: Exclude<
+    HardwareConnectOutcome,
+    { readonly status: "CONNECTED" }
+  >["status"],
+  message: string,
+): HardwareConnectOutcome {
+  return Object.freeze({ status, message });
+}
+
+async function confirmFailedConnectionClosed(
+  link: CrsfSerialLink,
+): Promise<boolean> {
+  let closeTask: Promise<boolean>;
+  try {
+    closeTask = link.close();
+  } catch {
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(closed);
+    };
+    const timer = setTimeout(
+      () => finish(false),
+      FAILED_CONNECTION_CLEANUP_TIMEOUT_MS,
+    );
+
+    // Keep both handlers attached if the deadline wins so a late cleanup
+    // settlement cannot become an unhandled rejection.
+    void closeTask.then(finish, () => finish(false));
+  });
+}
+
+async function closeFailedConnection(input: {
+  readonly link: CrsfSerialLink;
+  readonly status: Exclude<
+    HardwareConnectOutcome,
+    { readonly status: "CONNECTED" }
+  >["status"];
+  readonly message: string;
+}): Promise<HardwareConnectOutcome> {
+  if (await confirmFailedConnectionClosed(input.link)) {
+    return failedConnection(input.status, input.message);
+  }
+  return failedConnection(
+    "CLEANUP_UNCONFIRMED",
+    `${input.message}. The opened hardware connection could not be confirmed closed`,
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hardwareAbortError(message: string): HardwareSerialError {
+  return new HardwareSerialError("ABORTED", message);
+}
+
+function assertHardwareOperationActive(
+  signal: AbortSignal | undefined,
+  message: string,
+): void {
+  if (signal?.aborted === true) {
+    throw hardwareAbortError(message);
+  }
+}
+
+function sleepWithAbort(
+  ms: number,
+  signal: AbortSignal | undefined,
+  message: string,
+): Promise<void> {
+  if (signal?.aborted === true) {
+    return Promise.reject(hardwareAbortError(message));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(hardwareAbortError(message));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted === true) onAbort();
+  });
+}
+
+function waitForReceiverBootloaderTarget(
+  response: Promise<string>,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const resolveOnce = (target: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(target);
+    };
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () => {
+      rejectOnce(hardwareAbortError("Bootloader entry was cancelled"));
+    };
+
+    const timer = setTimeout(() => {
+      rejectOnce(
+        new ExpressLrsHardwareError(
+          "BOOTLOADER_NOT_ACKNOWLEDGED",
+          "The receiver did not return a bootloader target line",
+        ),
+      );
+    }, 2_000);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    void response.then(resolveOnce, rejectOnce);
+    if (signal?.aborted === true) onAbort();
+  });
 }
 
 function normalizedName(value: string): string {
@@ -260,7 +394,15 @@ export class ExpressLrsHardwareSession {
     }
 
     const link = new CrsfSerialLink(opened.port);
-    link.start();
+    try {
+      link.start();
+    } catch {
+      return closeFailedConnection({
+        link,
+        status: "STREAMS_UNAVAILABLE",
+        message: "The selected serial streams could not be acquired",
+      });
+    }
     let deviceInfo: CrsfDeviceInfo | null = null;
     for (const origin of [CrsfAddress.usb, CrsfAddress.core] as const) {
       try {
@@ -282,16 +424,16 @@ export class ExpressLrsHardwareSession {
           (error.code === "TIMEOUT" || error.code === "ABORTED")
         ) {
           if (error.code === "ABORTED") {
-            await link.close();
-            return Object.freeze({
+            return closeFailedConnection({
+              link,
               status: "NO_CRSF_RESPONSE",
               message: "The USB identification request was cancelled",
             });
           }
           continue;
         }
-        await link.close();
-        return Object.freeze({
+        return closeFailedConnection({
+          link,
           status: "NO_CRSF_RESPONSE",
           message:
             "The selected port failed while waiting for a CRSF device response",
@@ -300,23 +442,23 @@ export class ExpressLrsHardwareSession {
     }
 
     if (deviceInfo === null) {
-      await link.close();
-      return Object.freeze({
+      return closeFailedConnection({
+        link,
         status: "NO_CRSF_RESPONSE",
         message:
           "No valid ExpressLRS CRSF DEVICE_INFO response was received at 420000 baud",
       });
     }
     if (!deviceInfo.expressLrsMarkerValid) {
-      await link.close();
-      return Object.freeze({
+      return closeFailedConnection({
+        link,
         status: "NOT_EXPRESSLRS",
         message: "The responding CRSF device did not report the ELRS marker",
       });
     }
     if (deviceInfo.role !== "unknown" && deviceInfo.role !== input.role) {
-      await link.close();
-      return Object.freeze({
+      return closeFailedConnection({
+        link,
         status: "ROLE_MISMATCH",
         message: `The selected ${input.role.toUpperCase()} path received a ${deviceInfo.role.toUpperCase()} device`,
       });
@@ -341,8 +483,8 @@ export class ExpressLrsHardwareSession {
         parameters,
       });
     } catch {
-      await session.close();
-      return Object.freeze({
+      return closeFailedConnection({
+        link,
         status: "PARAMETER_READ_FAILED",
         message:
           "The device identity was valid, but its complete CRSF parameter table could not be read",
@@ -546,6 +688,10 @@ export class ExpressLrsHardwareSession {
         `Parameter ${known.name} is not an exposed numeric or selection setting`,
       );
     }
+    assertHardwareOperationActive(
+      signal,
+      "The settings write was cancelled before any device command was sent",
+    );
     const encoded = encodeParameterValue(known, value);
     await this.#link.write(
       createParameterWrite({
@@ -576,6 +722,10 @@ export class ExpressLrsHardwareSession {
     signal?: AbortSignal,
   ): Promise<readonly ParameterWriteResult[]> {
     this.#assertOpen();
+    assertHardwareOperationActive(
+      signal,
+      "Settings restoration was cancelled before any device command was sent",
+    );
     if (
       backup.schemaVersion !== 1 ||
       !sameIdentity(backup.identity, this.#identity)
@@ -621,6 +771,10 @@ export class ExpressLrsHardwareSession {
     step: number,
     signal?: AbortSignal,
   ): Promise<Extract<CrsfParameter, { readonly kind: "command" }>> {
+    assertHardwareOperationActive(
+      signal,
+      `The ${command.name} command was cancelled before it was sent`,
+    );
     const chunks: Uint8Array[] = [];
     let chunksRemaining = 1;
     let chunkIndex = 0;
@@ -675,6 +829,10 @@ export class ExpressLrsHardwareSession {
     signal?: AbortSignal,
   ): Promise<CommandExecutionResult> {
     this.#assertOpen();
+    assertHardwareOperationActive(
+      signal,
+      `The ${commandName} command was cancelled before it was sent`,
+    );
     const command = this.parameters.find(
       (parameter) =>
         parameter.kind === "command" &&
@@ -740,6 +898,10 @@ export class ExpressLrsHardwareSession {
 
   public async startBinding(signal?: AbortSignal): Promise<BindingResult> {
     this.#assertOpen();
+    assertHardwareOperationActive(
+      signal,
+      "Binding was cancelled before any device command was sent",
+    );
     if (this.#identity.role === "tx") {
       const result = await this.executeCommand("Bind", signal);
       return Object.freeze({
@@ -750,18 +912,21 @@ export class ExpressLrsHardwareSession {
       });
     }
 
-    const response = this.#link.waitForFrame(
-      (frame) => {
-        const extended = asExtendedFrame(frame);
-        return extended !== null && extended.origin === this.#identity.address;
-      },
-      { timeoutMs: 600, signal },
-    );
-    await this.#link.write(
-      createReceiverBindCommand(CrsfAddress.flightController),
+    assertHardwareOperationActive(
+      signal,
+      "Binding was cancelled before the receiver command was sent",
     );
     try {
-      await response.promise;
+      await this.#link.request(
+        createReceiverBindCommand(CrsfAddress.flightController),
+        (frame) => {
+          const extended = asExtendedFrame(frame);
+          return (
+            extended !== null && extended.origin === this.#identity.address
+          );
+        },
+        { timeoutMs: 600, signal },
+      );
       return Object.freeze({
         stage: "RX_BIND_COMMAND_TRANSMITTED",
         verified: false,
@@ -770,6 +935,10 @@ export class ExpressLrsHardwareSession {
       });
     } catch (error: unknown) {
       if (error instanceof HardwareSerialError && error.code === "TIMEOUT") {
+        assertHardwareOperationActive(
+          signal,
+          "Binding was cancelled before the legacy receiver command was sent",
+        );
         await this.#link.write(createLegacyBindCommand());
         return Object.freeze({
           stage: "LEGACY_BIND_COMMAND_TRANSMITTED",
@@ -795,6 +964,10 @@ export class ExpressLrsHardwareSession {
         "The CRSF bootloader sequence is only valid for a receiver path",
       );
     }
+    assertHardwareOperationActive(
+      input.signal,
+      "Bootloader entry was cancelled before any device command was sent",
+    );
     const textDecoder = new TextDecoder();
     let responseText = "";
     let resolveResponse: ((value: string) => void) | undefined;
@@ -813,33 +986,32 @@ export class ExpressLrsHardwareSession {
     });
     try {
       const train = new Uint8Array(32).fill(0x55);
+      assertHardwareOperationActive(
+        input.signal,
+        "Bootloader entry was cancelled before the sync command",
+      );
       await this.#link.write(new Uint8Array([0x07, 0x07, 0x12, 0x20]));
+      assertHardwareOperationActive(
+        input.signal,
+        "Bootloader entry was cancelled before the training sequence",
+      );
       await this.#link.write(train);
-      await sleep(200);
+      await sleepWithAbort(
+        200,
+        input.signal,
+        "Bootloader entry was cancelled before the reset command",
+      );
+      assertHardwareOperationActive(
+        input.signal,
+        "Bootloader entry was cancelled before the reset command",
+      );
       await this.#link.write(
         createLegacyBootloaderCommand(input.targetKey ?? ""),
       );
-      const target = await Promise.race([
+      const target = await waitForReceiverBootloaderTarget(
         response,
-        new Promise<string>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new ExpressLrsHardwareError(
-                  "BOOTLOADER_NOT_ACKNOWLEDGED",
-                  "The receiver did not return a bootloader target line",
-                ),
-              ),
-            2_000,
-          ),
-        ),
-      ]);
-      if (input.signal?.aborted === true) {
-        throw new HardwareSerialError(
-          "ABORTED",
-          "Bootloader entry was cancelled",
-        );
-      }
+        input.signal,
+      );
       if (
         input.targetKey !== undefined &&
         input.targetKey.length > 0 &&

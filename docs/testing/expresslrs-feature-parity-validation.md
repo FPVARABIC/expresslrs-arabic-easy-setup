@@ -1,4 +1,12 @@
-# Complete ExpressLRS TX/RX software parity certification
+# Historical failed ExpressLRS TX/RX software parity certification
+
+This file preserves the failed output for candidate
+`5b17692eb11d016a4d62db9037d45d306b97943f`; it is not the current branch
+status. The historical combined “DFU / ST-Link” claim below was inaccurate:
+the current writer implements STM32 ROM DFU/DfuSe only for upstream `dfu`
+Targets, while upstream `stlink` means a debug-probe path that remains
+unsupported. The old failure tails, including the `lua.zip` lookup, are kept
+unchanged as evidence.
 
 - Candidate SHA: `5b17692eb11d016a4d62db9037d45d306b97943f`
 - Software certification: `FAIL`
@@ -171,4 +179,3 @@ Dependency license policy check failed:
 - pako@2.2.0: unapproved license expression (MIT AND Zlib); add evidence-backed exact review or reject the dependency
 [ELIFECYCLE] Command failed with exit code 1.
 ```
-

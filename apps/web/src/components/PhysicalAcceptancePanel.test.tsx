@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PhysicalAcceptanceContextSnapshot } from "../acceptance/physical-acceptance";
+import {
+  createPhysicalAcceptanceSession,
+  serializePhysicalAcceptanceJson,
+  type PhysicalAcceptanceContextSnapshot,
+} from "../acceptance/physical-acceptance";
 import type { PhysicalAcceptanceStorage } from "../acceptance/physical-acceptance-storage";
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
@@ -87,12 +91,15 @@ describe("PhysicalAcceptancePanel", () => {
         context={context()}
         storage={storage()}
         now={fixedNow}
-        initialCandidateSha="abcdef123456"
+        initialCandidateSha={"a".repeat(40)}
       />,
     );
 
     expect(
       screen.getByText(/كل خطوة متاحة من البداية ولا توجد تبعية إجبارية/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/تغيير الإعدادات والربط والتفليش والاستعادة مقفلة/),
     ).toBeInTheDocument();
     expect(screen.getAllByRole("combobox", { name: /^نتيجة / })).toHaveLength(
       19,
@@ -102,6 +109,21 @@ describe("PhysicalAcceptancePanel", () => {
         name: "نتيجة استعادة بعد انقطاع متعمد",
       }),
     ).not.toBeDisabled();
+  });
+
+  it("states when a reviewed acceptance build enables device changes", () => {
+    render(
+      <PhysicalAcceptancePanel
+        context={context()}
+        deviceChangesEnabled
+        storage={storage()}
+        now={fixedNow}
+      />,
+    );
+
+    expect(
+      screen.getByText(/نسخة القبول المراجعة فعّلت عمليات تغيير الجهاز/),
+    ).toBeInTheDocument();
   });
 
   it("records a late destructive result while earlier tests remain not started", () => {
@@ -221,7 +243,7 @@ describe("PhysicalAcceptancePanel", () => {
         context={context()}
         storage={storage()}
         now={fixedNow}
-        initialCandidateSha="abcdef123456"
+        initialCandidateSha={"a".repeat(40)}
       />,
     );
 
@@ -232,6 +254,99 @@ describe("PhysicalAcceptancePanel", () => {
 
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not export evidence for a non-canonical Candidate SHA", () => {
+    render(
+      <PhysicalAcceptancePanel
+        context={context()}
+        storage={storage()}
+        now={fixedNow}
+        initialCandidateSha="abcdef123456"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "تصدير JSON" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "تصدير تقرير Markdown" }),
+    ).toBeDisabled();
+  });
+
+  it("keeps the runtime Candidate SHA immutable and replaces mismatched persisted state", async () => {
+    const persistent = storage();
+    const first = render(
+      <PhysicalAcceptancePanel
+        context={context()}
+        storage={persistent}
+        now={fixedNow}
+        initialCandidateSha={"a".repeat(40)}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("اسم المشغل المختصر"), {
+      target: { value: "Old operator" },
+    });
+    await waitFor(() => expect(persistent.values.size).toBe(1));
+    first.unmount();
+
+    render(
+      <PhysicalAcceptancePanel
+        context={context()}
+        storage={persistent}
+        now={fixedNow}
+        initialCandidateSha={"b".repeat(40)}
+      />,
+    );
+
+    expect(screen.getByLabelText("Candidate SHA")).toHaveValue("b".repeat(40));
+    expect(screen.getByLabelText("Candidate SHA")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("اسم المشغل المختصر")).toHaveValue("");
+    expect(
+      screen.getByText(/المحفوظ لا يطابق SHA هذه النسخة/u),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects an imported session from another Candidate SHA", async () => {
+    const foreign = createPhysicalAcceptanceSession({
+      runtime: {
+        appUrl: "https://example.test/",
+        userAgent: "Test Browser",
+        language: "ar",
+        candidateSha: "a".repeat(40),
+      },
+      now: fixedNow,
+    });
+    const file = new File(
+      [serializePhysicalAcceptanceJson(foreign)],
+      "foreign.json",
+      { type: "application/json" },
+    );
+    Object.defineProperty(file, "text", {
+      configurable: true,
+      value: vi
+        .fn()
+        .mockResolvedValue(serializePhysicalAcceptanceJson(foreign)),
+    });
+    const rendered = render(
+      <PhysicalAcceptancePanel
+        context={context()}
+        storage={storage()}
+        now={fixedNow}
+        initialCandidateSha={"b".repeat(40)}
+      />,
+    );
+    const input = rendered.container.querySelector(
+      "input.acceptance-file-input",
+    );
+    expect(input).toBeInstanceOf(HTMLInputElement);
+
+    fireEvent.change(input!, { target: { files: [file] } });
+
+    expect(
+      await screen.findByText(
+        /Candidate SHA في الملف لا يطابق SHA هذه النسخة/u,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Candidate SHA")).toHaveValue("b".repeat(40));
   });
 
   it("starts a clean session without disabling the tool", () => {

@@ -501,7 +501,6 @@ export function updatePhysicalAcceptanceMetadata(
   patch: Readonly<{
     operatorAlias?: string;
     benchLabel?: string;
-    candidateSha?: string;
     overallNotes?: string;
   }>,
   now: () => Date = () => new Date(),
@@ -516,10 +515,6 @@ export function updatePhysicalAcceptanceMetadata(
       patch.benchLabel === undefined
         ? session.benchLabel
         : sanitizeAcceptanceText(patch.benchLabel, 160),
-    candidateSha:
-      patch.candidateSha === undefined
-        ? session.candidateSha
-        : sanitizeAcceptanceText(patch.candidateSha, 80),
     overallNotes:
       patch.overallNotes === undefined
         ? session.overallNotes
@@ -720,7 +715,7 @@ export function suggestPhysicalAcceptanceEvidence(
             : null,
         evidence,
         reason:
-          "A prepared package and downloaded recovery archive are required",
+          "A prepared package and the user's explicit confirmation that the recovery archive was saved are required",
       });
     case "post_flash_reconnect":
       return Object.freeze({

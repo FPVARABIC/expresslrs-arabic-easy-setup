@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { loadOfficialExpressLrsCatalog } from "./official-catalog";
-import { fetchOfficialExpressLrsResource } from "./official-source";
+import { acquireOfficialLuaScript } from "./lua-package";
 
 const runLive =
   (
@@ -15,22 +15,20 @@ const runLive =
 (runLive ? describe : describe.skip)(
   "live official ExpressLRS release artifacts",
   () => {
-    it("resolves the current Firmware and Lua archives without consuming them", async () => {
+    it("downloads the current Lua script from the official Web Flasher mirror", async () => {
       const catalog = await loadOfficialExpressLrsCatalog();
       const release = catalog.releases.find(
         (item) => item.channel === "release",
       );
       expect(release).toBeDefined();
       if (release === undefined) return;
+      const target = catalog.targets.find((item) => item.role === "tx");
+      expect(target).toBeDefined();
+      if (target === undefined) return;
 
-      for (const fileName of ["firmware.zip", "lua.zip"] as const) {
-        const response = await fetchOfficialExpressLrsResource({
-          path: `${release.revision}/${fileName}`,
-          accept: "application/zip",
-        });
-        expect(response.ok).toBe(true);
-        await response.body?.cancel();
-      }
+      const script = await acquireOfficialLuaScript({ release, target });
+      expect(script.fileName).toBe("elrs.lua");
+      expect(script.bytes.byteLength).toBeGreaterThan(0);
     }, 120_000);
   },
 );

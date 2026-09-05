@@ -2,6 +2,11 @@
 
 Inspected 2026-08-20. Published API support is not equivalent to ExpressLRS hardware validation.
 
+Current implementation erratum (2026-09-04): this study records upstream
+ST-Link capabilities, but the application does not implement that debug-probe
+route. Its current STM32 WebUSB writer is ROM DFU/DfuSe and is offered only for
+upstream `dfu` Targets; upstream `stlink` Targets remain unsupported.
+
 ## Capability matrix
 
 | Need | Browser mechanism | What is feasible | Main constraints | Phase 0 disposition |

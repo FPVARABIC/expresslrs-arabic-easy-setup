@@ -84,4 +84,18 @@ describe("firmware option validation", () => {
       }),
     ).toThrow(expect.objectContaining({ field: "wifiPassword" }));
   });
+
+  it("fails closed for receiver-as-transmitter packaging", () => {
+    expect(() =>
+      validateFirmwareOptions({
+        target: {
+          ...target,
+          role: "rx",
+          radioKey: "rx_2400",
+          config: { ...target.config, firmware: "MODULE_RX" },
+        },
+        options: { ...options, receiverAsTransmitter: true },
+      }),
+    ).toThrow(expect.objectContaining({ field: "receiverAsTransmitter" }));
+  });
 });

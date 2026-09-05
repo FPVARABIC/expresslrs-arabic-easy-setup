@@ -1,10 +1,13 @@
-import { strFromU8, unzipSync } from "fflate";
+import { strFromU8, Unzip, UnzipInflate, unzipSync } from "fflate";
 
 import { copyToArrayBuffer } from "./byte-utils";
 import type { FirmwareSegment, OfficialTarget } from "./parity-types";
 
 const MAX_RECOVERY_ARCHIVE_BYTES = 64 * 1024 * 1024;
+const MAX_RECOVERY_MANIFEST_BYTES = 128 * 1024;
 const MAX_RECOVERY_SEGMENT_BYTES = 16 * 1024 * 1024;
+const MAX_RECOVERY_SEGMENTS = 8;
+const MAX_RECOVERY_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
 const RECOVERY_DB = "elrs-easy-hardware-recovery-v1";
 const RECOVERY_STORE = "checkpoint";
 const RECOVERY_KEY = "active";
@@ -84,6 +87,153 @@ function safeAddress(value: unknown): number | null {
     : null;
 }
 
+interface RecoveryArchiveEntryMetadata {
+  readonly kind: "manifest" | "segment";
+  readonly originalSize: number;
+  readonly compressedSize: number;
+  readonly compression: 0 | 8;
+  readonly maximumSize: number;
+}
+
+function recoveryArchiveEntry(
+  name: string,
+): Pick<RecoveryArchiveEntryMetadata, "kind" | "maximumSize"> | null {
+  if (name === "manifest.json") {
+    return { kind: "manifest", maximumSize: MAX_RECOVERY_MANIFEST_BYTES };
+  }
+  const match = /^segments\/([A-Za-z0-9_.-]{1,160})$/u.exec(name);
+  if (match === null || match[1] === "." || match[1] === "..") return null;
+  return { kind: "segment", maximumSize: MAX_RECOVERY_SEGMENT_BYTES };
+}
+
+function scanRecoveryArchive(
+  bytes: Uint8Array,
+): ReadonlyMap<string, RecoveryArchiveEntryMetadata> {
+  const metadata = new Map<string, RecoveryArchiveEntryMetadata>();
+  const foldedNames = new Set<string>();
+  let segmentCount = 0;
+  let uncompressedBytes = 0;
+
+  // Returning false is intentional: inspect every central-directory entry
+  // before allocating or inflating any of its advertised output.
+  unzipSync(bytes, {
+    filter(file) {
+      const admitted = recoveryArchiveEntry(file.name);
+      const foldedName = file.name.toLowerCase();
+      if (
+        admitted === null ||
+        metadata.has(file.name) ||
+        foldedNames.has(foldedName) ||
+        !Number.isSafeInteger(file.originalSize) ||
+        file.originalSize <= 0 ||
+        file.originalSize > admitted.maximumSize ||
+        !Number.isSafeInteger(file.size) ||
+        file.size < 0 ||
+        file.size > bytes.byteLength ||
+        (file.compression !== 0 && file.compression !== 8)
+      ) {
+        throw new Error("Recovery archive contains an unsafe entry");
+      }
+      if (
+        admitted.kind === "segment" &&
+        ++segmentCount > MAX_RECOVERY_SEGMENTS
+      ) {
+        throw new Error("Recovery archive contains too many segments");
+      }
+      uncompressedBytes += file.originalSize;
+      if (uncompressedBytes > MAX_RECOVERY_UNCOMPRESSED_BYTES) {
+        throw new Error("Recovery archive expands beyond its size limit");
+      }
+      metadata.set(file.name, {
+        ...admitted,
+        originalSize: file.originalSize,
+        compressedSize: file.size,
+        compression: file.compression,
+      });
+      foldedNames.add(foldedName);
+      return false;
+    },
+  });
+  return metadata;
+}
+
+function extractRecoveryArchive(
+  bytes: Uint8Array,
+  metadata: ReadonlyMap<string, RecoveryArchiveEntryMetadata>,
+): ReadonlyMap<string, Uint8Array> {
+  const entries = new Map<string, Uint8Array>();
+  const localNames = new Set<string>();
+  const localNamesFolded = new Set<string>();
+  let extractedBytes = 0;
+  let failureMessage: string | null = null;
+  const fail = (message: string): void => {
+    failureMessage ??= message;
+  };
+  const unzip = new Unzip((file) => {
+    const centralEntry = metadata.get(file.name);
+    const localEntry = recoveryArchiveEntry(file.name);
+    const foldedName = file.name.toLowerCase();
+    if (
+      centralEntry === undefined ||
+      localEntry === null ||
+      localNames.has(file.name) ||
+      localNamesFolded.has(foldedName) ||
+      file.compression !== centralEntry.compression ||
+      (file.size !== undefined && file.size !== centralEntry.compressedSize) ||
+      (file.originalSize !== undefined &&
+        file.originalSize !== centralEntry.originalSize)
+    ) {
+      fail("Recovery archive headers are inconsistent or ambiguous");
+      return;
+    }
+    localNames.add(file.name);
+    localNamesFolded.add(foldedName);
+    const output = new Uint8Array(centralEntry.originalSize);
+    let outputOffset = 0;
+    file.ondata = (error, data, final) => {
+      if (failureMessage !== null) return;
+      if (error !== null) {
+        fail("Recovery archive entry could not be decompressed");
+        return;
+      }
+      if (
+        data.byteLength > output.byteLength - outputOffset ||
+        data.byteLength > MAX_RECOVERY_UNCOMPRESSED_BYTES - extractedBytes
+      ) {
+        fail("Recovery archive produced more data than its bounded headers");
+        return;
+      }
+      output.set(data, outputOffset);
+      outputOffset += data.byteLength;
+      extractedBytes += data.byteLength;
+      if (final) {
+        if (outputOffset !== output.byteLength) {
+          fail("Recovery archive produced less data than its bounded headers");
+          return;
+        }
+        entries.set(file.name, output);
+      }
+    };
+    file.start();
+  });
+  unzip.register(UnzipInflate);
+
+  // Small input slices bound the temporary output a forged DEFLATE stream can
+  // produce before ondata gets a chance to stop further work.
+  const chunkSize = 8 * 1024;
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkSize) {
+    unzip.push(
+      bytes.subarray(offset, Math.min(offset + chunkSize, bytes.byteLength)),
+      offset + chunkSize >= bytes.byteLength,
+    );
+    if (failureMessage !== null) throw new Error(failureMessage);
+  }
+  if (entries.size !== metadata.size || localNames.size !== metadata.size) {
+    throw new Error("Recovery archive entry tables do not match");
+  }
+  return entries;
+}
+
 export async function validateRecoveryPackage(input: {
   readonly bytes: Uint8Array;
   readonly expectedTarget: OfficialTarget;
@@ -97,26 +247,22 @@ export async function validateRecoveryPackage(input: {
       "Recovery package is outside the 1-byte to 64-MiB limit",
     );
   }
-  let entries: Record<string, Uint8Array>;
+  let entries: ReadonlyMap<string, Uint8Array>;
+  let archiveMetadata: ReadonlyMap<string, RecoveryArchiveEntryMetadata>;
   try {
-    entries = unzipSync(input.bytes, {
-      filter(file) {
-        const name = file.name.replaceAll("\\", "/");
-        return (
-          name === "manifest.json" ||
-          (/^segments\/[A-Za-z0-9_.-]{1,160}$/u.test(name) &&
-            file.originalSize <= MAX_RECOVERY_SEGMENT_BYTES)
-        );
-      },
-    });
+    archiveMetadata = scanRecoveryArchive(input.bytes);
+    entries = extractRecoveryArchive(input.bytes, archiveMetadata);
   } catch {
     throw new RecoveryPackageError(
       "INVALID_ARCHIVE",
       "Recovery package could not be decompressed safely",
     );
   }
-  const manifestBytes = entries["manifest.json"];
-  if (manifestBytes === undefined || manifestBytes.byteLength > 128 * 1024) {
+  const manifestBytes = entries.get("manifest.json");
+  if (
+    manifestBytes === undefined ||
+    manifestBytes.byteLength > MAX_RECOVERY_MANIFEST_BYTES
+  ) {
     throw new RecoveryPackageError(
       "INVALID_MANIFEST",
       "Recovery package does not contain a bounded manifest",
@@ -212,7 +358,7 @@ export async function validateRecoveryPackage(input: {
         "Recovery segment table is malformed or duplicated",
       );
     }
-    const bytes = entries[`segments/${name}`];
+    const bytes = entries.get(`segments/${name}`);
     if (bytes === undefined || bytes.byteLength !== size) {
       throw new RecoveryPackageError(
         "INVALID_MANIFEST",
@@ -230,10 +376,17 @@ export async function validateRecoveryPackage(input: {
     seenAddresses.add(address);
     segments.push(Object.freeze({ name, address, bytes, sha256: actualSha }));
   }
-  if (segments.length === 0 || segments.length > 8) {
+  if (
+    segments.length === 0 ||
+    segments.length > MAX_RECOVERY_SEGMENTS ||
+    seenNames.size !==
+      Array.from(archiveMetadata.values()).filter(
+        (entry) => entry.kind === "segment",
+      ).length
+  ) {
     throw new RecoveryPackageError(
       "INVALID_MANIFEST",
-      "Recovery package contains an invalid segment count",
+      "Recovery package contains an invalid or unreferenced segment table",
     );
   }
   segments.sort((left, right) => left.address - right.address);
@@ -286,16 +439,43 @@ async function transactionRequest<T>(input: {
   const database = await openRecoveryDatabase();
   try {
     return await new Promise<T>((resolve, reject) => {
-      const transaction = database.transaction(RECOVERY_STORE, input.mode);
-      const request = input.operation(transaction.objectStore(RECOVERY_STORE));
+      const rejectUnavailable = (message: string) =>
+        reject(new RecoveryPackageError("STORAGE_UNAVAILABLE", message));
+      let transaction: IDBTransaction;
+      try {
+        transaction = database.transaction(RECOVERY_STORE, input.mode);
+      } catch {
+        rejectUnavailable("Recovery journal transaction could not be started");
+        return;
+      }
+      let requestResult: T;
+      let requestSucceeded = false;
+      transaction.onerror = () =>
+        rejectUnavailable("Recovery journal transaction failed");
+      transaction.onabort = () =>
+        rejectUnavailable("Recovery journal transaction was aborted");
+      transaction.oncomplete = () => {
+        if (!requestSucceeded) {
+          rejectUnavailable(
+            "Recovery journal transaction completed without a successful operation",
+          );
+          return;
+        }
+        resolve(requestResult);
+      };
+      let request: IDBRequest<T>;
+      try {
+        request = input.operation(transaction.objectStore(RECOVERY_STORE));
+      } catch {
+        rejectUnavailable("Recovery journal operation could not be started");
+        return;
+      }
       request.onerror = () =>
-        reject(
-          new RecoveryPackageError(
-            "STORAGE_UNAVAILABLE",
-            "Recovery journal operation failed",
-          ),
-        );
-      request.onsuccess = () => resolve(request.result);
+        rejectUnavailable("Recovery journal operation failed");
+      request.onsuccess = () => {
+        requestResult = request.result;
+        requestSucceeded = true;
+      };
     });
   } finally {
     database.close();
@@ -312,11 +492,26 @@ export async function saveRecoveryCheckpoint(
 }
 
 export async function loadRecoveryCheckpoint(): Promise<RecoveryCheckpoint | null> {
-  const value = await transactionRequest<unknown>({
+  // getAll distinguishes an absent key from a malformed stored `undefined`
+  // value; IDBObjectStore.get returns undefined for both cases.
+  const storedValues = await transactionRequest<unknown[]>({
     mode: "readonly",
-    operation: (store) => store.get(RECOVERY_KEY),
+    operation: (store) => store.getAll(RECOVERY_KEY, 1),
   });
-  if (!isRecord(value) || value.schemaVersion !== 1) return null;
+  if (!Array.isArray(storedValues) || storedValues.length > 1) {
+    throw new RecoveryPackageError(
+      "STORAGE_UNAVAILABLE",
+      "Recovery journal returned an invalid result set",
+    );
+  }
+  if (storedValues.length === 0) return null;
+  const value = storedValues[0];
+  if (!isRecord(value) || value.schemaVersion !== 1) {
+    throw new RecoveryPackageError(
+      "STORAGE_UNAVAILABLE",
+      "Recovery journal contains an invalid checkpoint",
+    );
+  }
   const targetId = safeString(value.targetId);
   const productName = safeString(value.productName);
   const packageSha256 =
@@ -349,7 +544,10 @@ export async function loadRecoveryCheckpoint(): Promise<RecoveryCheckpoint | nul
     updatedAt === null ||
     (value.safeError !== null && safeError === null)
   ) {
-    return null;
+    throw new RecoveryPackageError(
+      "STORAGE_UNAVAILABLE",
+      "Recovery journal contains an invalid checkpoint",
+    );
   }
   return Object.freeze({
     schemaVersion: 1,

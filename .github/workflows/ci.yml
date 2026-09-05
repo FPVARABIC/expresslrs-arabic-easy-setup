@@ -46,6 +46,9 @@ jobs:
       - name: Enforce repository and workflow hygiene
         run: pnpm check:ci-hygiene
 
+      - name: Enforce physical acceptance package
+        run: pnpm check:physical-acceptance
+
       - name: Check formatting
         run: pnpm format:check
 
@@ -66,6 +69,7 @@ jobs:
         env:
           GITHUB_PAGES: "true"
           PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+          VITE_BUILD_SHA: ${{ github.sha }}
         run: |
           pnpm --filter @elrs-easy/web build
           pnpm check:pages-build
@@ -84,5 +88,5 @@ jobs:
       - name: Enforce dependency license policy
         run: pnpm licenses:check
 
-      - name: Audit dependencies for high-severity advisories
+      - name: Audit dependencies for moderate-or-higher advisories
         run: pnpm security:audit

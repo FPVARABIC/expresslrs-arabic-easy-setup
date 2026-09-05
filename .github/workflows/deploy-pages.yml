@@ -11,6 +11,7 @@ permissions:
 
 env:
   PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+  VITE_BUILD_SHA: ${{ github.sha }}
 
 concurrency:
   group: pages

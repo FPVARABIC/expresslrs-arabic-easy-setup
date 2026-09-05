@@ -66,9 +66,11 @@ their own rows pass; do not infer them from a Chromium desktop result.
 
 ## Procedure A — explicit single read
 
-1. Verify the candidate commit and production header response. Confirm CSP has
-   no wildcard or unsafe execution source and `connect-src` contains only self
-   plus the three reviewed ExpressLRS origins.
+1. Verify the candidate commit and the deployed Pages artifact's early
+   meta-CSP. Confirm it has no wildcard or unsafe execution source and
+   `connect-src` contains only self, the official ExpressLRS Web Flasher mirror,
+   and the three reviewed local ExpressLRS origins. Record that Pages treats
+   `_headers` as an inert file; response-header evidence is unavailable there.
 2. Load the application while not connected to the device network. Confirm no
    local-device request occurs before user action.
 3. Put the reference device in Wi-Fi mode using its normal documented method and
@@ -163,8 +165,9 @@ The M2A Hardware gate can advance only when:
   disconnect/reconnect outcomes are explicitly recorded;
 - privacy review confirms no forbidden data in UI, clipboard, application logs,
   storage, or reports;
-- the tested commit has green official CI and the deployed CSP header matches
-  the reviewed policy;
+- the tested commit has green official CI and the deployed Pages artifact's
+  early meta-CSP matches the reviewed policy; response-header evidence remains
+  unavailable on Pages and is still required from any future production host;
 - failures and unsupported combinations remain documented rather than hidden.
 
 Promotion applies only to named rows. It does not authorize a write provider,

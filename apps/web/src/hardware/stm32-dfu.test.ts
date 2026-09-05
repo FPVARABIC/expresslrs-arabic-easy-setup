@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OfficialTarget } from "./parity-types";
 import {
   createDfuSeAddressCommand,
   flashStm32DfuFirmware,
   parseDfuSeMemoryDescriptor,
+  Stm32DfuError,
   type UsbDfuDeviceLike,
 } from "./stm32-dfu";
 
@@ -26,7 +27,7 @@ const target: OfficialTarget = {
     minVersion: null,
     customLayout: {},
     overlay: null,
-    raw: {},
+    raw: { stlink: { offset: "0x4000" } },
   },
 };
 
@@ -142,6 +143,10 @@ function fakeDfuDevice(): {
 }
 
 describe("STM32 WebUSB DFU", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("parses DfuSe page permissions and sizes", () => {
     const map = parseDfuSeMemoryDescriptor(
       "@Internal Flash /0x08000000/04*016Kg,01*064Ke",
@@ -184,7 +189,7 @@ describe("STM32 WebUSB DFU", () => {
       target,
       segment: {
         name: "firmware.bin",
-        address: 0,
+        address: 0x0800_4000,
         bytes: firmware,
         sha256: "0".repeat(64),
       },
@@ -196,15 +201,86 @@ describe("STM32 WebUSB DFU", () => {
 
     expect(result).toEqual({
       bytesWritten: firmware.byteLength,
-      baseAddress: 0x0800_0000,
+      baseAddress: 0x0800_4000,
+      cleanupVerified: true,
     });
-    expect(hardware.erasedPages).toEqual([0x0800_0000]);
-    expect(hardware.memory.slice(0, firmware.byteLength)).toEqual(firmware);
+    expect(hardware.erasedPages).toEqual([0x0800_4000]);
+    expect(hardware.memory.slice(0x4000, 0x4000 + firmware.byteLength)).toEqual(
+      firmware,
+    );
     expect(progress).toContain("ERASE");
     expect(progress).toContain("WRITE");
     expect(progress).toContain("VERIFY");
     expect(progress.at(-1)).toBe("RESET");
     expect(hardware.device.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unverified cleanup after a successful manifestation", async () => {
+    const hardware = fakeDfuDevice();
+    vi.mocked(hardware.device.close).mockRejectedValueOnce(
+      new Error("close failed"),
+    );
+
+    await expect(
+      flashStm32DfuFirmware({
+        target,
+        segment: {
+          name: "firmware.bin",
+          address: 0x0800_4000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "0".repeat(64),
+        },
+        navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      }),
+    ).resolves.toMatchObject({ cleanupVerified: false });
+  });
+
+  it("bounds a device close that never settles", async () => {
+    vi.useFakeTimers();
+    const hardware = fakeDfuDevice();
+    vi.mocked(hardware.device.close).mockImplementationOnce(
+      () => new Promise<void>(() => undefined),
+    );
+    const result = flashStm32DfuFirmware({
+      target,
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_4000,
+        bytes: new Uint8Array([1, 2, 3]),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    await expect(result).resolves.toMatchObject({ cleanupVerified: false });
+  });
+
+  it("marks the primary failure when cleanup is also unverified", async () => {
+    const hardware = fakeDfuDevice();
+    vi.mocked(hardware.device.claimInterface).mockRejectedValueOnce(
+      new Stm32DfuError("TRANSFER_FAILED", "claim failed"),
+    );
+    vi.mocked(hardware.device.close).mockRejectedValueOnce(
+      new Error("close failed"),
+    );
+
+    await expect(
+      flashStm32DfuFirmware({
+        target,
+        segment: {
+          name: "firmware.bin",
+          address: 0x0800_4000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "0".repeat(64),
+        },
+        navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      }),
+    ).rejects.toMatchObject({
+      code: "TRANSFER_FAILED",
+      cleanupVerified: false,
+    });
   });
 
   it("rejects a write crossing a protected page before erase", async () => {
@@ -236,6 +312,73 @@ describe("STM32 WebUSB DFU", () => {
         target,
         segment: {
           name: "firmware.bin",
+          address: 0x0800_4000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "0".repeat(64),
+        },
+        navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      }),
+    ).rejects.toMatchObject({ code: "RANGE_INVALID" });
+    expect(hardware.erasedPages).toHaveLength(0);
+  });
+
+  it("rechecks cancellation after the USB device chooser resolves", async () => {
+    const hardware = fakeDfuDevice();
+    const controller = new AbortController();
+    const requestDevice = vi.fn(async () => {
+      controller.abort();
+      return hardware.device;
+    });
+
+    await expect(
+      flashStm32DfuFirmware({
+        target,
+        segment: {
+          name: "firmware.bin",
+          address: 0x0800_4000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "0".repeat(64),
+        },
+        signal: controller.signal,
+        navigatorObject: { usb: { requestDevice } },
+      }),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect(hardware.device.open).not.toHaveBeenCalled();
+  });
+
+  it("rejects erase geometry that would erase bytes before the application offset", async () => {
+    const hardware = fakeDfuDevice();
+    const offsetTarget: OfficialTarget = {
+      ...target,
+      config: {
+        ...target.config,
+        raw: { stlink: { offset: "0x1000" } },
+      },
+    };
+
+    await expect(
+      flashStm32DfuFirmware({
+        target: offsetTarget,
+        segment: {
+          name: "firmware.bin",
+          address: 0x0800_1000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "0".repeat(64),
+        },
+        navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      }),
+    ).rejects.toMatchObject({ code: "RANGE_INVALID" });
+    expect(hardware.erasedPages).toHaveLength(0);
+  });
+
+  it("rejects a legacy base-address segment before opening the device chooser", async () => {
+    const hardware = fakeDfuDevice();
+
+    await expect(
+      flashStm32DfuFirmware({
+        target,
+        segment: {
+          name: "firmware.bin",
           address: 0,
           bytes: new Uint8Array([1, 2, 3]),
           sha256: "0".repeat(64),
@@ -243,6 +386,29 @@ describe("STM32 WebUSB DFU", () => {
         navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
       }),
     ).rejects.toMatchObject({ code: "RANGE_INVALID" });
+    expect(hardware.requestDevice).not.toHaveBeenCalled();
+    expect(hardware.erasedPages).toHaveLength(0);
+  });
+
+  it("rejects unverified Target offset metadata before opening the device chooser", async () => {
+    const hardware = fakeDfuDevice();
+
+    await expect(
+      flashStm32DfuFirmware({
+        target: {
+          ...target,
+          config: { ...target.config, raw: { stlink: { offset: "0x0" } } },
+        },
+        segment: {
+          name: "firmware.bin",
+          address: 0x0800_0000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "0".repeat(64),
+        },
+        navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      }),
+    ).rejects.toMatchObject({ code: "DEVICE_INVALID" });
+    expect(hardware.requestDevice).not.toHaveBeenCalled();
     expect(hardware.erasedPages).toHaveLength(0);
   });
 });

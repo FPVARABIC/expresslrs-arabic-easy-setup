@@ -39,7 +39,7 @@ describe("official Target parser", () => {
               product_name: "RX",
               platform: "stm32",
               firmware: "VENDOR_RX",
-              upload_methods: ["stlink"],
+              upload_methods: ["dfu"],
             },
           },
         },
@@ -56,6 +56,36 @@ describe("official Target parser", () => {
         }),
       }),
     );
+  });
+
+  it("does not authorize STM32 DFU for an upstream ST-Link-only Target", () => {
+    const targets = parseOfficialTargetsFlexible({
+      vendor: {
+        tx_900: {
+          probe_only: {
+            product_name: "ST-Link-only TX",
+            platform: "stm32",
+            firmware: "PROBE_ONLY_TX",
+            upload_methods: ["stlink"],
+          },
+          rom_dfu: {
+            product_name: "ROM DFU TX",
+            platform: "stm32",
+            firmware: "ROM_DFU_TX",
+            upload_methods: ["dfu", "stlink"],
+          },
+        },
+      },
+    });
+
+    expect(
+      targets.find((target) => target.targetKey === "probe_only")?.config
+        .uploadMethods,
+    ).toEqual(["download"]);
+    expect(
+      targets.find((target) => target.targetKey === "rom_dfu")?.config
+        .uploadMethods,
+    ).toEqual(["stlink", "download"]);
   });
 
   it("rejects traversal-like identifiers and artifact paths", () => {

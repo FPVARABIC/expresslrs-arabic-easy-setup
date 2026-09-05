@@ -40,11 +40,7 @@ import {
   type RecoveryCheckpoint,
   type ValidatedRecoveryPackage,
 } from "../hardware/recovery-package";
-import {
-  ExpressLrsHardwareSession,
-  type ExpressLrsIdentity,
-  type ExpressLrsSettingsBackup,
-} from "../hardware/session";
+import type { ExpressLrsIdentity } from "../hardware/session";
 import type { HardwareSerialPort } from "../hardware/serial";
 import { verifyReconnectTarget } from "../hardware/reconnect-target-verification";
 import { flashStm32DfuFirmware } from "../hardware/stm32-dfu";
@@ -52,6 +48,13 @@ import {
   matchHardwareIdentityToOfficialTargets,
   type TargetMatchResult,
 } from "../hardware/target-match";
+import {
+  connectUserHardwareSession,
+  type HardwareDriverConnector,
+  type SafeSettingsBackup,
+  type UserHardwareSession,
+  type WritableCrsfParameter,
+} from "../hardware/userSession";
 import { flashXmodemFirmware } from "../hardware/xmodem";
 
 const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
@@ -79,7 +82,7 @@ const METHOD_LABELS: Readonly<Record<ExpressLrsFlashMethod, string>> =
     edgetx: "عبر جهاز التحكم",
     passthru: "Passthrough جاهز",
     wifi: "Wi-Fi",
-    stlink: "ST-Link / STM32 DFU",
+    stlink: "STM32 DFU",
     download: "تنزيل فقط",
   });
 
@@ -103,6 +106,18 @@ function safeMessage(error: unknown): string {
     .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
     .replace(/\s+/gu, " ")
     .slice(0, 500);
+}
+
+function reportsUnconfirmedHardwareCleanup(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  try {
+    return (
+      Reflect.get(value, "cleanupVerified") === false ||
+      Reflect.get(value, "code") === "CLEANUP_UNCONFIRMED"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function formatBytes(value: number): string {
@@ -130,6 +145,7 @@ function commandForBootloader(
   const parameter = parameters.find(
     (candidate) =>
       candidate.kind === "command" &&
+      !candidate.hidden &&
       /(serial\s*update|bootloader|update\s*mode)/iu.test(candidate.name),
   );
   return parameter?.name ?? null;
@@ -175,13 +191,46 @@ function officialReleaseFromRecovery(
   });
 }
 
-export function ExpressLrsParityWorkbench() {
+function isStableRelease(release: OfficialRelease): boolean {
+  return (
+    release.channel === "release" && /^v?\d+\.\d+\.\d+$/u.test(release.label)
+  );
+}
+
+function isBuildableRelease(release: OfficialRelease): boolean {
+  const match =
+    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.exec(
+      release.label.trim(),
+    );
+  if (match === null) return false;
+  const validPrerelease = !(match[4]?.split(".") ?? []).some(
+    (part) => /^\d+$/u.test(part) && part.length > 1 && part.startsWith("0"),
+  );
+  if (!validPrerelease) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major === 3 || (major === 4 && minor <= 1);
+}
+
+function releaseSelectionKey(release: OfficialRelease): string {
+  return JSON.stringify([release.channel, release.label, release.revision]);
+}
+
+export interface ExpressLrsParityWorkbenchProps {
+  readonly allowDestructiveWrites?: boolean;
+  readonly hardwareConnector?: HardwareDriverConnector;
+}
+
+export function ExpressLrsParityWorkbench({
+  allowDestructiveWrites = false,
+  hardwareConnector,
+}: ExpressLrsParityWorkbenchProps = {}) {
   const [catalog, setCatalog] = useState<OfficialCatalog | null>(null);
   const [catalogState, setCatalogState] = useState<
     "idle" | "loading" | "ready" | "failed"
   >("idle");
   const [role, setRole] = useState<ExpressLrsDeviceRole>("tx");
-  const [releaseRevision, setReleaseRevision] = useState("");
+  const [selectedReleaseKey, setSelectedReleaseKey] = useState("");
   const [vendorKey, setVendorKey] = useState("");
   const [radioKey, setRadioKey] = useState("");
   const [targetId, setTargetId] = useState("");
@@ -189,14 +238,18 @@ export function ExpressLrsParityWorkbench() {
   const [options, setOptions] =
     useState<ExpressLrsFirmwareOptions>(DEFAULT_OPTIONS);
   const [status, setStatus] = useState(
-    "حمّل الكتالوج الرسمي ثم اختر الجهاز والإصدار.",
+    "يمكنك تعريف الجهاز مباشرة؛ حمّل الكتالوج فقط عند تجهيز Firmware رسمي.",
   );
   const [busy, setBusy] = useState(false);
   const [cancellable, setCancellable] = useState(false);
   const [identity, setIdentity] = useState<ExpressLrsIdentity | null>(null);
   const [parameters, setParameters] = useState<readonly CrsfParameter[]>([]);
+  const [writableParameters, setWritableParameters] = useState<
+    readonly WritableCrsfParameter[]
+  >([]);
+  const [hasBindCommand, setHasBindCommand] = useState(false);
   const [settingsBackup, setSettingsBackup] =
-    useState<ExpressLrsSettingsBackup | null>(null);
+    useState<SafeSettingsBackup | null>(null);
   const [targetMatch, setTargetMatch] = useState<TargetMatchResult | null>(
     null,
   );
@@ -205,15 +258,25 @@ export function ExpressLrsParityWorkbench() {
   const [prepared, setPrepared] = useState<PreparedFirmwarePackage | null>(
     null,
   );
+  const [recoveryDownloadStarted, setRecoveryDownloadStarted] = useState(false);
   const [recoveryDownloaded, setRecoveryDownloaded] = useState(false);
   const [manualTargetConfirmation, setManualTargetConfirmation] = useState("");
   const [powerAcknowledged, setPowerAcknowledged] = useState(false);
   const [antennaAcknowledged, setAntennaAcknowledged] = useState(false);
+  const [bindingAcknowledged, setBindingAcknowledged] = useState(false);
   const [flashProgress, setFlashProgress] =
     useState<FirmwareFlashProgress | null>(null);
   const [checkpoint, setCheckpoint] = useState<RecoveryCheckpoint | null>(null);
+  const [recoveryJournalState, setRecoveryJournalState] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
+  const [hardwareCloseUncertain, setHardwareCloseUncertain] = useState(false);
+  const [hardwareCloseInProgress, setHardwareCloseInProgress] = useState(false);
 
-  const sessionRef = useRef<ExpressLrsHardwareSession | null>(null);
+  const sessionRef = useRef<UserHardwareSession | null>(null);
+  const hardwareCloseUncertainRef = useRef(false);
+  const hardwareCloseInProgressRef = useRef<Promise<boolean> | null>(null);
+  const disconnectUnsubscribeRef = useRef<(() => void) | null>(null);
   const catalogAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
   const optionsRevisionRef = useRef(0);
@@ -222,13 +285,23 @@ export function ExpressLrsParityWorkbench() {
     let active = true;
     void loadRecoveryCheckpoint()
       .then((value) => {
-        if (active) setCheckpoint(value);
+        if (!active) return;
+        setCheckpoint(value);
+        setRecoveryJournalState("ready");
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (!active) return;
+        setRecoveryJournalState("error");
+        setStatus(
+          `تعذر التحقق من سجل الاستعادة؛ بقيت كل عمليات الكتابة مقفلة: ${safeMessage(error)}`,
+        );
+      });
     return () => {
       active = false;
       catalogAbortRef.current?.abort();
       operationAbortRef.current?.abort();
+      disconnectUnsubscribeRef.current?.();
+      disconnectUnsubscribeRef.current = null;
       const session = sessionRef.current;
       sessionRef.current = null;
       if (session !== null) void session.close();
@@ -245,7 +318,7 @@ export function ExpressLrsParityWorkbench() {
     return () => window.removeEventListener("beforeunload", preventNavigation);
   }, [busy]);
 
-  const releases = catalog?.releases ?? [];
+  const releases = (catalog?.releases ?? []).filter(isBuildableRelease);
   const roleTargets = (catalog?.targets ?? []).filter(
     (target) => target.role === role,
   );
@@ -262,16 +335,13 @@ export function ExpressLrsParityWorkbench() {
     (target) => target.radioKey === radioKey,
   );
   const selectedRelease =
-    releases.find((release) => release.revision === releaseRevision) ?? null;
+    releases.find(
+      (release) => releaseSelectionKey(release) === selectedReleaseKey,
+    ) ?? null;
   const selectedTarget =
     roleTargets.find((target) => target.id === targetId) ?? null;
   const availableMethods = selectedTarget?.config.uploadMethods ?? [];
   const regionChoices = regulatoryRegionsForRadioKey(radioKey);
-  const writableParameters = parameters.filter(
-    (parameter) =>
-      !parameter.hidden &&
-      (parameter.kind === "number" || parameter.kind === "selection"),
-  );
   const selectedSetting = writableParameters.find(
     (parameter) => String(parameter.id) === selectedSettingId,
   );
@@ -283,10 +353,19 @@ export function ExpressLrsParityWorkbench() {
     selectedTarget !== null &&
     normalized(manualTargetConfirmation) ===
       normalized(selectedTarget.targetKey);
+  const sameDirectUartIdentity = method === "uart" && exactHardwareTarget;
   const operationNeedsTargetConfirmation =
-    !exactHardwareTarget && method !== "wifi" && method !== "download";
+    method !== "wifi" && method !== "download" && !sameDirectUartIdentity;
   const firmwareWriteMethod = !["wifi", "download"].includes(method);
+  const hardwareCleanupReady =
+    !hardwareCloseUncertain && !hardwareCloseInProgress;
+  const deviceWritesReady =
+    allowDestructiveWrites &&
+    hardwareCleanupReady &&
+    recoveryJournalState === "ready" &&
+    checkpoint === null;
   const writeReady =
+    deviceWritesReady &&
     prepared !== null &&
     selectedTarget !== null &&
     recoveryDownloaded &&
@@ -297,6 +376,7 @@ export function ExpressLrsParityWorkbench() {
 
   function resetPreparedState(): void {
     setPrepared(null);
+    setRecoveryDownloadStarted(false);
     setRecoveryDownloaded(false);
     setPowerAcknowledged(false);
     setAntennaAcknowledged(false);
@@ -318,16 +398,174 @@ export function ExpressLrsParityWorkbench() {
     resetPreparedState();
   }
 
-  async function disconnectHardware(): Promise<void> {
-    const session = sessionRef.current;
-    sessionRef.current = null;
-    if (session !== null) await session.close();
+  function clearHardwarePresentation(): void {
     setIdentity(null);
     setParameters([]);
+    setWritableParameters([]);
+    setHasBindCommand(false);
     setSettingsBackup(null);
     setTargetMatch(null);
     setSelectedSettingId("");
     setSettingDraft("");
+    setBindingAcknowledged(false);
+  }
+
+  function latchUnconfirmedHardwareClose(detail?: string): void {
+    hardwareCloseUncertainRef.current = true;
+    setHardwareCloseUncertain(true);
+    operationAbortRef.current?.abort(
+      new DOMException("Hardware port cleanup is unconfirmed", "AbortError"),
+    );
+    disconnectUnsubscribeRef.current?.();
+    disconnectUnsubscribeRef.current = null;
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    if (session !== null) {
+      void session.close().catch(() => undefined);
+    }
+    clearHardwarePresentation();
+    setStatus(
+      `تعذر تأكيد إغلاق جلسة الجهاز؛ أُخفيت أي هوية وتوقفت إعادة الاتصال حتى إعادة تحميل الصفحة.${detail === undefined ? "" : ` ${detail}`}`,
+    );
+  }
+
+  function hardwareCleanupGateOpen(): boolean {
+    return (
+      !hardwareCloseUncertainRef.current &&
+      hardwareCloseInProgressRef.current === null
+    );
+  }
+
+  async function closePortOrLatch(
+    port: HardwareSerialPort,
+    detail: string,
+  ): Promise<boolean> {
+    let closeTask: Promise<void>;
+    try {
+      closeTask = port.close();
+    } catch {
+      latchUnconfirmedHardwareClose(detail);
+      return false;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const closed = await Promise.race([
+      closeTask.then(
+        () => true,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 1_500);
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (!closed) latchUnconfirmedHardwareClose(detail);
+    return closed;
+  }
+
+  function assertCurrentDeviceOperation(
+    session: UserHardwareSession,
+    signal: AbortSignal,
+  ): void {
+    if (
+      hardwareCleanupGateOpen() &&
+      sessionRef.current === session &&
+      !session.closed &&
+      !signal.aborted
+    ) {
+      return;
+    }
+    throw new Error(
+      "تغيرت جلسة الجهاز أو حالة تنظيف المنفذ أثناء العملية؛ تم تجاهل النتيجة المتأخرة.",
+    );
+  }
+
+  function observeSessionDisconnect(session: UserHardwareSession): void {
+    disconnectUnsubscribeRef.current?.();
+    disconnectUnsubscribeRef.current = session.onDisconnected(() => {
+      if (sessionRef.current !== session) return;
+      sessionRef.current = null;
+      disconnectUnsubscribeRef.current = null;
+      clearHardwarePresentation();
+      setStatus("انقطع اتصال الجهاز. أعد اختياره يدويًا للمتابعة.");
+    });
+  }
+
+  async function disconnectHardware(): Promise<boolean> {
+    if (hardwareCloseUncertainRef.current) {
+      clearHardwarePresentation();
+      setStatus(
+        "لا يمكن فتح جلسة أجهزة جديدة لأن إغلاق المنفذ السابق غير مثبت؛ أعد تحميل الصفحة بعد فصل الجهاز بأمان.",
+      );
+      return false;
+    }
+    const pendingClose = hardwareCloseInProgressRef.current;
+    if (pendingClose !== null) return pendingClose;
+
+    disconnectUnsubscribeRef.current?.();
+    disconnectUnsubscribeRef.current = null;
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    clearHardwarePresentation();
+    if (session === null) return true;
+
+    setHardwareCloseInProgress(true);
+    const closeTask = Promise.resolve()
+      .then(() => session.close())
+      .then(
+        (closed) => {
+          if (!closed) latchUnconfirmedHardwareClose();
+          return closed;
+        },
+        (error: unknown) => {
+          latchUnconfirmedHardwareClose(
+            `تعذر إغلاق المنفذ بأمان: ${safeMessage(error)}`,
+          );
+          return false;
+        },
+      );
+    hardwareCloseInProgressRef.current = closeTask;
+    try {
+      return await closeTask;
+    } finally {
+      if (hardwareCloseInProgressRef.current === closeTask) {
+        hardwareCloseInProgressRef.current = null;
+        setHardwareCloseInProgress(false);
+      }
+    }
+  }
+
+  async function closeSessionOrLatch(
+    session: UserHardwareSession,
+    detail: string,
+  ): Promise<boolean> {
+    let closed = false;
+    try {
+      closed = await session.close();
+    } catch (error: unknown) {
+      latchUnconfirmedHardwareClose(`${detail}: ${safeMessage(error)}`);
+      return false;
+    }
+    if (!closed) latchUnconfirmedHardwareClose(detail);
+    return closed;
+  }
+
+  function deviceWriteLockMessage(): string {
+    if (!allowDestructiveWrites) {
+      return "أوامر تغيير الجهاز مقفلة في هذه النسخة؛ التعريف والقراءة فقط متاحان.";
+    }
+    if (recoveryJournalState === "loading") {
+      return "انتظر اكتمال فحص سجل الاستعادة قبل تغيير الجهاز.";
+    }
+    if (recoveryJournalState === "error") {
+      return "تعذر التحقق من سجل الاستعادة؛ كل أوامر تغيير الجهاز مقفلة بأمان.";
+    }
+    if (hardwareCloseUncertainRef.current) {
+      return "إغلاق منفذ جهاز سابق غير مثبت؛ أعد تحميل الصفحة بعد فصل الجهاز بأمان.";
+    }
+    if (hardwareCloseInProgressRef.current !== null) {
+      return "انتظر حتى يثبت إغلاق جلسة الجهاز السابقة.";
+    }
+    return "توجد استعادة معلقة؛ أكملها قبل إرسال أي أمر يغيّر الجهاز.";
   }
 
   function cancelCurrentOperation(): void {
@@ -355,18 +593,47 @@ export function ExpressLrsParityWorkbench() {
       });
       setCatalog(loaded);
       setCatalogState("ready");
-      setReleaseRevision(loaded.releases[0]?.revision ?? "");
-      const first = loaded.targets.find((target) => target.role === role);
-      setVendorKey(first?.vendorKey ?? "");
-      setRadioKey(first?.radioKey ?? "");
-      setTargetId(first?.id ?? "");
-      const methods = first?.config.uploadMethods ?? [];
+      const buildableReleases = loaded.releases.filter(isBuildableRelease);
+      const defaultRelease = buildableReleases.find(isStableRelease);
+      setSelectedReleaseKey(
+        defaultRelease === undefined ? "" : releaseSelectionKey(defaultRelease),
+      );
+      const connectedIdentity = sessionRef.current?.identity ?? null;
+      const match =
+        connectedIdentity === null
+          ? null
+          : matchHardwareIdentityToOfficialTargets({
+              identity: connectedIdentity,
+              targets: loaded.targets,
+            });
+      const defaultTarget = loaded.targets.find(
+        (target) => target.role === role,
+      );
+      const nextTarget =
+        match?.confidence === "EXACT" && match.selected !== null
+          ? match.selected
+          : defaultTarget;
+      setTargetMatch(match);
+      setVendorKey(nextTarget?.vendorKey ?? "");
+      setRadioKey(nextTarget?.radioKey ?? "");
+      setTargetId(nextTarget?.id ?? "");
+      const methods = nextTarget?.config.uploadMethods ?? [];
       setMethod(methods.includes("uart") ? "uart" : (methods[0] ?? "download"));
       setOptions((current) => ({ ...current, region: "", domain: -1 }));
       resetPreparedState();
-      setStatus(
-        `تم تحميل ${loaded.releases.length} إصدارًا و${loaded.targets.length} Target رسميًا.`,
-      );
+      if (connectedIdentity === null) {
+        setStatus(
+          `تم تحميل ${buildableReleases.length} إصدارًا قابلاً للبناء و${loaded.targets.length} Target رسميًا.`,
+        );
+      } else if (match?.confidence === "EXACT") {
+        setStatus(
+          `تم تحميل الكتالوج ومطابقة ${connectedIdentity.productName} بـTarget رسمي واحد.`,
+        );
+      } else {
+        setStatus(
+          `تم تحميل الكتالوج مع بقاء هوية CRSF مثبتة. مطابقة Target: ${match?.confidence ?? "NOT_FOUND"}.`,
+        );
+      }
     } catch (error: unknown) {
       setCatalogState("failed");
       setStatus(`تعذر تحميل المصدر الرسمي: ${safeMessage(error)}`);
@@ -380,11 +647,7 @@ export function ExpressLrsParityWorkbench() {
   }
 
   async function connectHardware(): Promise<void> {
-    if (catalog === null) {
-      setStatus("حمّل الكتالوج الرسمي قبل تعريف الجهاز.");
-      return;
-    }
-    await disconnectHardware();
+    if (!(await disconnectHardware())) return;
     const controller = new AbortController();
     operationAbortRef.current = controller;
     setCancellable(true);
@@ -393,34 +656,51 @@ export function ExpressLrsParityWorkbench() {
       "اختر منفذ وحدة ExpressLRS المباشر؛ جارٍ إرسال CRSF Device Ping…",
     );
     try {
-      const outcome = await ExpressLrsHardwareSession.connect({
+      const outcome = await connectUserHardwareSession({
         role,
+        ...(hardwareConnector === undefined
+          ? {}
+          : { connector: hardwareConnector }),
         signal: controller.signal,
+        onCleanupUnconfirmed: latchUnconfirmedHardwareClose,
       });
       if (outcome.status !== "CONNECTED") {
+        if (outcome.status === "CLEANUP_UNCONFIRMED") {
+          latchUnconfirmedHardwareClose(outcome.message);
+          return;
+        }
         setStatus(`لم يكتمل التعرف: ${outcome.message}`);
         return;
       }
+      if (hardwareCloseUncertainRef.current) {
+        try {
+          await outcome.session.close();
+        } catch {
+          // The existing latch already requires a page reload.
+        }
+        return;
+      }
       sessionRef.current = outcome.session;
-      const match = matchHardwareIdentityToOfficialTargets({
-        identity: outcome.identity,
-        targets: catalog.targets,
-      });
-      const backup = outcome.session.createSettingsBackup();
+      observeSessionDisconnect(outcome.session);
+      const match =
+        catalog === null
+          ? null
+          : matchHardwareIdentityToOfficialTargets({
+              identity: outcome.identity,
+              targets: catalog.targets,
+            });
       setIdentity(outcome.identity);
-      setParameters(outcome.parameters);
-      setSettingsBackup(backup);
+      setParameters(outcome.session.parameters);
+      setWritableParameters(outcome.session.writableParameters);
+      setHasBindCommand(outcome.session.hasBindCommand);
+      setSettingsBackup(outcome.backup);
       setTargetMatch(match);
-      const firstWritable = outcome.parameters.find(
-        (parameter) =>
-          !parameter.hidden &&
-          (parameter.kind === "number" || parameter.kind === "selection"),
-      );
+      const firstWritable = outcome.session.writableParameters[0];
       setSelectedSettingId(
         firstWritable === undefined ? "" : String(firstWritable.id),
       );
       setSettingDraft(currentSettingValue(firstWritable));
-      if (match.confidence === "EXACT" && match.selected !== null) {
+      if (match?.confidence === "EXACT" && match.selected !== null) {
         const target = match.selected;
         setVendorKey(target.vendorKey);
         setRadioKey(target.radioKey);
@@ -434,9 +714,13 @@ export function ExpressLrsParityWorkbench() {
         setStatus(
           `تم إثبات CRSF ومطابقة ${outcome.identity.productName} بـTarget رسمي واحد.`,
         );
+      } else if (catalog === null) {
+        setStatus(
+          `تم إثبات CRSF وهوية ${outcome.identity.productName}. يمكنك تحميل الكتالوج لاحقًا لمطابقة Target وتجهيز التحديث.`,
+        );
       } else {
         setStatus(
-          `تم إثبات CRSF وهوية الجهاز. مطابقة Target: ${match.confidence}؛ اختر Target الرسمي وأكّد مفتاحه قبل التفليش.`,
+          `تم إثبات CRSF وهوية الجهاز. مطابقة Target: ${match?.confidence ?? "NOT_FOUND"}؛ اختر Target الرسمي وأكّد مفتاحه قبل التفليش.`,
         );
       }
     } catch (error: unknown) {
@@ -451,15 +735,30 @@ export function ExpressLrsParityWorkbench() {
   async function writeSetting(): Promise<void> {
     const session = sessionRef.current;
     if (session === null || selectedSetting === undefined) return;
+    if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
+      setStatus(deviceWriteLockMessage());
+      return;
+    }
     const requestedValue = Number(settingDraft);
+    if (!Number.isSafeInteger(requestedValue)) {
+      setStatus("أدخل قيمة صحيحة قبل حفظ الإعداد.");
+      return;
+    }
+    operationAbortRef.current?.abort();
+    const controller = new AbortController();
+    operationAbortRef.current = controller;
+    setCancellable(true);
     setBusy(true);
     setStatus(`جارٍ كتابة ${selectedSetting.name} ثم إعادة قراءته…`);
     try {
       const result = await session.writeParameter(
         selectedSetting.id,
         requestedValue,
+        controller.signal,
       );
+      assertCurrentDeviceOperation(session, controller.signal);
       setParameters(session.parameters);
+      setWritableParameters(session.writableParameters);
       setSettingDraft(String(result.requestedValue));
       setStatus(
         `تم حفظ ${selectedSetting.name} والتحقق من القيمة بالقراءة الرجعية.`,
@@ -467,6 +766,10 @@ export function ExpressLrsParityWorkbench() {
     } catch (error: unknown) {
       setStatus(`تعذر حفظ الإعداد: ${safeMessage(error)}`);
     } finally {
+      if (operationAbortRef.current === controller) {
+        operationAbortRef.current = null;
+      }
+      setCancellable(false);
       setBusy(false);
     }
   }
@@ -474,34 +777,66 @@ export function ExpressLrsParityWorkbench() {
   async function restoreSettings(): Promise<void> {
     const session = sessionRef.current;
     if (session === null || settingsBackup === null) return;
+    if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
+      setStatus(deviceWriteLockMessage());
+      return;
+    }
+    operationAbortRef.current?.abort();
+    const controller = new AbortController();
+    operationAbortRef.current = controller;
+    setCancellable(true);
     setBusy(true);
     setStatus("جارٍ استعادة لقطة الإعدادات والتحقق من كل قيمة…");
     try {
-      const results = await session.restoreSettingsBackup(settingsBackup);
+      const results = await session.restoreBackup(settingsBackup, {
+        confirmedByUser: true,
+        signal: controller.signal,
+      });
+      assertCurrentDeviceOperation(session, controller.signal);
       setParameters(session.parameters);
+      setWritableParameters(session.writableParameters);
       setStatus(`اكتملت استعادة ${results.length} قيمة مع قراءة رجعية.`);
     } catch (error: unknown) {
       setStatus(`توقفت استعادة الإعدادات: ${safeMessage(error)}`);
     } finally {
+      if (operationAbortRef.current === controller) {
+        operationAbortRef.current = null;
+      }
+      setCancellable(false);
       setBusy(false);
     }
   }
 
   async function startBinding(): Promise<void> {
     const session = sessionRef.current;
-    if (session === null) return;
+    if (session === null || !bindingAcknowledged) return;
+    if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
+      setStatus(deviceWriteLockMessage());
+      return;
+    }
+    operationAbortRef.current?.abort();
+    const controller = new AbortController();
+    operationAbortRef.current = controller;
+    setCancellable(true);
     setBusy(true);
+    setBindingAcknowledged(false);
     setStatus("جارٍ إرسال أمر الربط الحقيقي الذي يعلنه الجهاز عبر CRSF…");
     try {
-      const result = await session.startBinding();
+      const result = await session.startBinding({
+        confirmedByUser: true,
+        signal: controller.signal,
+      });
+      assertCurrentDeviceOperation(session, controller.signal);
       setStatus(
-        result.verified
-          ? `أقر الجهاز أمر الربط: ${result.information}`
-          : `أُرسل أمر الربط، لكن نجاح رابط RF يتطلب مشاهدة الطرفين: ${result.information}`,
+        `اكتمل أمر الربط، لكن نجاح رابط RF يتطلب مشاهدة الطرفين: ${result.information}`,
       );
     } catch (error: unknown) {
       setStatus(`توقف الربط: ${safeMessage(error)}`);
     } finally {
+      if (operationAbortRef.current === controller) {
+        operationAbortRef.current = null;
+      }
+      setCancellable(false);
       setBusy(false);
     }
   }
@@ -552,6 +887,7 @@ export function ExpressLrsParityWorkbench() {
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
       }
+      setCancellable(false);
       setBusy(false);
     }
   }
@@ -573,9 +909,10 @@ export function ExpressLrsParityWorkbench() {
       prepared.recoveryFileName,
       "application/zip",
     );
-    setRecoveryDownloaded(true);
+    setRecoveryDownloadStarted(true);
+    setRecoveryDownloaded(false);
     setStatus(
-      "تم تنزيل حزمة الاستعادة. احتفظ بها حتى اكتمال التحقق بعد الإقلاع.",
+      "بدأ المتصفح طلب تنزيل حزمة الاستعادة، لكن التطبيق لا يستطيع إثبات حفظها. بعد التحقق من وجود الملف، أكّد ذلك يدويًا.",
     );
   }
 
@@ -583,23 +920,31 @@ export function ExpressLrsParityWorkbench() {
     if (
       selectedRelease === null ||
       selectedTarget === null ||
-      selectedTarget.role !== "tx" ||
-      selectedTarget.config.luaName === null
+      selectedTarget.role !== "tx"
     ) {
       return;
     }
+    operationAbortRef.current?.abort();
+    const controller = new AbortController();
+    operationAbortRef.current = controller;
+    setCancellable(true);
     setBusy(true);
-    setStatus("جارٍ تنزيل ملف Lua الرسمي المطابق لهذا Target…");
+    setStatus("جارٍ تنزيل ملف Lua الرسمي المتوافق مع إصدار ExpressLRS…");
     try {
       const script = await acquireOfficialLuaScript({
         release: selectedRelease,
         target: selectedTarget,
+        signal: controller.signal,
       });
       downloadPreparedBytes(script.bytes, script.fileName, "text/plain");
       setStatus(`تم بدء تنزيل ${script.fileName}.`);
     } catch (error: unknown) {
       setStatus(`تعذر تنزيل ملف Lua: ${safeMessage(error)}`);
     } finally {
+      if (operationAbortRef.current === controller) {
+        operationAbortRef.current = null;
+      }
+      setCancellable(false);
       setBusy(false);
     }
   }
@@ -634,6 +979,7 @@ export function ExpressLrsParityWorkbench() {
     readonly expectedIdentity: ExpressLrsIdentity | null;
     readonly manualTargetWasConfirmed: boolean;
     readonly totalBytes: number;
+    readonly signal: AbortSignal;
   }): Promise<void> {
     setFlashProgress({
       stage: "RECONNECT",
@@ -642,11 +988,28 @@ export function ExpressLrsParityWorkbench() {
       detail: "أعد اختيار منفذ الجهاز بعد الإقلاع",
     });
     setStatus("أعد اختيار منفذ الجهاز بعد الإقلاع لإثبات الهوية والإصدار.");
-    const outcome = await ExpressLrsHardwareSession.connect({
+    const outcome = await connectUserHardwareSession({
       role: input.target.role,
+      ...(hardwareConnector === undefined
+        ? {}
+        : { connector: hardwareConnector }),
+      signal: input.signal,
+      onCleanupUnconfirmed: latchUnconfirmedHardwareClose,
     });
     if (outcome.status !== "CONNECTED") {
+      if (outcome.status === "CLEANUP_UNCONFIRMED") {
+        latchUnconfirmedHardwareClose(outcome.message);
+      }
       throw new Error(`تعذرت إعادة قراءة الجهاز: ${outcome.message}`);
+    }
+    if (hardwareCloseUncertainRef.current || input.signal.aborted) {
+      await closeSessionOrLatch(
+        outcome.session,
+        "تعذر عزل جلسة إعادة الاتصال بعد فشل تنظيف سابق",
+      );
+      throw new Error(
+        "اكتملت إعادة قراءة الجهاز بعد رصد منفذ سابق غير مثبت الإغلاق.",
+      );
     }
     const match = matchHardwareIdentityToOfficialTargets({
       identity: outcome.identity,
@@ -660,7 +1023,10 @@ export function ExpressLrsParityWorkbench() {
       manualTargetConfirmed: input.manualTargetWasConfirmed,
     });
     if (!targetVerification.verified) {
-      await outcome.session.close();
+      await closeSessionOrLatch(
+        outcome.session,
+        "تعذر تأكيد إغلاق جلسة إعادة الاتصال غير المطابقة",
+      );
       throw new Error(
         `عاد جهاز، لكن أدلة Target لا تطابق العملية المخططة (${targetVerification.reason}).`,
       );
@@ -671,21 +1037,86 @@ export function ExpressLrsParityWorkbench() {
       parameters: outcome.parameters,
     });
     if (!build.verified) {
-      await outcome.session.close();
+      await closeSessionOrLatch(
+        outcome.session,
+        "تعذر تأكيد إغلاق جلسة الإصدار غير المطابق",
+      );
       throw new Error(
         `عاد الجهاز، لكن الإصدار/Commit لا يطابق ${build.expected}.`,
       );
     }
     const oldSession = sessionRef.current;
-    sessionRef.current = outcome.session;
+    disconnectUnsubscribeRef.current?.();
+    disconnectUnsubscribeRef.current = null;
     if (oldSession !== null && oldSession !== outcome.session) {
-      await oldSession.close();
+      const oldClosed = await closeSessionOrLatch(
+        oldSession,
+        "تعذر تأكيد إغلاق جلسة CRSF السابقة بعد إعادة الاتصال",
+      );
+      if (!oldClosed) {
+        sessionRef.current = null;
+        await closeSessionOrLatch(
+          outcome.session,
+          "تعذر تأكيد إغلاق جلسة إعادة الاتصال الاحتياطية",
+        );
+        throw new Error(
+          "تعذر إثبات إغلاق جلسة CRSF السابقة؛ أُوقفت إعادة الاتصال بأمان.",
+        );
+      }
     }
+    if (
+      !hardwareCleanupGateOpen() ||
+      input.signal.aborted ||
+      sessionRef.current !== oldSession
+    ) {
+      if (sessionRef.current === oldSession) {
+        sessionRef.current = null;
+        clearHardwarePresentation();
+      }
+      await closeSessionOrLatch(
+        outcome.session,
+        "تعذر تأكيد إغلاق جلسة إعادة الاتصال بعد تغير بوابة التنظيف",
+      );
+      throw new Error(
+        "تغيرت جلسة الجهاز أو بوابة تنظيف المنفذ أثناء إعادة الاتصال؛ عُزلت الجلسة الجديدة.",
+      );
+    }
+    sessionRef.current = outcome.session;
+    observeSessionDisconnect(outcome.session);
     setIdentity(outcome.identity);
-    setParameters(outcome.parameters);
-    setSettingsBackup(outcome.session.createSettingsBackup());
+    setParameters(outcome.session.parameters);
+    setWritableParameters(outcome.session.writableParameters);
+    setHasBindCommand(outcome.session.hasBindCommand);
+    setSettingsBackup(outcome.backup);
+    const firstWritable = outcome.session.writableParameters[0];
+    setSelectedSettingId(
+      firstWritable === undefined ? "" : String(firstWritable.id),
+    );
+    setSettingDraft(currentSettingValue(firstWritable));
     setTargetMatch(match);
     await clearRecoveryCheckpoint();
+    if (
+      !hardwareCleanupGateOpen() ||
+      input.signal.aborted ||
+      sessionRef.current !== outcome.session ||
+      outcome.session.closed
+    ) {
+      if (sessionRef.current === outcome.session) {
+        const unsubscribeReconnect = disconnectUnsubscribeRef.current as
+          (() => void) | null;
+        unsubscribeReconnect?.();
+        disconnectUnsubscribeRef.current = null;
+        sessionRef.current = null;
+        clearHardwarePresentation();
+      }
+      await closeSessionOrLatch(
+        outcome.session,
+        "تعذر تأكيد إغلاق جلسة إعادة الاتصال بعد تغير بوابة التنظيف",
+      );
+      throw new Error(
+        "تغيرت جلسة الجهاز أو بوابة تنظيف المنفذ قبل اعتماد إعادة الاتصال.",
+      );
+    }
     setCheckpoint(null);
     setFlashProgress({
       stage: "COMPLETE",
@@ -699,26 +1130,53 @@ export function ExpressLrsParityWorkbench() {
     readonly selectedMethod: ExpressLrsFlashMethod;
     readonly family: "esp" | "stm32";
     readonly signal: AbortSignal;
+    readonly exactTargetIdentityRequired: boolean;
   }): Promise<
     Readonly<{
       port: HardwareSerialPort;
       resetMode: "default_reset" | "no_reset";
     }>
   > {
+    if (!hardwareCleanupGateOpen()) {
+      throw new Error(
+        "إغلاق منفذ جهاز سابق غير مثبت؛ أُوقف فتح أي منفذ كتابة جديد.",
+      );
+    }
     if (input.selectedMethod === "uart") {
       const session = sessionRef.current;
       if (session === null) {
         throw new Error("جلسة CRSF المباشرة مغلقة.");
       }
       const liveIdentity = await session.verifyCurrentIdentity(input.signal);
+      if (!hardwareCleanupGateOpen()) {
+        throw new Error(
+          "تغيرت حالة تنظيف منفذ الجهاز أثناء التحقق من الهوية؛ أُوقفت الكتابة.",
+        );
+      }
       if (
         selectedTarget === null ||
         liveIdentity.role !== selectedTarget.role
       ) {
         throw new Error("نوع الجهاز تغير أو لا يطابق Target المختار.");
       }
+      if (input.exactTargetIdentityRequired) {
+        const liveMatch = matchHardwareIdentityToOfficialTargets({
+          identity: liveIdentity,
+          targets: catalog?.targets ?? [],
+        });
+        if (
+          liveMatch.confidence !== "EXACT" ||
+          liveMatch.selected?.id !== selectedTarget.id
+        ) {
+          throw new Error(
+            "هوية الجهاز الحية لم تعد تطابق Target الذي حصل على إعفاء التأكيد اليدوي.",
+          );
+        }
+      }
       if (input.family === "stm32" && selectedTarget.role === "rx") {
         const bootloader = await session.enterReceiverBootloader({
+          expectedFirmwareTarget: selectedTarget.config.firmware,
+          confirmedByUser: true,
           signal: input.signal,
         });
         const observed = normalized(bootloader.target);
@@ -740,18 +1198,46 @@ export function ExpressLrsParityWorkbench() {
         }
       } else if (selectedTarget.role === "tx") {
         const command = commandForBootloader(parameters);
-        if (command !== null) {
-          await session.executeCommand(command, input.signal);
+        if (command === null) {
+          throw new Error(
+            "الجهاز لا يعلن أمر Bootloader صالحًا؛ أُوقفت الكتابة بأمان.",
+          );
         }
+        await session.enterTransmitterBootloader({
+          commandName: command,
+          confirmedByUser: true,
+          signal: input.signal,
+        });
       }
-      const port = await session.detachPortForBootloader();
-      sessionRef.current = null;
-      setIdentity(null);
-      setParameters([]);
+      disconnectUnsubscribeRef.current?.();
+      disconnectUnsubscribeRef.current = null;
+      let port: HardwareSerialPort;
+      try {
+        port = await session.detachPortForBootloader({
+          confirmedByUser: true,
+        });
+      } catch (error: unknown) {
+        latchUnconfirmedHardwareClose(
+          `فشل تحرير منفذ CRSF للتفليش، لذلك لا يمكن إثبات إغلاقه: ${safeMessage(error)}`,
+        );
+        throw error;
+      } finally {
+        sessionRef.current = null;
+        clearHardwarePresentation();
+      }
       return Object.freeze({ port, resetMode: "default_reset" });
     }
 
     const port = await requestHardwarePort();
+    if (!hardwareCleanupGateOpen() || input.signal.aborted) {
+      await closePortOrLatch(
+        port,
+        "تعذر تأكيد إغلاق المنفذ الذي اختير بعد إلغاء عملية التفليش",
+      );
+      throw new Error(
+        "تغيرت حالة تنظيف منفذ الجهاز أثناء اختيار المنفذ؛ أُوقفت الكتابة.",
+      );
+    }
     await initializeSerialPassthrough({
       method: input.selectedMethod as PassthroughMethod,
       port,
@@ -762,6 +1248,24 @@ export function ExpressLrsParityWorkbench() {
   }
 
   async function flashPreparedFirmware(): Promise<void> {
+    if (!allowDestructiveWrites) {
+      setStatus(
+        "الكتابة المباشرة وفتح مسار Wi-Fi مقفلان في نقطة الدخول العامة الحالية.",
+      );
+      return;
+    }
+    if (!hardwareCleanupGateOpen()) {
+      setStatus(deviceWriteLockMessage());
+      return;
+    }
+    if (recoveryJournalState !== "ready") {
+      setStatus(
+        recoveryJournalState === "loading"
+          ? "انتظر اكتمال فحص سجل الاستعادة قبل أي كتابة."
+          : "تعذر التحقق من سجل الاستعادة؛ كل عمليات الكتابة مقفلة بأمان.",
+      );
+      return;
+    }
     if (prepared === null || selectedTarget === null) return;
     if (!writeReady) {
       setStatus("لم تكتمل بوابات Target والاستعادة والطاقة والهوائي.");
@@ -793,6 +1297,11 @@ export function ExpressLrsParityWorkbench() {
     setFlashProgress(null);
     try {
       await saveCheckpoint(prepared, "PACKAGE_SAVED");
+      if (!hardwareCleanupGateOpen()) {
+        throw new Error(
+          "تغيرت حالة تنظيف منفذ الجهاز؛ أُوقفت الكتابة قبل فتح منفذ جديد.",
+        );
+      }
       const family = platformFamily(selectedTarget);
       if (family === "other") {
         throw new Error("منصة Target غير مدعومة داخل التطبيق.");
@@ -800,7 +1309,7 @@ export function ExpressLrsParityWorkbench() {
       await saveCheckpoint(prepared, "BOOTLOADER");
       if (method === "stlink") {
         if (family !== "stm32") {
-          throw new Error("ST-Link / DFU لا يطابق منصة Target المختار.");
+          throw new Error("STM32 DFU لا يطابق منصة Target المختار.");
         }
         const firmware = prepared.segments.find(
           (segment) => segment.name === "firmware.bin",
@@ -809,21 +1318,30 @@ export function ExpressLrsParityWorkbench() {
           throw new Error("حزمة STM32 لا تحتوي firmware.bin.");
         }
         await saveCheckpoint(prepared, "WRITING");
-        await flashStm32DfuFirmware({
+        const flashResult = await flashStm32DfuFirmware({
           target: selectedTarget,
           segment: firmware,
           signal: controller.signal,
           onProgress: setFlashProgress,
         });
+        if (!flashResult.cleanupVerified) {
+          latchUnconfirmedHardwareClose(
+            "اكتملت كتابة STM32 لكن تعذر إثبات تحرير واجهة USB وإغلاقها",
+          );
+          throw new Error(
+            "تعذر تأكيد إغلاق منفذ STM32 بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+          );
+        }
       } else {
         const serial = await prepareSerialTransport({
           selectedMethod: method,
           family,
           signal: controller.signal,
+          exactTargetIdentityRequired: sameDirectUartIdentity,
         });
         await saveCheckpoint(prepared, "WRITING");
         if (family === "esp") {
-          await flashEspFirmware({
+          const flashResult = await flashEspFirmware({
             port: serial.port,
             target: selectedTarget,
             segments: prepared.segments,
@@ -831,6 +1349,14 @@ export function ExpressLrsParityWorkbench() {
             signal: controller.signal,
             onProgress: setFlashProgress,
           });
+          if (!flashResult.cleanupVerified) {
+            latchUnconfirmedHardwareClose(
+              "اكتملت كتابة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
+            );
+            throw new Error(
+              "تعذر تأكيد إغلاق منفذ ESP بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+            );
+          }
         } else {
           const firmware = prepared.segments.find(
             (segment) => segment.name === "firmware.bin",
@@ -853,17 +1379,31 @@ export function ExpressLrsParityWorkbench() {
         expectedIdentity,
         manualTargetWasConfirmed: manualConfirmationSnapshot,
         totalBytes,
+        signal: controller.signal,
       });
       setStatus("اكتمل التفليش وعاد الجهاز بالإصدار/Commit المتوقع.");
     } catch (error: unknown) {
+      const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
+      if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
+        latchUnconfirmedHardwareClose(
+          "تعذر إثبات إغلاق منفذ الكتابة بعد توقف التفليش",
+        );
+      }
       const message = safeMessage(error);
       try {
         await saveCheckpoint(prepared, "RECOVERY_REQUIRED", message);
       } catch {
         // The visible recovery requirement remains even if IndexedDB is blocked.
       }
-      setStatus(`توقف التفليش وتحتاج العملية إلى الاستعادة: ${message}`);
+      setStatus(
+        `توقف التفليش وتحتاج العملية إلى الاستعادة: ${message}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`,
+      );
     } finally {
+      // Every flash or recovery is a distinct destructive attempt. Do not
+      // carry Target, power, or antenna acknowledgements into another one.
+      setManualTargetConfirmation("");
+      setPowerAcknowledged(false);
+      setAntennaAcknowledged(false);
       operationAbortRef.current = null;
       setCancellable(false);
       setBusy(false);
@@ -871,6 +1411,23 @@ export function ExpressLrsParityWorkbench() {
   }
 
   async function recoverFromFile(file: File): Promise<void> {
+    if (!allowDestructiveWrites) {
+      setStatus("الاستعادة المباشرة مقفلة في نقطة الدخول العامة الحالية.");
+      return;
+    }
+    if (!hardwareCleanupGateOpen()) {
+      setStatus(deviceWriteLockMessage());
+      return;
+    }
+    if (recoveryJournalState !== "ready" || checkpoint === null) {
+      setStatus(
+        recoveryJournalState === "loading"
+          ? "انتظر اكتمال فحص سجل الاستعادة قبل اختيار الحزمة."
+          : "لا يمكن تشغيل الاستعادة دون سجل استعادة موثوق ومقروء.",
+      );
+      return;
+    }
+    const trustedCheckpoint = checkpoint;
     if (selectedTarget === null) return;
     if (method === "wifi" || method === "download") {
       setStatus(
@@ -878,10 +1435,24 @@ export function ExpressLrsParityWorkbench() {
       );
       return;
     }
-    if (!manualTargetConfirmed && !exactHardwareTarget) {
-      setStatus("أكّد مفتاح Target قبل تشغيل الاستعادة.");
+    if (!manualTargetConfirmed) {
+      setStatus(
+        "أكّد مفتاح Target قبل تشغيل الاستعادة؛ منفذ الاستعادة اختيار جديد ولا يرث هوية CRSF السابقة.",
+      );
       return;
     }
+    if (!powerAcknowledged) {
+      setStatus("أكّد ثبات الطاقة قبل تشغيل الاستعادة.");
+      return;
+    }
+    if (selectedTarget.role === "tx" && !antennaAcknowledged) {
+      setStatus("أكّد تثبيت هوائي جهاز الإرسال قبل تشغيل الاستعادة.");
+      return;
+    }
+    operationAbortRef.current?.abort();
+    const controller = new AbortController();
+    operationAbortRef.current = controller;
+    setCancellable(true);
     setBusy(true);
     setStatus("جارٍ فحص حزمة الاستعادة وSHA-256 لكل قطاع…");
     try {
@@ -890,12 +1461,14 @@ export function ExpressLrsParityWorkbench() {
         bytes,
         expectedTarget: selectedTarget,
       });
-      if (
-        checkpoint !== null &&
-        checkpoint.packageSha256 !== validated.packageSha256
-      ) {
+      if (trustedCheckpoint.packageSha256 !== validated.packageSha256) {
         throw new Error(
           "الحزمة المختارة لا تطابق بصمة جلسة الاستعادة المعلقة.",
+        );
+      }
+      if (!hardwareCleanupGateOpen()) {
+        throw new Error(
+          "تغيرت حالة تنظيف منفذ الجهاز؛ أُوقفت الاستعادة قبل فتح منفذ جديد.",
         );
       }
       const family = platformFamily(selectedTarget);
@@ -905,7 +1478,7 @@ export function ExpressLrsParityWorkbench() {
       );
       if (method === "stlink") {
         if (family !== "stm32") {
-          throw new Error("ST-Link / DFU لا يطابق منصة Target المختار.");
+          throw new Error("STM32 DFU لا يطابق منصة Target المختار.");
         }
         const firmware = validated.segments.find(
           (segment) => segment.name === "firmware.bin",
@@ -913,28 +1486,56 @@ export function ExpressLrsParityWorkbench() {
         if (firmware === undefined) {
           throw new Error("حزمة الاستعادة لا تحتوي firmware.bin.");
         }
-        await flashStm32DfuFirmware({
+        const flashResult = await flashStm32DfuFirmware({
           target: selectedTarget,
           segment: firmware,
+          signal: controller.signal,
           onProgress: setFlashProgress,
         });
+        if (!flashResult.cleanupVerified) {
+          latchUnconfirmedHardwareClose(
+            "اكتملت استعادة STM32 لكن تعذر إثبات تحرير واجهة USB وإغلاقها",
+          );
+          throw new Error(
+            "تعذر تأكيد إغلاق منفذ STM32 بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+          );
+        }
       } else {
         const port = await requestHardwarePort();
+        if (!hardwareCleanupGateOpen() || controller.signal.aborted) {
+          await closePortOrLatch(
+            port,
+            "تعذر تأكيد إغلاق المنفذ الذي اختير بعد إلغاء الاستعادة",
+          );
+          throw new Error(
+            "تغيرت حالة تنظيف منفذ الجهاز أثناء اختيار منفذ الاستعادة؛ أُوقفت الكتابة.",
+          );
+        }
         if (!["uart", "passthru"].includes(method)) {
           await initializeSerialPassthrough({
             method: method as PassthroughMethod,
             port,
             flashBaud: family === "esp" ? 460_800 : 420_000,
+            signal: controller.signal,
           });
         }
         if (family === "esp") {
-          await flashEspFirmware({
+          const flashResult = await flashEspFirmware({
             port,
             target: selectedTarget,
             segments: validated.segments,
             resetMode: method === "uart" ? "default_reset" : "no_reset",
+            signal: controller.signal,
             onProgress: setFlashProgress,
           });
+          if (!flashResult.cleanupVerified) {
+            latchUnconfirmedHardwareClose(
+              "اكتملت استعادة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
+            );
+            throw new Error(
+              "تعذر تأكيد إغلاق منفذ ESP بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+            );
+          }
         } else if (family === "stm32") {
           const firmware = validated.segments.find(
             (segment) => segment.name === "firmware.bin",
@@ -945,6 +1546,7 @@ export function ExpressLrsParityWorkbench() {
           await flashXmodemFirmware({
             port,
             firmware: firmware.bytes,
+            signal: controller.signal,
             onProgress: setFlashProgress,
           });
         } else {
@@ -957,11 +1559,27 @@ export function ExpressLrsParityWorkbench() {
         expectedIdentity: null,
         manualTargetWasConfirmed: manualTargetConfirmed,
         totalBytes,
+        signal: controller.signal,
       });
       setStatus("اكتملت الاستعادة وعاد الجهاز بالإصدار/Commit المتوقع.");
     } catch (error: unknown) {
-      setStatus(`توقفت الاستعادة: ${safeMessage(error)}`);
+      const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
+      if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
+        latchUnconfirmedHardwareClose(
+          "تعذر إثبات إغلاق منفذ الكتابة بعد توقف الاستعادة",
+        );
+      }
+      setStatus(
+        `توقفت الاستعادة: ${safeMessage(error)}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`,
+      );
     } finally {
+      setManualTargetConfirmation("");
+      setPowerAcknowledged(false);
+      setAntennaAcknowledged(false);
+      if (operationAbortRef.current === controller) {
+        operationAbortRef.current = null;
+      }
+      setCancellable(false);
       setBusy(false);
     }
   }
@@ -999,10 +1617,7 @@ export function ExpressLrsParityWorkbench() {
       flashMethod: method,
       settingsBackupAvailable: settingsBackup !== null,
       writableParameterCount: writableParameters.length,
-      bindCommandAvailable: parameters.some(
-        (parameter) =>
-          parameter.kind === "command" && /\bbind\b/iu.test(parameter.name),
-      ),
+      bindCommandAvailable: hasBindCommand,
       bootloaderCommandAvailable: commandForBootloader(parameters) !== null,
       packageFileName: prepared?.primaryFileName ?? null,
       recoveryFileName: prepared?.recoveryFileName ?? null,
@@ -1060,12 +1675,69 @@ export function ExpressLrsParityWorkbench() {
               <p>{checkpoint.safeError}</p>
             )}
           </div>
+          {selectedTarget === null ? null : (
+            <div>
+              <label className="manual-confirm">
+                <span>تأكيد Target للاستعادة</span>
+                <input
+                  type="text"
+                  value={manualTargetConfirmation}
+                  placeholder={selectedTarget.targetKey}
+                  disabled={
+                    busy || !allowDestructiveWrites || !hardwareCleanupReady
+                  }
+                  onChange={(event) =>
+                    setManualTargetConfirmation(event.currentTarget.value)
+                  }
+                />
+                <small>اكتب حرفيًا: {selectedTarget.targetKey}</small>
+              </label>
+              <div className="flash-acknowledgements">
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={powerAcknowledged}
+                    disabled={
+                      busy || !allowDestructiveWrites || !hardwareCleanupReady
+                    }
+                    onChange={(event) =>
+                      setPowerAcknowledged(event.currentTarget.checked)
+                    }
+                  />
+                  <span>ثبات الطاقة أثناء الاستعادة</span>
+                </label>
+                {selectedTarget.role === "tx" ? (
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={antennaAcknowledged}
+                      disabled={
+                        busy || !allowDestructiveWrites || !hardwareCleanupReady
+                      }
+                      onChange={(event) =>
+                        setAntennaAcknowledged(event.currentTarget.checked)
+                      }
+                    />
+                    <span>هوائي جهاز الإرسال مثبت أثناء الاستعادة</span>
+                  </label>
+                ) : null}
+              </div>
+            </div>
+          )}
           <label className="file-button">
             اختيار حزمة الاستعادة
             <input
               type="file"
               accept=".zip,application/zip"
-              disabled={busy || selectedTarget === null}
+              disabled={
+                busy ||
+                selectedTarget === null ||
+                !allowDestructiveWrites ||
+                !hardwareCleanupReady ||
+                !manualTargetConfirmed ||
+                !powerAcknowledged ||
+                (selectedTarget.role === "tx" && !antennaAcknowledged)
+              }
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 if (file !== undefined) void recoverFromFile(file);
@@ -1075,6 +1747,16 @@ export function ExpressLrsParityWorkbench() {
           </label>
         </section>
       )}
+
+      {recoveryJournalState === "loading" ? (
+        <p className="danger-note" role="status">
+          جارٍ فحص سجل الاستعادة؛ عمليات الكتابة مقفلة مؤقتًا.
+        </p>
+      ) : recoveryJournalState === "error" ? (
+        <p className="danger-note" role="alert">
+          تعذر التحقق من سجل الاستعادة؛ عمليات التفليش والاستعادة مقفلة بأمان.
+        </p>
+      ) : null}
 
       <section className="parity-card" aria-labelledby="catalog-heading">
         <div className="parity-card-heading">
@@ -1122,20 +1804,21 @@ export function ExpressLrsParityWorkbench() {
           <label>
             <span>الإصدار</span>
             <select
-              value={releaseRevision}
+              value={selectedReleaseKey}
               disabled={catalog === null || busy}
               onChange={(event) => {
-                setReleaseRevision(event.currentTarget.value);
+                setSelectedReleaseKey(event.currentTarget.value);
                 resetPreparedState();
               }}
             >
+              <option value="">اختر إصدارًا</option>
               {releases.map((release) => (
                 <option
-                  key={`${release.channel}:${release.revision}`}
-                  value={release.revision}
+                  key={releaseSelectionKey(release)}
+                  value={releaseSelectionKey(release)}
                 >
                   {release.label}
-                  {release.channel === "branch" ? " · تجريبي" : ""}
+                  {!isStableRelease(release) ? " · تجريبي" : ""}
                 </option>
               ))}
             </select>
@@ -1301,14 +1984,19 @@ export function ExpressLrsParityWorkbench() {
             <span>2</span>
             <div>
               <h2 id="device-heading">تعريف الجهاز وإعداداته</h2>
-              <p>لا تُعرض هوية قبل Device Info صحيح وCRC صالح.</p>
+              <p>
+                لا تُعرض هوية قبل Device Info صحيح وCRC صالح، ولا يتطلب ذلك
+                تحميل الكتالوج.
+              </p>
             </div>
           </div>
           {identity === null ? (
             <button
               type="button"
               className="primary-button"
-              disabled={busy || catalog === null}
+              disabled={
+                busy || hardwareCloseUncertain || hardwareCloseInProgress
+              }
               onClick={() => void connectHardware()}
             >
               تعريف الجهاز عبر CRSF
@@ -1347,12 +2035,20 @@ export function ExpressLrsParityWorkbench() {
               </div>
               <div>
                 <dt>مطابقة Target</dt>
-                <dd>{targetMatch?.confidence ?? "NOT_FOUND"}</dd>
+                <dd>
+                  {targetMatch?.confidence ??
+                    (catalog === null ? "بانتظار الكتالوج" : "NOT_FOUND")}
+                </dd>
               </div>
             </dl>
             {exactHardwareTarget ? (
               <p className="success-note">
                 Target المختار مطابق تلقائيًا لهوية CRSF.
+              </p>
+            ) : catalog === null ? (
+              <p className="empty-state">
+                هوية CRSF مثبتة. حمّل الكتالوج لاحقًا فقط لمطابقة Target وتجهيز
+                Firmware.
               </p>
             ) : (
               <p className="danger-note">
@@ -1361,6 +2057,13 @@ export function ExpressLrsParityWorkbench() {
                 الجهاز نفسه.
               </p>
             )}
+
+            {!allowDestructiveWrites ? (
+              <p className="danger-note">
+                هذه النسخة تسمح بتعريف الجهاز وقراءة المعاملات فقط؛ أوامر
+                التغيير والربط والكتابة مقفلة في نقطة الدخول العامة الحالية.
+              </p>
+            ) : null}
 
             <div className="settings-grid">
               <label>
@@ -1433,7 +2136,9 @@ export function ExpressLrsParityWorkbench() {
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={busy || selectedSetting === undefined}
+                  disabled={
+                    busy || selectedSetting === undefined || !deviceWritesReady
+                  }
                   onClick={() => void writeSetting()}
                 >
                   حفظ مع قراءة رجعية
@@ -1441,20 +2146,41 @@ export function ExpressLrsParityWorkbench() {
                 <button
                   type="button"
                   className="secondary-button"
-                  disabled={busy || settingsBackup === null}
+                  disabled={
+                    busy || settingsBackup === null || !deviceWritesReady
+                  }
                   onClick={() => void restoreSettings()}
                 >
                   استعادة اللقطة
                 </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={busy}
-                  onClick={() => void startBinding()}
-                >
-                  تشغيل الربط الحقيقي
-                </button>
+                {hasBindCommand ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={
+                      busy || !bindingAcknowledged || !deviceWritesReady
+                    }
+                    onClick={() => void startBinding()}
+                  >
+                    تشغيل الربط الحقيقي
+                  </button>
+                ) : null}
               </div>
+              {hasBindCommand ? (
+                <label className="check-field">
+                  <input
+                    type="checkbox"
+                    checked={bindingAcknowledged}
+                    disabled={busy || !deviceWritesReady}
+                    onChange={(event) =>
+                      setBindingAcknowledged(event.currentTarget.checked)
+                    }
+                  />
+                  <span>
+                    الطرف الآخر جاهز للربط، والطاقة والهوائيات في حالة آمنة
+                  </span>
+                </label>
+              ) : null}
             </div>
           </>
         )}
@@ -1643,18 +2369,11 @@ export function ExpressLrsParityWorkbench() {
                 <span>R9MM Mini SBUS</span>
               </label>
               <label className="check-field">
-                <input
-                  type="checkbox"
-                  checked={options.receiverAsTransmitter}
-                  disabled={busy}
-                  onChange={(event) =>
-                    updateOption(
-                      "receiverAsTransmitter",
-                      event.currentTarget.checked,
-                    )
-                  }
-                />
-                <span>استخدام RX كمرسل</span>
+                <input type="checkbox" checked={false} disabled readOnly />
+                <span>
+                  استخدام RX كمرسل — مقفل حتى تنفيذ تحويل ملف TX ومخطط العتاد
+                  والتحقق منهما
+                </span>
               </label>
             </>
           )}
@@ -1684,6 +2403,14 @@ export function ExpressLrsParityWorkbench() {
             بناء Firmware الرسمي
           </button>
         </div>
+
+        {!allowDestructiveWrites ? (
+          <p className="danger-note">
+            بناء الحزمة وتنزيلها متاحان، لكن التفليش والاستعادة وفتح صفحة Wi-Fi
+            مقفلة في نقطة الدخول العامة الحالية؛ وتفعيلها يتطلب نقطة دخول منفصلة
+            ومراجعة.
+          </p>
+        ) : null}
 
         {prepared === null ? (
           <p className="empty-state">لم تُبنَ حزمة بعد.</p>
@@ -1721,8 +2448,7 @@ export function ExpressLrsParityWorkbench() {
               >
                 تنزيل حزمة الاستعادة
               </button>
-              {selectedTarget?.role === "tx" &&
-              selectedTarget.config.luaName !== null ? (
+              {selectedTarget?.role === "tx" ? (
                 <button
                   type="button"
                   className="secondary-button"
@@ -1735,21 +2461,45 @@ export function ExpressLrsParityWorkbench() {
             </div>
 
             {recoveryDownloaded ? (
-              <p className="success-note">تم تأكيد تنزيل حزمة الاستعادة.</p>
+              <p className="success-note">
+                أكد المستخدم أن حزمة الاستعادة محفوظة خارج التطبيق.
+              </p>
+            ) : recoveryDownloadStarted ? (
+              <label className="check-field danger-note">
+                <input
+                  type="checkbox"
+                  checked={false}
+                  disabled={busy}
+                  onChange={(event) => {
+                    if (!event.currentTarget.checked) return;
+                    setRecoveryDownloaded(true);
+                    setStatus(
+                      "سُجل تأكيدك اليدوي بأن حزمة الاستعادة محفوظة؛ احتفظ بها حتى اكتمال التحقق بعد الإقلاع.",
+                    );
+                  }}
+                />
+                <span>
+                  أؤكد أن ملف حزمة الاستعادة حُفظ ويمكنني الوصول إليه دون هذا
+                  التطبيق
+                </span>
+              </label>
             ) : (
               <p className="danger-note">
-                الكتابة مقفلة حتى تنزيل حزمة الاستعادة.
+                الكتابة مقفلة حتى بدء التنزيل ثم تأكيدك اليدوي أن حزمة الاستعادة
+                حُفظت.
               </p>
             )}
 
-            {operationNeedsTargetConfirmation ? (
+            {operationNeedsTargetConfirmation && checkpoint === null ? (
               <label className="manual-confirm">
                 <span>تأكيد Target</span>
                 <input
                   type="text"
                   value={manualTargetConfirmation}
                   placeholder={selectedTarget?.targetKey ?? ""}
-                  disabled={busy}
+                  disabled={
+                    busy || !allowDestructiveWrites || !hardwareCleanupReady
+                  }
                   onChange={(event) =>
                     setManualTargetConfirmation(event.currentTarget.value)
                   }
@@ -1763,7 +2513,9 @@ export function ExpressLrsParityWorkbench() {
                 <input
                   type="checkbox"
                   checked={powerAcknowledged}
-                  disabled={busy}
+                  disabled={
+                    busy || !allowDestructiveWrites || !hardwareCleanupReady
+                  }
                   onChange={(event) =>
                     setPowerAcknowledged(event.currentTarget.checked)
                   }
@@ -1775,7 +2527,9 @@ export function ExpressLrsParityWorkbench() {
                   <input
                     type="checkbox"
                     checked={antennaAcknowledged}
-                    disabled={busy}
+                    disabled={
+                      busy || !allowDestructiveWrites || !hardwareCleanupReady
+                    }
                     onChange={(event) =>
                       setAntennaAcknowledged(event.currentTarget.checked)
                     }
@@ -1796,7 +2550,7 @@ export function ExpressLrsParityWorkbench() {
                 : method === "download"
                   ? "تنزيل الحزمة"
                   : method === "stlink"
-                    ? "بدء ST-Link / STM32 DFU"
+                    ? "بدء STM32 DFU"
                     : "بدء التفليش الحقيقي"}
             </button>
           </>
@@ -1814,7 +2568,10 @@ export function ExpressLrsParityWorkbench() {
         )}
       </section>
 
-      <PhysicalAcceptancePanel context={physicalAcceptanceContext} />
+      <PhysicalAcceptancePanel
+        context={physicalAcceptanceContext}
+        deviceChangesEnabled={allowDestructiveWrites}
+      />
 
       <footer className="parity-footer">
         <span>المصدر: ExpressLRS الرسمي</span>

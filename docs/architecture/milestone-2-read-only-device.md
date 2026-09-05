@@ -120,12 +120,15 @@ reconnect combinations closed.
 ## Browser deployment boundary
 
 `apps/web/public/_headers` is the reviewed production header artifact for
-compatible static hosts. Its CSP allows connections only to the application
-origin and the three fixed ExpressLRS origins; scripts and styles are same-origin
-only, while `base-uri`, `object-src`, and `frame-ancestors` are `none`. The build
-verifies that the copied artifact is byte-for-byte identical to the reviewed
-source. Hosts that do not implement `_headers` must translate the same policy
-to their native configuration and verify the response header before release.
+compatible static hosts. At this read-only checkpoint, its CSP allowed
+connections only to the application origin and the three fixed ExpressLRS
+origins. The later M2 physical-candidate amendment in ADR-0011 adds the official
+ExpressLRS Web Flasher mirror; the current policy and checker must be reviewed
+together. Scripts and styles remain same-origin only, while `base-uri`,
+`object-src`, and `frame-ancestors` are `none`. The build verifies that the
+copied artifact is byte-for-byte identical to the reviewed source. Hosts that
+do not implement `_headers` must translate the same policy to their native
+configuration and verify the response header before release.
 
 CSP permission does not override browser mixed-content, CORS, Local Network
 Access, mDNS, or captive-portal rules. Those remain Hardware/Browser gates.

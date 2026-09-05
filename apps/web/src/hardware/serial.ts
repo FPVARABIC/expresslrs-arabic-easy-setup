@@ -1,6 +1,7 @@
 import { CrsfStreamParser, type CrsfFrame } from "./crsf";
 
 export const EXPRESSLRS_CRSF_BAUD_RATE = 420_000 as const;
+const HARDWARE_SERIAL_CLEANUP_TIMEOUT_MS = 1_000;
 
 export interface HardwareSerialPortInfo {
   readonly usbVendorId: number | null;
@@ -62,7 +63,8 @@ export type HardwareSerialOpenFailure =
   | "CANCELLED"
   | "PERMISSION_DENIED"
   | "OPEN_FAILED"
-  | "STREAMS_UNAVAILABLE";
+  | "STREAMS_UNAVAILABLE"
+  | "CLEANUP_UNCONFIRMED";
 
 export type HardwareSerialOpenOutcome =
   | Readonly<{
@@ -86,6 +88,38 @@ function safeIdentifier(value: unknown): number | null {
     (value as number) <= 0xffff
     ? (value as number)
     : null;
+}
+
+function confirmHardwareSerialPortClosed(
+  port: HardwareSerialPort,
+): Promise<boolean> {
+  let closeTask: Promise<void>;
+  try {
+    closeTask = port.close();
+  } catch {
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(closed);
+    };
+    const timer = setTimeout(
+      () => finish(false),
+      HARDWARE_SERIAL_CLEANUP_TIMEOUT_MS,
+    );
+
+    // Keep both handlers attached if the deadline wins so a late browser
+    // settlement cannot become an unhandled rejection.
+    void closeTask.then(
+      () => finish(true),
+      () => finish(false),
+    );
+  });
 }
 
 export function readHardwareSerialPortInfo(
@@ -178,10 +212,8 @@ export async function requestAndOpenHardwareSerial(
   }
 
   if (port.readable == null || port.writable == null) {
-    try {
-      await port.close();
-    } catch {
-      // The more specific STREAMS_UNAVAILABLE outcome is retained.
+    if (!(await confirmHardwareSerialPortClosed(port))) {
+      return Object.freeze({ status: "CLEANUP_UNCONFIRMED" });
     }
     return Object.freeze({ status: "STREAMS_UNAVAILABLE" });
   }

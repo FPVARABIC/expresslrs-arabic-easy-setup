@@ -1,13 +1,49 @@
-# Milestone 2A Read-only Candidate — Acceptance Evidence
+# Milestone 2 Integration Candidate — Acceptance Evidence
 
-Status: **Build-tested implementation candidate with green official CI; owner
-acceptance and Hardware validation pending**.
+Status: **Final local software suites passed; Draft PR CI, owner acceptance,
+and Hardware validation pending**.
 
-This evidence covers only the first real Browser read path. It does not close
+## Current integration checkpoint
+
+| Field | Value |
+| --- | --- |
+| Branch | `feat/m2-real-hardware-first-test` |
+| Draft PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — Draft, unmerged |
+| Date | `2026-09-04` |
+| Candidate SHA | Branch HEAD, injected and checked at build time; intentionally not hard-coded before the final commit |
+| Full local Vitest | 79 files passed + 2 skipped (81 total); 935 tests passed + 5 skipped (940 total) |
+| Focused sensitive suite | 17 files; 242 tests passed + 3 skipped |
+| Live official-source suite | 3 files; 31/31 tests passed |
+| Local software gate | `PASS` |
+| Draft PR CI | `PENDING POST-PUSH VERIFICATION` |
+| Hardware validation | **NONE** |
+| Public/default device-changing operations | **LOCKED** |
+| Deployment in this work | **NONE**; Draft PR events cannot trigger Pages publication |
+
+The current branch keeps read-only discovery and identity inspection independent
+from remote-catalog availability. Settings writes, Binding, Firmware flashing,
+Wi-Fi handoff, and recovery remain fail-closed in the public/default
+configuration. Their presence in software is not permission to exercise them on
+a real device.
+
+The correction set also replaces the earlier, nonexistent `lua.zip` acquisition
+path with the official ExpressLRS Web Flasher CORS mirror's direct Lua artifact
+and updates `fflate` from 0.8.2 to 0.8.3. The final local suites are recorded in
+the table above. A Pages build accepts only an exact 40-character lowercase
+candidate SHA and verifies that it is embedded in the artifact; the immutable
+value is supplied from the checked-out branch/CI SHA rather than pre-committed
+into this document.
+
+No new deployment is requested or authorized by this evidence record. Pull
+requests run read-only CI and a non-deployed Pages artifact check; the Pages
+deployment workflow has no PR trigger and is additionally restricted to
+`refs/heads/main`.
+
+The original evidence below covers only the first real Browser read path. It does not close
 the complete Milestone 2 hardware gate and does not authorize Binding,
 configuration, reboot, update, or Firmware write.
 
-## Candidate contract
+## Original Milestone 2A candidate contract
 
 ```text
 Explicit user action
@@ -30,9 +66,9 @@ The request uses `GET`, `mode: "cors"`, `cache: "no-store"`,
 and `Accept: application/json`. The provider offers no arbitrary URL, subnet
 scan, fallback endpoint, or write command.
 
-## Automated evidence
+## Historical automated evidence for the original read-only candidate
 
-| Gate | Candidate evidence | Local status |
+| Gate | Candidate evidence | Historical local status |
 | --- | --- | --- |
 | No request before user intent | Web test asserts `fetch` is untouched on initial render | Passed |
 | Exact request boundary | Provider/Web tests assert fixed origins, literal `/config`, method, credentials, redirect, cache, and referrer policy | Passed |
@@ -55,9 +91,9 @@ scan, fallback endpoint, or write command.
 The 360/1440 Web tests are component-shell smoke checks under jsdom. They do
 not execute a real layout engine and are not responsive-browser evidence.
 
-## Local quality evidence
+## Historical local quality evidence
 
-Executed from the candidate tree on 2026-08-20:
+Executed from the original candidate tree on 2026-08-20:
 
 ```text
 Prettier format check: passed
@@ -80,12 +116,16 @@ high-severity advisory audit found no known vulnerability. Candidate commit
 `79eb37e7298b0e244f0bedf368e84dc1c684c5c4` passed the complete official gate
 in [GitHub Actions run #8](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409948903)
 and the PR-triggered [run #9](https://github.com/melyanneahmed-rgb/expresslrs-arabic-easy-setup/actions/runs/32409978636).
-These runs are evidence only for that immutable candidate; later source changes
-require their own run.
+These runs are evidence only for that immutable historical candidate. They are
+not green-CI evidence for Draft PR #7; the final pushed branch SHA requires its
+own official run.
 
-## Validation labels and limits
+## Current validation labels and limits
 
-- Achieved locally: `CODE_REVIEWED`, `BUILD_TESTED` for the Web/Core candidate.
+- Historical achievement: `CODE_REVIEWED`, `BUILD_TESTED` for the immutable original Web/Core candidate.
+- Current post-change software result: `BUILD_TESTED` locally with the full,
+  focused-sensitive, and live-source totals recorded above.
+- Draft PR #7 official CI: `PENDING POST-PUSH VERIFICATION`.
 - Hardware validation: **NONE**.
 - Gate state: `HARDWARE_VALIDATION_PENDING`.
 - Not claimed: supported device/Target, authenticated identity,
