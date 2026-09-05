@@ -1,0 +1,54 @@
+.limited-offline-notice,
+.application-update-notice {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 0.55rem 1rem;
+  color: #10231e;
+  border-bottom: 1px solid rgb(16 35 30 / 18%);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.limited-offline-notice {
+  background: #f0dea0;
+}
+
+.application-update-notice {
+  background: #bcebdc;
+}
+
+.limited-offline-notice strong,
+.application-update-notice strong {
+  white-space: nowrap;
+}
+
+.app-error-fallback {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  gap: 0.75rem;
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.app-error-fallback h1,
+.app-error-fallback p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .limited-offline-notice,
+  .application-update-notice {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.15rem;
+    text-align: start;
+  }
+}

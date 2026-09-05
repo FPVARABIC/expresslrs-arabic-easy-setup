@@ -1,0 +1,25 @@
+# Local research checkouts and generated evidence
+.research-worktrees/
+artifacts/
+benchmarks/raw/
+
+# JavaScript dependencies and generated output
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+dependency-licenses.json
+*.tsbuildinfo
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key

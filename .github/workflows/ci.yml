@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Quality, license, and security gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Require committed dependency lockfile
+        run: test -f pnpm-lock.yaml
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Enforce repository and workflow hygiene
+        run: pnpm check:ci-hygiene
+
+      - name: Enforce physical acceptance package
+        run: pnpm check:physical-acceptance
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Run lint, typecheck, tests, and production build
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm check:boundaries
+          pnpm check:security-headers
+          pnpm check:pwa-safety
+          pnpm check:visual-theme
+          pnpm check:links
+          pnpm check:master-plan
+          pnpm test
+          pnpm build
+
+      - name: Build and verify the GitHub Pages artifact
+        env:
+          GITHUB_PAGES: "true"
+          PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+          VITE_BUILD_SHA: ${{ github.sha }}
+        run: |
+          pnpm --filter @elrs-easy/web build
+          pnpm check:pages-build
+
+      - name: Generate dependency license inventory
+        run: pnpm licenses:report
+
+      - name: Preserve dependency license inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-licenses-${{ github.run_attempt }}
+          path: dependency-licenses.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce dependency license policy
+        run: pnpm licenses:check
+
+      - name: Audit dependencies for moderate-or-higher advisories
+        run: pnpm security:audit

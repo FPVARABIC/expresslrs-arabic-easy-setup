@@ -1,0 +1,8 @@
+/*
+  Content-Security-Policy: default-src 'none'; base-uri 'none'; connect-src 'self' https://expresslrs.github.io http://10.0.0.1 http://elrs_rx.local http://elrs_tx.local; font-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; manifest-src 'self'; object-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Permissions-Policy: bluetooth=(), camera=(), geolocation=(), hid=(), local-network=(self), microphone=(), payment=(), serial=(self), usb=(self)

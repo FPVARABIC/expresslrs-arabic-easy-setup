@@ -1,0 +1,56 @@
+# Validation Levels
+
+| Label | Meaning |
+| --- | --- |
+| `CODE_REVIEWED` | Confirmed by reading pinned source and recording paths/symbols |
+| `BUILD_TESTED` | Reproducible build executed for named SHA/target/toolchain |
+| `BENCH_TESTED` | Repeatable non-flight bench procedure and results exist |
+| `HARDWARE_TESTED` | Named physical hardware and procedure produced results |
+| `FLIGHT_TESTED` | Controlled flight profile, build, configuration, logs, and stop conditions recorded |
+| `STABLE` | All release gates for the supported scope passed |
+
+وجود مستوى لا يعني المستويات الأعلى. Milestone 0 لا يرفع نتائج القراءة إلى Hardware validation.
+
+## Gate states are not validation levels
+
+`UNVALIDATED` describes evidence whose reliability has not been established on
+the required physical matrix. `HARDWARE_VALIDATION_PENDING` describes an open
+gate. Neither label is an achieved level and neither may be presented as
+`HARDWARE_TESTED`.
+
+For the M2A Local HTTP candidate, source review and automated build/tests can
+support `CODE_REVIEWED` and `BUILD_TESTED`. A successful `/config` read alone
+does not validate the reported Target, device family, browser, or Hardware.
+
+## Artifact evidence is also separated
+
+| Artifact label | Exact meaning |
+| --- | --- |
+| `COHERENCE_ONLY` | Descriptor and provenance have a safe shape and agree internally |
+| Digest `SYNTHETIC_ONLY` | Complete deterministic fixture bytes matched the Mock boundary; not cryptographic evidence |
+| Digest `CRYPTOGRAPHIC` | A reviewed platform digest adapter calculated SHA-256 over the copied bytes |
+| Signature `VALID_UNTRUSTED` | Ed25519 matched bounded canonical Manifest bytes using a caller-supplied Synthetic key; no root authorized that key |
+| Root `ROTATION_VERIFIED_UNTRUSTED` | One parsed Synthetic root advanced exactly `N → N+1`, and the incoming bytes met both caller-supplied old/new root thresholds; the old root was not admitted |
+| Root `FRESH_UNTRUSTED` | A parsed Synthetic root was inside its validity interval at one fixed time from a `SYNTHETIC_ONLY` clock |
+| Manifest `VERIFIED_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved the single-signature Manifest role and Ed25519 matched; the root itself was not admitted |
+| State `ADVANCED_UNPERSISTED` | A parser-created in-memory Synthetic rollback snapshot advanced monotonically after internally proven rotation/Manifest evidence; no durable write occurred |
+| Artifact `VERIFIED_SYNTHETIC_FIXTURE` | Bounded gzip fixture input and output matched separately named digests, and an exact Synthetic executable container carried the expected Target; the descriptor was unsigned and no writable bytes were returned |
+| Manifest `VERIFIED_DUAL_FORM_AGAINST_UNTRUSTED_ROOT` | A fresh parsed Synthetic root resolved an exact version-2 signature that names compressed and decompressed sizes and SHA-256 values; the root itself was not admitted |
+| Candidate `SYNTHETIC_CATALOG_CANDIDATE_EVIDENCE` | Internally branded dual-form Manifest/root, artifact-validation, and unpersisted rollback results all refer to the same Target, release, and bytes |
+| Distribution `VERIFIED_DISTRIBUTION_AGAINST_UNTRUSTED_ROOT` | The same fresh unadmitted Synthetic root resolved a separate exact statement naming the v2 artifact, source archive, and notice bundle URLs, sizes, and SHA-256 values |
+| Acquisition `VERIFIED_SYNTHETIC_ACQUISITION` | A Synthetic provider emitted the complete signed object through bounded chunks; Core required an unchanged exact-URL receipt, matched SHA-256, discarded its byte copies, and returned no writable bytes |
+| Source/notice `EXACT_BYTES_VERIFIED_CONTENTS_UNINSPECTED` | The exact signed bundle bytes were present; archive contents, build correspondence, notice syntax, and legal completeness were not established |
+| Distribution candidate `SYNTHETIC_DISTRIBUTION_CANDIDATE_EVIDENCE` | Internally branded catalog, distribution-root, Firmware acquisition, source acquisition, and notice acquisition evidence all identify one parsed root, Target, release, and artifact |
+| Source inventory `VERIFIED_SYNTHETIC_SOURCE_INVENTORY` | The exact signed gzip passed Synthetic CRC32/ISIZE output linkage; its restricted USTAR entries exactly matched one canonical inventory, and all listed file sizes/SHA-256 values matched |
+| Build inputs `EXACT_DECLARED_INPUTS_LINKED_TO_ARCHIVE_ENTRIES` | The six required Synthetic input IDs each point to one exact hashed archive entry; truth, sufficiency, execution, and reproducibility remain unproven |
+| Notices `VERIFIED_SYNTHETIC_NOTICE_SCHEMA` | Exact signed canonical notice JSON names the same Target/release/artifact/source and links all and only declared license entries by path and SHA-256; legal completeness is unproven |
+| Source review `SYNTHETIC_FIRMWARE_SOURCE_REVIEW_EVIDENCE` | Internally branded distribution candidate, source inspection, and notice inspection identify one distribution/root and exact three object digests; no bytes, Catalog admission, or writer path is produced |
+| Build recipe `VERIFIED_SYNTHETIC_FIRMWARE_BUILD_RECIPE` | The exact inventoried `build-configuration` bytes form one canonical recipe linking the other five inputs and signed output identity; declaration truth and build execution remain unproven |
+| Build comparison `SYNTHETIC_FIRMWARE_BUILD_OUTPUT_COMPARISON_EVIDENCE` | A separate Synthetic provider emitted one bounded output and exact receipt; Core independently matched its SHA-256 to the signed fixture artifact, but no real toolchain or second independent builder ran |
+| Catalog `NOT_ADMITTED_UNTRUSTED_SYNTHETIC` | Candidate evidence exists for software tests only; no Target Catalog record or release authority was created |
+| Write `BLOCKED_SYNTHETIC_FIXTURE` | The evidence is structurally unable to authorize or feed a current Firmware writer |
+| `UNVERIFIED_NO_TRUST_ROOT` | No admitted key established who produced or authorized the matching bytes |
+
+A cryptographic digest proves integrity against the expected digest, not the
+authenticity of that expectation. None of these labels implies
+`HARDWARE_TESTED`, and no current label admits a real writer.
