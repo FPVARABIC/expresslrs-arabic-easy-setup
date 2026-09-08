@@ -38,6 +38,13 @@ export default defineConfig({
           include: ["apps/web/**/*.{test,spec}.{ts,tsx}"],
           exclude: [WEB_HARDWARE_TESTS, ...GENERATED_TEST_PATHS],
           setupFiles: ["./vitest.setup.ts"],
+          // The heaviest journeys here drive more than a dozen userEvent
+          // interactions through jsdom. Those measured close to the 5s default,
+          // so the suite failed on timing alone under parallel load while every
+          // assertion still held. This raises the time budget only; no
+          // assertion, gate, or skip is involved. Node projects keep the tight
+          // default.
+          testTimeout: 30_000,
         },
       },
     ],

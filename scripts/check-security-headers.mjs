@@ -8,12 +8,15 @@ const repositoryRoot = path.resolve(
 );
 const sourcePath = path.join(repositoryRoot, "apps/web/public/_headers");
 const builtPath = path.join(repositoryRoot, "apps/web/dist/_headers");
+// `http://elrs_rx.local` and `http://elrs_tx.local` were removed: an underscore
+// is not legal in a CSP host-source, so Chromium rejected both with "contains
+// an invalid source ... It will be ignored" on every page load. They granted
+// nothing and only produced console errors. Removing them narrows the declared
+// policy to what a browser actually enforces.
 const expectedConnectSources = new Set([
   "'self'",
   "https://expresslrs.github.io",
   "http://10.0.0.1",
-  "http://elrs_rx.local",
-  "http://elrs_tx.local",
 ]);
 const requiredHeaders = new Map([
   ["referrer-policy", "no-referrer"],

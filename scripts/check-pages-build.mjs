@@ -13,7 +13,7 @@ const expectedBuildSha = process.env.VITE_BUILD_SHA;
 const expectedPolicy = [
   "default-src 'none'",
   "base-uri 'none'",
-  "connect-src 'self' https://expresslrs.github.io http://10.0.0.1 http://elrs_rx.local http://elrs_tx.local",
+  "connect-src 'self' https://expresslrs.github.io http://10.0.0.1",
   "font-src 'self'",
   "form-action 'none'",
   "img-src 'self' data:",
