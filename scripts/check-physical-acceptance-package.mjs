@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -109,6 +109,37 @@ if (
 }
 if (!packageJson.includes('"check:physical-acceptance"')) {
   failures.push("package.json does not expose the permanent acceptance gate");
+}
+
+// Defence in depth for the production write lock. The lock is a default-false
+// `allowDestructiveWrites` prop on the canonical workbench, so checking
+// main.tsx alone is not enough: any other production module could wrap the
+// workbench and grant device-write authority without main.tsx ever naming the
+// prop. Only the workbench itself and test files may reference it.
+const writeLockOwners = new Set([
+  "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
+]);
+
+async function* walkTypeScriptSources(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const child = path.join(directory, entry.name);
+    if (entry.isDirectory()) yield* walkTypeScriptSources(child);
+    else if (/\.tsx?$/u.test(entry.name)) yield child;
+  }
+}
+
+for await (const file of walkTypeScriptSources(
+  path.join(root, "apps/web/src"),
+)) {
+  const relative = path.relative(root, file).split(path.sep).join("/");
+  if (/\.(test|spec)\.tsx?$/u.test(relative)) continue;
+  if (writeLockOwners.has(relative)) continue;
+  const source = await readFile(file, "utf8");
+  if (source.includes("allowDestructiveWrites")) {
+    failures.push(
+      `only the canonical workbench may grant device-write authority: ${relative}`,
+    );
+  }
 }
 
 if (failures.length > 0) {

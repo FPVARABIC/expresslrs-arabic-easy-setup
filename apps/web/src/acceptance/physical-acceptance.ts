@@ -419,16 +419,49 @@ export function sanitizeAcceptanceText(
     .slice(0, maximumLength);
 }
 
+/**
+ * Latin secret labels. Word separators are accepted as space, underscore, or
+ * hyphen so `bind phrase`, `bind-phrase`, and `binding_phrase` are all covered.
+ */
+const LATIN_SECRET_LABEL =
+  "password|passphrase|wifi[\\s_-]*password|ssid|binding[\\s_-]*phrase|bind[\\s_-]*phrase|uid|token|secret";
+
+/**
+ * Arabic secret labels. This is an Arabic-first application, so operators write
+ * acceptance notes in Arabic and the exported evidence must redact those labels
+ * too. Arabic letters are not `\w`, so `\b` cannot be used around them.
+ */
+const ARABIC_SECRET_LABEL =
+  "كلمة\\s+(?:المرور|السر)|عبارة\\s+(?:الربط|ربط)|اسم\\s+الشبكة|الرقم\\s+السري|الرمز\\s+السري";
+
 export function redactSensitiveAcceptanceText(value: unknown): string {
-  return sanitizeAcceptanceText(value, 20_000)
-    .replace(
-      /\b(password|passphrase|wifi\s*password|ssid|binding\s*phrase|bind\s*phrase|uid|token|secret)\b\s*[:=]\s*([^\s,;]+)/giu,
-      "$1=[REDACTED]",
-    )
-    .replace(
-      /\b(password|passphrase|ssid|binding\s*phrase|bind\s*phrase|uid|token|secret)\b\s+([^\n]{1,120})/giu,
-      "$1 [REDACTED]",
-    );
+  return (
+    sanitizeAcceptanceText(value, 20_000)
+      // A binding UID is written as an octet list. Redact every octet, not just
+      // the first one before the separating comma.
+      .replace(
+        /\b(uid)\b[ \t]*[:=][ \t]*\[?[ \t]*\d{1,3}(?:[ \t]*[,،][ \t]*\d{1,3})*[ \t]*\]?/giu,
+        "$1=[REDACTED]",
+      )
+      .replace(
+        new RegExp(
+          `\\b(${LATIN_SECRET_LABEL})\\b\\s*[:=]\\s*([^\\s,;]+)`,
+          "giu",
+        ),
+        "$1=[REDACTED]",
+      )
+      .replace(
+        new RegExp(`\\b(${LATIN_SECRET_LABEL})\\b\\s+([^\\n]{1,120})`, "giu"),
+        "$1 [REDACTED]",
+      )
+      .replace(
+        new RegExp(
+          `(${ARABIC_SECRET_LABEL})\\s*[:=]?\\s*([^\\n]{1,120})`,
+          "gu",
+        ),
+        "$1 [REDACTED]",
+      )
+  );
 }
 
 function initialResult(): PhysicalAcceptanceStepResult {

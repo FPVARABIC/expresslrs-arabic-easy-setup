@@ -163,6 +163,55 @@ describe("physical acceptance model", () => {
     expect(redacted).toContain("result ok");
   });
 
+  it("redacts Arabic sensitive labels written by an Arabic-first operator", () => {
+    const redacted = redactSensitiveAcceptanceText(
+      [
+        "عبارة الربط: sirr-alrabt",
+        "كلمة المرور: hunter2",
+        "كلمة السر hunter3",
+        "اسم الشبكة: my-home-network",
+        "الرقم السري: 998877",
+        "النتيجة سليمة",
+      ].join("\n"),
+    );
+
+    expect(redacted).not.toContain("sirr-alrabt");
+    expect(redacted).not.toContain("hunter2");
+    expect(redacted).not.toContain("hunter3");
+    expect(redacted).not.toContain("my-home-network");
+    expect(redacted).not.toContain("998877");
+    expect(redacted).toContain("[REDACTED]");
+    expect(redacted).toContain("النتيجة سليمة");
+  });
+
+  it("redacts hyphen and underscore separated binding-phrase labels", () => {
+    const redacted = redactSensitiveAcceptanceText(
+      [
+        "bind-phrase: hyphen-secret",
+        "binding_phrase: underscore-secret",
+        "wifi-password: wifi-secret",
+        "result ok",
+      ].join("\n"),
+    );
+
+    expect(redacted).not.toContain("hyphen-secret");
+    expect(redacted).not.toContain("underscore-secret");
+    expect(redacted).not.toContain("wifi-secret");
+    expect(redacted).toContain("result ok");
+  });
+
+  it("redacts every octet of a comma-separated binding UID", () => {
+    const redacted = redactSensitiveAcceptanceText(
+      "uid: 12, 34, 56, 78, 90, 11\nresult ok",
+    );
+
+    for (const octet of ["12", "34", "56", "78", "90", "11"]) {
+      expect(redacted).not.toContain(octet);
+    }
+    expect(redacted).toContain("[REDACTED]");
+    expect(redacted).toContain("result ok");
+  });
+
   it("captures only bounded hardware evidence and rejects impossible USB IDs", () => {
     const value = capturePhysicalAcceptanceContext(
       session(),
