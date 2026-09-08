@@ -1,12 +1,21 @@
 # Pre-Hardware Software Readiness
 
+> **Superseded historical record.** This document describes the Milestone 1/5
+> software-readiness model, whose application entry point was `App.tsx` and the
+> `packages/*` Core. The shipped Milestone 2 entry point is
+> `ExpressLrsParityWorkbench`, and `packages/workflows`, `packages/device`,
+> `packages/compatibility`, and `packages/diagnostics` are no longer reachable
+> from the public build. The candidate SHA, branch, run numbers, and test counts
+> below belong to that earlier checkpoint and must not be quoted as current.
+> [STATUS.md](../../STATUS.md) is the canonical current state.
+
 ## Purpose
 
 This document defines the point at which the project has completed the software work that can be implemented and truthfully validated before reference TX/RX Hardware is introduced.
 
 `READY_FOR_HARDWARE_VALIDATION` does **not** mean Stable Release, Hardware support, real flashing approval, RF improvement, or production trust. It means every enumerated software-only construction gate is explicitly `PASS`; a `BLOCKED` software gate produces `EXTERNAL_GATES_BLOCKED`, while separate physical and owner evidence gates remain visible and cannot be invented by software.
 
-## Current reviewed candidate
+## Reviewed candidate at the time of this record (historical)
 
 - application candidate: `b05d8e257ff1f5afdde5e501b9493f5413b201e5`
 - branch: `feat/read-only-device-foundation`
