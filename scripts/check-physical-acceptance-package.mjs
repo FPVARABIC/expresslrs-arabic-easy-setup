@@ -99,13 +99,31 @@ if (!workbench.includes("physicalAcceptanceContext")) {
 if (!main.includes('import "./physical-acceptance.css";')) {
   failures.push("physical acceptance styles are absent from the entrypoint");
 }
+// The public entry point mounts the product shell, and the shell is the only
+// module allowed to mount the workbench. Both links are checked so the chain
+// from main.tsx to the workbench cannot acquire write authority anywhere.
+const shell = await readFile(
+  path.join(root, "apps/web/src/components/ProductShell.tsx"),
+  "utf8",
+);
 if (
-  !main.includes("<ExpressLrsParityWorkbench />") ||
+  !main.includes("<ProductShell />") ||
   main.includes("allowDestructiveWrites")
 ) {
   failures.push(
-    "the public entrypoint must mount the workbench with device-changing operations locked",
+    "the public entrypoint must mount the product shell with device-changing operations locked",
   );
+}
+if (
+  !shell.includes("<ExpressLrsParityWorkbench />") ||
+  shell.includes("allowDestructiveWrites")
+) {
+  failures.push(
+    "the product shell must mount the workbench with device-changing operations locked",
+  );
+}
+if (!shell.includes("<EasySetup")) {
+  failures.push("the product shell must mount Easy Mode");
 }
 if (!packageJson.includes('"check:physical-acceptance"')) {
   failures.push("package.json does not expose the permanent acceptance gate");

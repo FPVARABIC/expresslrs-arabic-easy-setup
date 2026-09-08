@@ -283,6 +283,59 @@ export const en = {
     "The device needs a recovery workflow before continuing.",
   "error.INTERNAL_ERROR": "An unexpected internal error occurred.",
   "debug.englishOnly": "English fallback verified",
+
+  "easy.title": "Set up ExpressLRS",
+  "easy.intro":
+    "Connect your transmitter or receiver over USB to read its identity. This preview only reads; it never changes your device.",
+  "easy.roleLabel": "Type of connected device",
+  "easy.roleTx": "Transmitter (TX)",
+  "easy.roleRx": "Receiver (RX)",
+  "easy.connect": "Identify my device",
+  "easy.connecting": "Reading the device…",
+  "easy.cancel": "Cancel",
+  "easy.identityHeading": "Your device",
+  "easy.fieldProduct": "Model",
+  "easy.fieldFirmware": "Firmware version",
+  "easy.fieldHardware": "Hardware version",
+  "easy.fieldRole": "Type",
+  "easy.confidence": "Identification confidence",
+  "easy.confidenceConfirmed": "Confirmed by the device itself",
+  "easy.confidenceUnconfirmed": "Not confirmed",
+  "easy.recheck": "Re-check the device",
+  "easy.rechecking": "Re-checking…",
+  "easy.recheckOk": "The same device answered again with the same identity.",
+  "easy.recheckChanged":
+    "The device that answered is not the one identified before. The session was closed for safety.",
+  "easy.disconnected":
+    "The device was disconnected. Reconnect it and identify again.",
+  "easy.disconnect": "Close the connection",
+  "easy.lockedHeading": "Not available yet",
+  "easy.lockedBinding": "Binding",
+  "easy.lockedSettings": "Changing settings",
+  "easy.lockedUpdate": "Firmware update",
+  "easy.lockedWhy":
+    "These stay locked in this preview until they are validated on real hardware. No build option unlocks them.",
+  "easy.noHardwareClaim":
+    "Nothing here is proof that a device was bound, configured, or flashed.",
+  "easy.advancedCta": "Open advanced mode",
+  "easy.advancedHint":
+    "Technical workbench: catalog, targets, firmware packaging, and diagnostics.",
+  "easy.easyCta": "Back to easy mode",
+  "easy.copyDetails": "Copy technical details",
+  "easy.copied": "Copied",
+  "easy.copyFailed": "Copy failed. Select the text manually.",
+  "easy.errorHeading": "Could not identify the device",
+  "easy.browserUnsupported":
+    "This browser cannot talk to USB devices. Use Chrome or Edge on a computer, over HTTPS.",
+  "easy.fail.CANCELLED": "You cancelled before the device answered.",
+  "easy.fail.TIMED_OUT": "The device did not answer in time.",
+  "easy.fail.INVALID_PARAMETER_TABLE":
+    "The device answered with data this preview cannot trust.",
+  "easy.fail.CLEANUP_UNCONFIRMED":
+    "The previous port could not be confirmed closed. Reload the page before trying again.",
+  "easy.fail.CONNECT_FAILED": "The device could not be opened.",
+  "easy.fail.UNKNOWN":
+    "The device could not be identified, so nothing is claimed about it.",
 } as const;
 
 export type MessageKey = keyof typeof en;

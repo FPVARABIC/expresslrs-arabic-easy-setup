@@ -26,4 +26,6 @@ ADRs تسجل `Context / Decision / Alternatives / Consequences`. لا يُعا�
 - ADR-0020: restricted Synthetic USTAR/gzip source inventory, exact declared build-input links, canonical notice schema, and branded source-review join — accepted as inspected, non-reproducible, non-admitted, non-writable evidence only.
 - ADR-0021: exact canonical Synthetic build recipe plus a bounded separate fixture-provider receipt and Core output hash comparison — accepted as single-provider, non-reproducible, non-admitted, non-writable evidence only.
 
+- ADR-0022: one product architecture around the real device layer — accepted; Easy and Advanced Modes share one session, identity, and write authority.
+
 Android platform strategy remains intentionally undecided until the real-device spike.

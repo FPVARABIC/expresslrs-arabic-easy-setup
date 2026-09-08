@@ -44,8 +44,23 @@ if (!existsSync(mainPath) || !existsSync(canonicalWorkbenchPath)) {
   fail("the canonical production entrypoint or workbench is missing");
 } else {
   const main = readFileSync(mainPath, "utf8");
-  if (!main.includes('from "./components/ExpressLrsParityWorkbench"')) {
-    fail("main.tsx does not import the canonical workbench");
+  const shellPath = "apps/web/src/components/ProductShell.tsx";
+  if (!main.includes('from "./components/ProductShell"')) {
+    fail("main.tsx does not import the canonical product shell");
+  }
+  if (!existsSync(shellPath)) {
+    fail(`${shellPath} is missing`);
+  } else {
+    const shell = readFileSync(shellPath, "utf8");
+    if (!shell.includes('from "./ExpressLrsParityWorkbench"')) {
+      fail("the product shell does not import the canonical workbench");
+    }
+    if (!shell.includes('from "./EasySetup"')) {
+      fail("the product shell does not import Easy Mode");
+    }
+    if (/WorkbenchV2|main-v2/u.test(shell)) {
+      fail("the product shell still references a V2-only entrypoint");
+    }
   }
   if (/WorkbenchV2|main-v2/u.test(main)) {
     fail("main.tsx still references a V2-only entrypoint");
@@ -59,6 +74,9 @@ if (!existsSync(canonicalCiPath)) {
   const canonicalCi = readFileSync(canonicalCiPath, "utf8");
   if (!/^\s*run:\s*pnpm check:physical-acceptance\s*$/mu.test(canonicalCi)) {
     fail("ci.yml does not enforce the physical acceptance package gate");
+  }
+  if (!/^\s*run:\s*pnpm check:read-only-build\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce the public read-only build boundary");
   }
   if (!canonicalCi.includes("VITE_BUILD_SHA: ${{ github.sha }}")) {
     fail("ci.yml does not bind the Pages artifact to github.sha");

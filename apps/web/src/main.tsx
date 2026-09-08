@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { defaultLocale, getDirection } from "@elrs-easy/i18n";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
-import { ExpressLrsParityWorkbench } from "./components/ExpressLrsParityWorkbench";
+import { ProductShell } from "./components/ProductShell";
 import { ApplicationUpdateNotice } from "./pwa/ApplicationUpdateNotice";
 import { NetworkModeNotice } from "./pwa/NetworkModeNotice";
 import "./styles.css";
@@ -12,6 +12,7 @@ import "./reference-theme.css";
 import "./connection-hub.css";
 import "./parity-workbench.css";
 import "./physical-acceptance.css";
+import "./easy.css";
 
 document.documentElement.lang = defaultLocale;
 document.documentElement.dir = getDirection(defaultLocale);
@@ -29,7 +30,7 @@ createRoot(root).render(
     <NetworkModeNotice />
     <ApplicationUpdateNotice />
     <AppErrorBoundary>
-      <ExpressLrsParityWorkbench />
+      <ProductShell />
     </AppErrorBoundary>
   </StrictMode>,
 );
