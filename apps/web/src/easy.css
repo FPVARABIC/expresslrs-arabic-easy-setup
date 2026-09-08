@@ -1,0 +1,208 @@
+.product-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--page);
+  color: var(--text);
+}
+
+.skip-link {
+  position: absolute;
+  inset-inline-start: -9999px;
+  top: 0;
+  padding: 0.5rem 1rem;
+  background: var(--surface-strong);
+  color: var(--text);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  inset-inline-start: 0;
+}
+
+.product-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.product-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.product-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.mode-switch,
+.language-switch {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.mode-switch button,
+.language-switch button {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mode-switch button[aria-pressed="true"],
+.language-switch button[aria-pressed="true"] {
+  border-color: var(--cyan);
+  color: var(--text);
+}
+
+.product-shell main {
+  flex: 1;
+  padding: 1rem;
+}
+
+.product-shell main:focus {
+  outline: none;
+}
+
+.product-footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.easy {
+  max-width: 46rem;
+  margin: 0 auto;
+}
+
+.easy h1 {
+  margin-top: 0;
+}
+
+.easy-intro,
+.easy-note {
+  color: var(--text-muted);
+}
+
+.easy-role {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+
+.easy-role-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-inline-end: 1rem;
+  cursor: pointer;
+}
+
+.easy-primary {
+  padding: 0.7rem 1.25rem;
+  border: 0;
+  border-radius: 8px;
+  background: var(--cyan);
+  color: var(--page);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.easy-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.easy-result {
+  margin: 1rem 0;
+}
+
+.easy-result:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 4px;
+}
+
+.easy-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0.5rem 0;
+}
+
+.easy-facts dt {
+  color: var(--text-muted);
+}
+
+.easy-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.easy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.easy-actions button,
+.easy-advanced {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.easy-error {
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.easy-error h2 {
+  margin-top: 0;
+  color: var(--danger);
+}
+
+.easy-locked {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  background: var(--surface);
+}
+
+.easy-locked h2 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.easy-locked ul {
+  margin: 0.5rem 0;
+  padding-inline-start: 1.25rem;
+  color: var(--text-muted);
+}
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .easy-facts {
+    grid-template-columns: 1fr;
+  }
+}

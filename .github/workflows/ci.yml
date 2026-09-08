@@ -49,6 +49,9 @@ jobs:
       - name: Enforce physical acceptance package
         run: pnpm check:physical-acceptance
 
+      - name: Enforce public read-only build boundary
+        run: pnpm check:read-only-build
+
       - name: Check formatting
         run: pnpm format:check
 

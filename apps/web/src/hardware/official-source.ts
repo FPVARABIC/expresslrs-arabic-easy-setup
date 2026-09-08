@@ -1,12 +1,52 @@
-export const OFFICIAL_EXPRESSLRS_ARTIFACT_BASES = Object.freeze([
+/**
+ * The only artifact origin a document may contact. The reviewed browser policy
+ * pins `connect-src` to `'self'`, this origin, and the three local device
+ * origins; both `scripts/check-pages-build.mjs` and
+ * `scripts/check-security-headers.mjs` enforce that list exactly.
+ */
+export const BROWSER_EXPRESSLRS_ARTIFACT_BASES = Object.freeze([
   "https://expresslrs.github.io/web-flasher/assets",
+] as const);
+
+/**
+ * Official Artifactory is a real mirror, but a document can never reach it:
+ * Chromium refuses the request against the deployed Pages policy with
+ * "Refused to connect ... because it violates the following Content Security
+ * Policy directive: connect-src ...". It is kept for Node callers (the
+ * network-gated live suites and tooling), where no document policy applies, so
+ * the redundancy survives where it demonstrably works instead of being
+ * advertised in a browser where it cannot.
+ */
+export const NODE_ONLY_EXPRESSLRS_ARTIFACT_BASES = Object.freeze([
   "https://artifactory.expresslrs.org/ExpressLRS",
+] as const);
+
+export const OFFICIAL_EXPRESSLRS_ARTIFACT_BASES = Object.freeze([
+  ...BROWSER_EXPRESSLRS_ARTIFACT_BASES,
+  ...NODE_ONLY_EXPRESSLRS_ARTIFACT_BASES,
 ] as const);
 
 import { isAbortRequested } from "./byte-utils";
 const ALLOWED_HOSTS = Object.freeze(
   new Set(["expresslrs.github.io", "artifactory.expresslrs.org"]),
 );
+
+/**
+ * A document is exactly the context in which a Content Security Policy applies,
+ * so the runtime capability is tested directly rather than inferred from a
+ * User-Agent string.
+ */
+function documentContext(): boolean {
+  return typeof (globalThis as { document?: unknown }).document !== "undefined";
+}
+
+export function officialExpressLrsArtifactBases(
+  browserContext: boolean = documentContext(),
+): readonly string[] {
+  return browserContext
+    ? BROWSER_EXPRESSLRS_ARTIFACT_BASES
+    : OFFICIAL_EXPRESSLRS_ARTIFACT_BASES;
+}
 
 export class OfficialSourceError extends Error {
   public constructor(
@@ -48,11 +88,13 @@ export async function fetchOfficialExpressLrsResource(input: {
   readonly signal?: AbortSignal;
   readonly fetchImplementation?: typeof fetch;
   readonly accept?: string;
+  readonly browserContext?: boolean;
 }): Promise<Response> {
   const path = safeRelativePath(input.path);
   const fetchImplementation = input.fetchImplementation ?? fetch;
   const failures: string[] = [];
-  for (const base of OFFICIAL_EXPRESSLRS_ARTIFACT_BASES) {
+  const bases = officialExpressLrsArtifactBases(input.browserContext);
+  for (const base of bases) {
     if (isAbortRequested(input.signal)) {
       throw new DOMException(
         "Official artifact request was cancelled",
@@ -86,10 +128,17 @@ export async function fetchOfficialExpressLrsResource(input: {
       );
     }
   }
+  // Name only the sources that were actually contacted. Claiming that "all"
+  // mirrors failed while a document silently never contacted the Artifactory
+  // mirror would misdescribe the failure to the operator.
+  const scope =
+    bases.length === 1
+      ? "The only browser-reachable official ExpressLRS artifact source failed"
+      : "All official ExpressLRS artifact sources failed";
   throw new OfficialSourceError(
     failures.some((failure) => /HTTP 404\b/u.test(failure))
       ? "NOT_FOUND"
       : "NETWORK",
-    `All official ExpressLRS artifact sources failed: ${failures.join(" | ")}`,
+    `${scope}: ${failures.join(" | ")}`,
   );
 }

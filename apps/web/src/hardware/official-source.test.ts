@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fetchOfficialExpressLrsResource,
   isTrustedOfficialExpressLrsUrl,
+  officialExpressLrsArtifactBases,
 } from "./official-source";
 
 describe("official ExpressLRS artifact source", () => {
@@ -23,6 +24,53 @@ describe("official ExpressLRS artifact source", () => {
     expect(
       isTrustedOfficialExpressLrsUrl("http://expresslrs.github.io/a"),
     ).toBe(false);
+  });
+
+  it("never contacts the Artifactory mirror from a document context", async () => {
+    // Chromium refuses that origin against the deployed Pages CSP, so a
+    // document must not advertise a fallback it can never use.
+    const requested: string[] = [];
+    const fetchImplementation = vi.fn(async (url: string | URL | Request) => {
+      requested.push(String(url));
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      fetchOfficialExpressLrsResource({
+        path: "index.json",
+        fetchImplementation,
+        browserContext: true,
+      }),
+    ).rejects.toMatchObject({ code: "NETWORK" });
+
+    expect(requested).toEqual([
+      "https://expresslrs.github.io/web-flasher/assets/index.json",
+    ]);
+    expect(requested.some((url) => url.includes("artifactory"))).toBe(false);
+  });
+
+  it("describes a browser failure without claiming every mirror was tried", async () => {
+    const fetchImplementation = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      fetchOfficialExpressLrsResource({
+        path: "index.json",
+        fetchImplementation,
+        browserContext: true,
+      }),
+    ).rejects.toThrow(/only browser-reachable/u);
+  });
+
+  it("keeps both mirrors for Node callers where no document policy applies", () => {
+    expect(officialExpressLrsArtifactBases(false)).toEqual([
+      "https://expresslrs.github.io/web-flasher/assets",
+      "https://artifactory.expresslrs.org/ExpressLRS",
+    ]);
+    expect(officialExpressLrsArtifactBases(true)).toEqual([
+      "https://expresslrs.github.io/web-flasher/assets",
+    ]);
   });
 
   it("falls back from the Pages mirror to official Artifactory", async () => {

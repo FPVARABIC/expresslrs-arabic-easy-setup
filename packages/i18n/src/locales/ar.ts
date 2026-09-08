@@ -275,4 +275,55 @@ export const ar = {
   "error.INVALID_STATE_TRANSITION": "دخلت العملية في حالة داخلية غير صالحة.",
   "error.RECOVERY_REQUIRED": "يحتاج الجهاز إلى مسار استعادة قبل المتابعة.",
   "error.INTERNAL_ERROR": "حدث خطأ داخلي غير متوقع.",
+
+  "easy.title": "إعداد ExpressLRS",
+  "easy.intro":
+    "وصّل جهاز الإرسال أو الاستقبال عبر USB لقراءة هويته. هذه المعاينة تقرأ فقط ولا تغيّر جهازك.",
+  "easy.roleLabel": "نوع الجهاز المتصل",
+  "easy.roleTx": "جهاز إرسال (TX)",
+  "easy.roleRx": "جهاز استقبال (RX)",
+  "easy.connect": "تعرّف على جهازي",
+  "easy.connecting": "جارٍ قراءة الجهاز…",
+  "easy.cancel": "إلغاء",
+  "easy.identityHeading": "جهازك",
+  "easy.fieldProduct": "الموديل",
+  "easy.fieldFirmware": "إصدار Firmware",
+  "easy.fieldHardware": "إصدار Hardware",
+  "easy.fieldRole": "النوع",
+  "easy.confidence": "درجة تأكيد الهوية",
+  "easy.confidenceConfirmed": "مؤكدة من الجهاز نفسه",
+  "easy.confidenceUnconfirmed": "غير مؤكدة",
+  "easy.recheck": "أعد فحص الجهاز",
+  "easy.rechecking": "جارٍ إعادة الفحص…",
+  "easy.recheckOk": "أجاب الجهاز نفسه مرة أخرى بالهوية نفسها.",
+  "easy.recheckChanged":
+    "الجهاز الذي أجاب ليس الجهاز الذي جرى تعريفه سابقًا. أُغلقت الجلسة للسلامة.",
+  "easy.disconnected": "فُصل الجهاز. أعد توصيله ثم أعد التعريف.",
+  "easy.disconnect": "إغلاق الاتصال",
+  "easy.lockedHeading": "غير متاح بعد",
+  "easy.lockedBinding": "الربط",
+  "easy.lockedSettings": "تغيير الإعدادات",
+  "easy.lockedUpdate": "تحديث Firmware",
+  "easy.lockedWhy":
+    "تبقى هذه العمليات مقفلة في هذه المعاينة حتى تُختبر على عتاد حقيقي. لا يوجد خيار بناء يفتحها.",
+  "easy.noHardwareClaim":
+    "لا شيء هنا دليل على أن جهازًا جرى ربطه أو إعداده أو تحديثه.",
+  "easy.advancedCta": "افتح الوضع المتقدم",
+  "easy.advancedHint":
+    "منضدة تقنية: الكتالوج وTargets وتجهيز Firmware والتشخيص.",
+  "easy.easyCta": "العودة إلى الوضع السهل",
+  "easy.copyDetails": "انسخ التفاصيل التقنية",
+  "easy.copied": "تم النسخ",
+  "easy.copyFailed": "تعذر النسخ. حدّد النص يدويًا.",
+  "easy.errorHeading": "تعذر التعرف على الجهاز",
+  "easy.browserUnsupported":
+    "هذا المتصفح لا يستطيع التخاطب مع أجهزة USB. استخدم Chrome أو Edge على حاسوب وعبر HTTPS.",
+  "easy.fail.CANCELLED": "ألغيت العملية قبل أن يجيب الجهاز.",
+  "easy.fail.TIMED_OUT": "لم يجب الجهاز في الوقت المتاح.",
+  "easy.fail.INVALID_PARAMETER_TABLE":
+    "أجاب الجهاز ببيانات لا تستطيع هذه المعاينة الوثوق بها.",
+  "easy.fail.CLEANUP_UNCONFIRMED":
+    "تعذر إثبات إغلاق المنفذ السابق. أعد تحميل الصفحة قبل المحاولة مرة أخرى.",
+  "easy.fail.CONNECT_FAILED": "تعذر فتح الجهاز.",
+  "easy.fail.UNKNOWN": "تعذر التعرف على الجهاز، فلا يُدّعى عنه شيء.",
 } satisfies Partial<Record<MessageKey, string>>;
