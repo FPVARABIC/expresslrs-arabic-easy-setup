@@ -286,7 +286,7 @@ export const en = {
 
   "easy.title": "Set up ExpressLRS",
   "easy.intro":
-    "Connect your transmitter or receiver over USB to read its identity. This preview only reads; it never changes your device.",
+    "Choose what you want to do. The app walks you through it: connect the device, identify it, check what it supports, run the operation, then verify the result.",
   "easy.roleLabel": "Type of connected device",
   "easy.roleTx": "Transmitter (TX)",
   "easy.roleRx": "Receiver (RX)",
@@ -336,6 +336,73 @@ export const en = {
   "easy.fail.CONNECT_FAILED": "The device could not be opened.",
   "easy.fail.UNKNOWN":
     "The device could not be identified, so nothing is claimed about it.",
+  "easy.op.binding": "Bind transmitter and receiver",
+  "easy.op.bindingDescription":
+    "Put the device into bind mode and confirm the link on the other side.",
+  "easy.op.settings": "Essential settings",
+  "easy.op.settingsDescription":
+    "Read the current values from the device and change one safely.",
+  "easy.op.firmware": "Firmware update",
+  "easy.op.firmwareDescription":
+    "Check the installed version and update to an official release.",
+  "easy.op.start": "Start",
+  "easy.op.back": "Choose another operation",
+  "easy.step.connect": "Connect the device",
+  "easy.step.identify": "Identify it",
+  "easy.step.compatibility": "Check what it supports",
+  "easy.step.execute": "Run the operation",
+  "easy.step.verify": "Verify the result",
+  "easy.step.connectHint":
+    "Connect the device over USB, then choose its port in the browser prompt.",
+  "easy.run.binding": "Put the device into bind mode",
+  "easy.run.settings": "Apply the change",
+  "easy.run.firmware": "Continue in advanced mode",
+  "easy.run.busy": "Working…",
+  "easy.binding.sent":
+    "The device accepted the bind command. Bring the other side into bind range now and confirm below whether the link came up.",
+  "easy.binding.confirmQuestion": "Did the other side link",
+  "easy.binding.linked": "The link came up",
+  "easy.binding.notLinked": "No link yet",
+  "easy.binding.verified":
+    "You observed the link. Binding is recorded as confirmed by that observation, not by the command alone.",
+  "easy.binding.unverified":
+    "The command was accepted but no link was observed, so binding is not reported as successful. Check the other side and try again.",
+  "easy.settings.current": "Current value on the device",
+  "easy.settings.choose": "Setting",
+  "easy.settings.newValue": "New value",
+  "easy.settings.applied":
+    "The change was written and read back from the device with the same value.",
+  "easy.settings.mismatch":
+    "The value read back does not match what was requested, so the change is not reported as applied.",
+  "easy.firmware.handoff":
+    "Your device is identified and its Target is known. Advanced mode carries the firmware workflow: official catalog, artifact verification, recovery package, write, and reconnect verification.",
+  "easy.compat.noBindCommand":
+    "This device does not report a bind command over USB. Bind it from its own controller menu or its Wi-Fi page, then return here to verify.",
+  "easy.compat.noEssentialSettings":
+    "This device reported no writable essential settings over CRSF. Advanced mode lists every parameter it did report.",
+  "easy.compat.needIdentity":
+    "The device must be identified before a firmware update can be prepared.",
+  "easy.deny.NO_DEVICE_SESSION": "Connect the device first.",
+  "easy.deny.IDENTITY_UNCONFIRMED":
+    "The device identity is not confirmed. Identify it again.",
+  "easy.deny.PORT_CLEANUP_UNCONFIRMED":
+    "A previous port was not confirmed closed. Reload the page after disconnecting safely.",
+  "easy.deny.OPERATION_IN_PROGRESS": "Another operation is running.",
+  "easy.deny.RECOVERY_JOURNAL_UNREADABLE":
+    "The recovery journal could not be read, so no write is allowed without a known way back.",
+  "easy.deny.PENDING_RECOVERY_CHECKPOINT":
+    "An interrupted operation is waiting for recovery. Finish it first.",
+  "easy.deny.NO_PENDING_RECOVERY":
+    "There is no interrupted operation to recover.",
+  "easy.deny.TARGET_NOT_MATCHED": "Choose a Target that matches this device.",
+  "easy.deny.BAND_NOT_MATCHED": "The band does not match this device.",
+  "easy.deny.ARTIFACT_NOT_VERIFIED":
+    "Prepare and verify the firmware package first.",
+  "easy.deny.RECOVERY_NOT_AVAILABLE": "Download the recovery package first.",
+  "easy.deny.BENCH_NOT_ACKNOWLEDGED":
+    "Confirm stable power, and a fitted transmitter antenna, before writing.",
+  "easy.deny.USER_CONFIRMATION_MISSING":
+    "Confirm the operation before it runs.",
 } as const;
 
 export type MessageKey = keyof typeof en;

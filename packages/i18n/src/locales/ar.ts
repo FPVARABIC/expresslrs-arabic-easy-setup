@@ -278,7 +278,7 @@ export const ar = {
 
   "easy.title": "إعداد ExpressLRS",
   "easy.intro":
-    "وصّل جهاز الإرسال أو الاستقبال عبر USB لقراءة هويته. هذه المعاينة تقرأ فقط ولا تغيّر جهازك.",
+    "اختر العملية التي تريدها. سيرشدك التطبيق خطوة بخطوة: توصيل الجهاز، ثم التعرف عليه، ثم فحص ما يدعمه، ثم التنفيذ، ثم التحقق من النتيجة.",
   "easy.roleLabel": "نوع الجهاز المتصل",
   "easy.roleTx": "جهاز إرسال (TX)",
   "easy.roleRx": "جهاز استقبال (RX)",
@@ -326,4 +326,65 @@ export const ar = {
     "تعذر إثبات إغلاق المنفذ السابق. أعد تحميل الصفحة قبل المحاولة مرة أخرى.",
   "easy.fail.CONNECT_FAILED": "تعذر فتح الجهاز.",
   "easy.fail.UNKNOWN": "تعذر التعرف على الجهاز، فلا يُدّعى عنه شيء.",
+  "easy.op.binding": "ربط المرسل والمستقبل",
+  "easy.op.bindingDescription":
+    "أدخل الجهاز في وضع الربط ثم تأكّد من قيام الرابط في الطرف الآخر.",
+  "easy.op.settings": "الإعدادات الأساسية",
+  "easy.op.settingsDescription":
+    "اقرأ القيم الحالية من الجهاز وغيّر واحدة منها بأمان.",
+  "easy.op.firmware": "تحديث Firmware",
+  "easy.op.firmwareDescription": "افحص الإصدار المثبّت وحدّثه إلى إصدار رسمي.",
+  "easy.op.start": "ابدأ",
+  "easy.op.back": "اختر عملية أخرى",
+  "easy.step.connect": "وصّل الجهاز",
+  "easy.step.identify": "تعرّف عليه",
+  "easy.step.compatibility": "افحص ما يدعمه",
+  "easy.step.execute": "نفّذ العملية",
+  "easy.step.verify": "تحقّق من النتيجة",
+  "easy.step.connectHint":
+    "وصّل الجهاز عبر USB ثم اختر منفذه من نافذة المتصفح.",
+  "easy.run.binding": "أدخل الجهاز في وضع الربط",
+  "easy.run.settings": "طبّق التغيير",
+  "easy.run.firmware": "أكمل في الوضع المتقدم",
+  "easy.run.busy": "جارٍ التنفيذ…",
+  "easy.binding.sent":
+    "قبل الجهاز أمر الربط. قرّب الطرف الآخر الآن وأكّد أدناه ما إذا قام الرابط فعلًا.",
+  "easy.binding.confirmQuestion": "حالة الرابط في الطرف الآخر",
+  "easy.binding.linked": "قام الرابط",
+  "easy.binding.notLinked": "لم يقم الرابط بعد",
+  "easy.binding.verified":
+    "رصدت قيام الرابط. يُسجَّل الربط ناجحًا بناءً على هذه المشاهدة، لا على الأمر وحده.",
+  "easy.binding.unverified":
+    "قُبل الأمر لكن لم يُرصد رابط، فلا يُعلن الربط ناجحًا. افحص الطرف الآخر ثم أعد المحاولة.",
+  "easy.settings.current": "القيمة الحالية على الجهاز",
+  "easy.settings.choose": "الإعداد",
+  "easy.settings.newValue": "القيمة الجديدة",
+  "easy.settings.applied":
+    "كُتب التغيير وأُعيدت قراءته من الجهاز بالقيمة نفسها.",
+  "easy.settings.mismatch":
+    "القيمة المقروءة رجعيًا لا تطابق المطلوبة، فلا يُعلن التغيير مطبَّقًا.",
+  "easy.firmware.handoff":
+    "جهازك معرّف وTarget معروف. الوضع المتقدم يحمل مسار Firmware كاملًا: الكتالوج الرسمي والتحقق من الحزمة وحزمة الاستعادة والكتابة والتحقق بعد إعادة الاتصال.",
+  "easy.compat.noBindCommand":
+    "لا يعلن هذا الجهاز أمر ربط عبر USB. اربطه من قائمة جهاز التحكم أو صفحة Wi-Fi الخاصة به ثم عد هنا للتحقق.",
+  "easy.compat.noEssentialSettings":
+    "لم يعلن هذا الجهاز إعدادات أساسية قابلة للكتابة عبر CRSF. الوضع المتقدم يعرض كل معامل أعلنه.",
+  "easy.compat.needIdentity": "يجب تعريف الجهاز قبل تجهيز تحديث Firmware.",
+  "easy.deny.NO_DEVICE_SESSION": "وصّل الجهاز أولًا.",
+  "easy.deny.IDENTITY_UNCONFIRMED": "هوية الجهاز غير مؤكدة؛ أعد التعريف.",
+  "easy.deny.PORT_CLEANUP_UNCONFIRMED":
+    "إغلاق منفذ سابق غير مثبت؛ أعد تحميل الصفحة بعد الفصل بأمان.",
+  "easy.deny.OPERATION_IN_PROGRESS": "هناك عملية جارية.",
+  "easy.deny.RECOVERY_JOURNAL_UNREADABLE":
+    "تعذّر قراءة سجل الاستعادة، فلا كتابة بلا طريق رجوع معروف.",
+  "easy.deny.PENDING_RECOVERY_CHECKPOINT":
+    "توجد عملية متوقفة تنتظر الاستعادة؛ أكملها أولًا.",
+  "easy.deny.NO_PENDING_RECOVERY": "لا توجد عملية متوقفة لاستعادتها.",
+  "easy.deny.TARGET_NOT_MATCHED": "اختر Target مطابقًا لهذا الجهاز.",
+  "easy.deny.BAND_NOT_MATCHED": "النطاق لا يطابق هذا الجهاز.",
+  "easy.deny.ARTIFACT_NOT_VERIFIED": "جهّز حزمة Firmware وتحقق منها أولًا.",
+  "easy.deny.RECOVERY_NOT_AVAILABLE": "نزّل حزمة الاستعادة أولًا.",
+  "easy.deny.BENCH_NOT_ACKNOWLEDGED":
+    "أكّد ثبات الطاقة، وتركيب هوائي المرسل، قبل الكتابة.",
+  "easy.deny.USER_CONFIRMATION_MISSING": "أكّد العملية قبل تنفيذها.",
 } satisfies Partial<Record<MessageKey, string>>;

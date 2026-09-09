@@ -75,8 +75,8 @@ if (!existsSync(canonicalCiPath)) {
   if (!/^\s*run:\s*pnpm check:physical-acceptance\s*$/mu.test(canonicalCi)) {
     fail("ci.yml does not enforce the physical acceptance package gate");
   }
-  if (!/^\s*run:\s*pnpm check:read-only-build\s*$/mu.test(canonicalCi)) {
-    fail("ci.yml does not enforce the public read-only build boundary");
+  if (!/^\s*run:\s*pnpm check:write-path-integrity\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce device write-path integrity");
   }
   if (!canonicalCi.includes("VITE_BUILD_SHA: ${{ github.sha }}")) {
     fail("ci.yml does not bind the Pages artifact to github.sha");

@@ -6,14 +6,13 @@
 | Field | Value |
 | --- | --- |
 | Audit date | 2026-09-08 |
-| Phase | M2 candidate with the Arabic product entry point shipped; Hardware pending |
+| Phase | Hardware-validation beta: all operations real; physical validation pending |
 | Branch | `claude/expresslrs-hardware-validation-i073sx` (fast-forward of `feat/m2-real-hardware-first-test`) |
 | Draft PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — Draft, unmerged |
 | Candidate identity | Branch HEAD; injected at build time as the exact 40-character `VITE_BUILD_SHA` |
-| Technical workbench | `TECHNICAL_WORKBENCH_READY_FOR_READ_ONLY_HARDWARE_VALIDATION` |
-| Easy Mode product | `EASY_MODE_PRODUCT_INTEGRATION_IN_PROGRESS` — read-only identification shipped; guided Binding, settings, and update not built |
-| Hardware validation | **NONE** |
-| Public device-changing operations | **LOCKED** |
+| Software status | `FULLY_FUNCTIONAL_HARDWARE_VALIDATION_BETA` — every operation is built, reachable, and wired to a real service |
+| Hardware validation | **NONE** — nothing in this build has been proven on a physical device |
+| Public device-changing operations | **ENABLED, evidence-gated** — no project-phase lock; each write requires live device evidence and operator confirmation |
 | Performance / RF claims | **NONE** |
 | Stable Release claim | **NO** |
 
@@ -29,7 +28,7 @@ environment declared in `package.json` `engines`.
 | `pnpm check` | PASS (exit 0) — runs every gate below in one sequence |
 | `pnpm check:ci-hygiene` | PASS — `ci.yml`, `deploy-pages.yml`, one canonical entry chain |
 | `pnpm check:physical-acceptance` | PASS — 9 files, 19 recorder steps, JSON + Markdown export |
-| `pnpm check:read-only-build` | PASS — 42 modules reachable from `main.tsx`; no device-write module outside the reviewed boundary |
+| `pnpm check:write-path-integrity` | PASS — flashers reachable only through the authorized boundary; no phase lock; no handler-less control |
 | `pnpm format:check` | PASS |
 | `pnpm lint` | PASS (`--max-warnings=0`) |
 | `pnpm typecheck` | PASS |
@@ -37,7 +36,7 @@ environment declared in `package.json` `engines`.
 | `pnpm check:security-headers` | PASS — source and build output |
 | `pnpm check:pwa-safety` | PASS — source and build output |
 | `pnpm check:visual-theme` | PASS |
-| `pnpm check:links` | PASS — 125 local links across 74 Markdown files |
+| `pnpm check:links` | PASS — 127 local links across 75 Markdown files |
 | `pnpm check:master-plan` | PASS — headings 1–449 in order |
 | `pnpm test` | PASS — see the exact counts below |
 | `pnpm build` | PASS |
@@ -49,9 +48,9 @@ environment declared in `package.json` `engines`.
 | Project | Files | Tests |
 | --- | --- | --- |
 | `core` (`packages/**`) | 38 passed | 528 passed |
-| `web-hardware` (`apps/web/src/hardware/**`) | 25 passed + 2 skipped | 262 passed + 5 skipped |
-| `web-ui` (remaining `apps/web/**`) | 18 passed | 165 passed |
-| **Total** | **81 passed + 2 skipped (83)** | **955 passed + 5 skipped (960)** |
+| `web-hardware` (`apps/web/src/hardware/**`) | 26 passed + 2 skipped | 277 passed + 5 skipped |
+| `web-ui` (remaining `apps/web/**`) | 18 passed | 168 passed |
+| **Total** | **82 passed + 2 skipped (84)** | **973 passed + 5 skipped (978)** |
 
 The 5 skipped tests are the three `*.live.*` describe blocks that reach the
 official ExpressLRS mirrors. They are network-gated behind an explicit opt-in
@@ -100,35 +99,34 @@ Consequently the `realWritesEnabled: false` field in
 object. It is **not** the control that keeps the public build read-only, and it
 must not be cited as one.
 
-## The control that actually locks device writes
+## How device writes are authorized
 
-`ExpressLrsParityWorkbench` takes `allowDestructiveWrites`, which defaults to
-`false`. `ProductShell` mounts the workbench with no props and `main.tsx` mounts
-the shell with no props, so the public build has no device-write authority.
-Every settings write, Binding command, bootloader entry, flash, and recovery
-path is gated on it.
+There is no project-phase lock, and no feature is hidden or disabled because of
+where the project is. `apps/web/src/hardware/write-authority.ts` issues a
+single-use capability bound to one device session, one device fingerprint, and
+one operation, with a TTL. Consuming it invalidates it, so a repeated click
+cannot start a second write, and a device or session that changed between
+authorization and write cannot inherit the authorization.
 
-Enforcement, so the lock cannot regress silently:
+A refusal always names the missing condition — no session, unconfirmed
+identity, unconfirmed port cleanup, an operation already running, an unreadable
+recovery journal, a pending checkpoint, an unmatched Target or band, an
+unverified artifact, a missing recovery package, an unacknowledged bench, or a
+missing confirmation. "The feature is locked" is not among the possible
+answers.
 
-- `scripts/check-physical-acceptance-package.mjs` requires `main.tsx` to mount
-  exactly `<ProductShell />`, requires the shell to mount exactly
-  `<ExpressLrsParityWorkbench />` and Easy Mode, and fails if either names the
-  write prop. Both links in the chain are checked.
-- The same gate scans every non-test source under `apps/web/src` and fails if
-  any module other than the workbench that defines the prop names it. This
-  closes the wrapper bypass, where a new component could have been given write
-  authority without `main.tsx` changing.
-- `scripts/check-public-read-only-build.mjs` is a static boundary rather than a
-  runtime one. It walks the real import graph from `main.tsx` and fails if any
-  module performing a device write becomes reachable outside the single
-  reviewed boundary that gates on the lock. Verified by making Easy Mode import
-  the ESP flasher: the gate fails and prints the trail
-  `main.tsx -> ProductShell -> EasySetup -> esp-flasher`. The write modules and
-  their tests are kept for the future controlled-write laboratory entry point.
+Recovery is modelled as its own case: it requires the pending checkpoint and an
+operator-confirmed Target instead of a live identity, because it runs on a
+device that may no longer answer CRSF. Wi-Fi and download are handoffs rather
+than writes, so they require a known recovery path but not a live USB identity.
 
-There is no query parameter, `localStorage` key, environment variable, or build
-flag that enables writes. The only `import.meta.env` reads in shipped code are
-`VITE_BUILD_SHA` and `PROD`.
+`scripts/check-write-path-integrity.mjs` fails the build if a flasher becomes
+reachable outside the reviewed boundary, if that boundary stops requesting and
+consuming a capability, if a phase lock reappears anywhere under
+`apps/web/src`, or if any shipped button renders without a handler.
+
+See the [Feature Reality Matrix](docs/FEATURE_REALITY_MATRIX.md) for what each
+feature is, and what remains unproven on hardware.
 
 ## Success semantics
 
@@ -152,12 +150,14 @@ governs the released application.
 Measured in Chromium (Playwright) against the real production Pages build,
 served locally. Unit tests alone were not treated as sufficient.
 
-- Easy Mode is the landing view, Arabic with `dir="rtl"` and `lang="ar"`.
+- Easy Mode is the landing view, Arabic with `dir="rtl"` and `lang="ar"`, and
+  offers all three operations with none disabled when no device is attached.
+- Choosing an operation with nothing connected starts the five-step flow at the
+  connect step rather than presenting a disabled control.
+- No placeholder or locked-feature copy appears anywhere in the shipped UI.
 - English is a real switch in the shipped path: the heading becomes
   "Set up ExpressLRS" and direction becomes `ltr`.
 - The technical workbench opens only after an explicit mode choice.
-- No flashing, Binding, settings-write, recovery, or bootloader control is
-  offered in either mode in the public build — absent, not merely disabled.
 - The skip link is the first tab stop and targets `#product-main`.
 - No console or page errors at 1280px, at a Pixel 7 viewport, or at 320px, and
   no horizontal overflow at any of them.

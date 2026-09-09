@@ -561,12 +561,17 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(connect);
 
     expect(await screen.findByText("Bench TX 2.4GHz")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "حفظ مع قراءة رجعية" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "تشغيل الربط الحقيقي" }),
-    ).toBeDisabled();
+    // Binding is no longer withheld by a project-phase flag. It is withheld
+    // only by the operator acknowledgement, which is a real safety condition:
+    // disabled before the acknowledgement, enabled immediately after it.
+    const bind = screen.getByRole("button", { name: "تشغيل الربط الحقيقي" });
+    expect(bind).toBeDisabled();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "الطرف الآخر جاهز للربط، والطاقة والهوائيات في حالة آمنة",
+      }),
+    );
+    expect(bind).toBeEnabled();
     expect(hardware.connector).toHaveBeenCalledWith(
       expect.objectContaining({ role: "tx" }),
     );
@@ -784,12 +789,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
           : newerHardware.outcome;
       });
       mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
-      render(
-        <ExpressLrsParityWorkbench
-          allowDestructiveWrites
-          hardwareConnector={connector}
-        />,
-      );
+      render(<ExpressLrsParityWorkbench hardwareConnector={connector} />);
 
       fireEvent.click(
         screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
@@ -869,10 +869,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     const user = userEvent.setup();
     const hardware = connectedHardware();
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await user.click(
@@ -921,10 +918,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     });
     const user = userEvent.setup();
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await user.click(
@@ -970,10 +964,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     const hardware = connectedHardware({ productName: "Vendor TX Module" });
     mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await user.click(
@@ -1061,10 +1052,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     });
     mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await user.click(
@@ -1112,10 +1100,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     });
     mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await user.click(
@@ -1180,12 +1165,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
           : mismatchedHardware.outcome;
       });
       mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
-      render(
-        <ExpressLrsParityWorkbench
-          allowDestructiveWrites
-          hardwareConnector={connector}
-        />,
-      );
+      render(<ExpressLrsParityWorkbench hardwareConnector={connector} />);
 
       await user.click(
         screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
@@ -1245,12 +1225,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
         : reconnectedHardware.outcome;
     });
     mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
-    render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={connector}
-      />,
-    );
+    render(<ExpressLrsParityWorkbench hardwareConnector={connector} />);
 
     await user.click(
       screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
@@ -1316,12 +1291,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
         : reconnectedHardware.outcome;
     });
     mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
-    render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={connector}
-      />,
-    );
+    render(<ExpressLrsParityWorkbench hardwareConnector={connector} />);
 
     await user.click(
       screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
@@ -1415,10 +1385,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       });
       mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
       render(
-        <ExpressLrsParityWorkbench
-          allowDestructiveWrites
-          hardwareConnector={hardware.connector}
-        />,
+        <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
       );
 
       await user.click(
@@ -1477,10 +1444,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       new Error("simulated write failure"),
     );
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await user.click(
@@ -1532,10 +1496,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
     mocks.loadCheckpoint.mockResolvedValueOnce(recoveryCheckpoint);
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     await screen.findByText(/استعادة معلّقة/u);
@@ -1615,10 +1576,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     const hardware = connectedHardware();
     const user = userEvent.setup();
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     expect(
@@ -1673,10 +1631,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     const hardware = connectedHardware();
     const user = userEvent.setup();
     render(
-      <ExpressLrsParityWorkbench
-        allowDestructiveWrites
-        hardwareConnector={hardware.connector}
-      />,
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
     );
 
     const journalAlert = await screen.findByRole("alert");
