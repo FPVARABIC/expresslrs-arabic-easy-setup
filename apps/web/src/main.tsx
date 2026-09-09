@@ -9,7 +9,6 @@ import { NetworkModeNotice } from "./pwa/NetworkModeNotice";
 import "./styles.css";
 import "./pwa/pwa.css";
 import "./reference-theme.css";
-import "./connection-hub.css";
 import "./parity-workbench.css";
 import "./physical-acceptance.css";
 import "./easy.css";
