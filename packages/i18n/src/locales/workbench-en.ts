@@ -315,6 +315,8 @@ export const workbenchEn = {
     "A direct UART write needs a live device identity; connect the device first.",
   "wb.need.recoveryJournal":
     "The recovery journal could not be read. Reload the page so it can be verified.",
+  "wb.need.targetPack":
+    "{target} is newer than validated Target pack {pack} (ExpressLRS/targets {targetsSha}). Its hardware layout {layout} is not in the pack, and packaging reads exact layout bytes from the pack rather than from the live mirror, so that a recovery archive restores the same image it saved. The Target stays selectable; a new validated pack is needed to write to it.",
   "wb.need.clearCheckpoint":
     "An earlier operation left a recovery checkpoint open. Finish or clear that recovery first.",
   "wb.need.portCleanup":

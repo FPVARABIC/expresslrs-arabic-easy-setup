@@ -165,11 +165,26 @@ const espReceiver: OfficialTarget = {
   },
 };
 
+/**
+ * A Target whose hardware layout the frozen pack does not carry — the shape of
+ * a device the mirror published after the pack was validated.
+ */
+const unpackedReceiver: OfficialTarget = {
+  ...espReceiver,
+  id: "vendor/rx_2400/brand-new",
+  targetKey: "brand-new",
+  config: {
+    ...espReceiver.config,
+    productName: "Vendor Brand New RX",
+    layoutFile: "Vendor Brand New RX.json",
+  },
+};
+
 const catalog: OfficialCatalog = {
   source: "EXPRESSLRS_WEB_FLASHER_MIRROR",
   loadedAt: "2026-09-09T00:00:00.000Z",
   releases: [{ label: "4.1.0", revision: "release410", channel: "release" }],
-  targets: [espTransmitter, espReceiver],
+  targets: [espTransmitter, espReceiver, unpackedReceiver],
 };
 
 const preparedPackage: PreparedFirmwarePackage = {
@@ -951,6 +966,50 @@ describe("runtime availability, from the production entry point", () => {
       verification: "the same read-back and reconnect verification",
       onFailure: "the same recovery path, surfaced in the operator's language",
     });
+  });
+
+  it("a Target newer than the validated pack stays selectable and says exactly why", async () => {
+    mountAdvanced();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load the official catalog" }),
+    );
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "RX receiver" }));
+    await settle(4);
+
+    // It is a real device. Hiding it would leave an operator looking for an
+    // entry that is not there, which is worse than a refusal with a reason.
+    const select = targetSelect();
+    expect(Array.from(select.options).map((option) => option.value)).toContain(
+      unpackedReceiver.id,
+    );
+
+    fireEvent.change(select, { target: { value: unpackedReceiver.id } });
+    await settle(4);
+
+    // And it is refused for packaging, naming the pack and the missing layout
+    // rather than the build.
+    // Listed beside every operation it blocks — packaging, recovery and
+    // rx-as-tx all read layout bytes from the pack — so the operator sees it
+    // wherever they try.
+    const reasons = screen.getAllByText(
+      /is newer than validated Target pack .* Its hardware layout .* is not in the pack/u,
+    );
+    expect(reasons.length).toBeGreaterThan(0);
+    for (const reason of reasons) {
+      expect(reason.textContent).toContain("Vendor Brand New RX");
+      expect(reason.textContent).toContain("Vendor Brand New RX.json");
+      // The reason is a fact about this Target and this pack. It must never
+      // read as a project stage.
+      expect(reason.textContent).not.toMatch(
+        /this build|preview|coming soon|not yet supported/iu,
+      );
+    }
+
+    const build = screen.getByRole("button", {
+      name: "Build the official firmware",
+    });
+    expect(build).toBeDisabled();
   });
 
   it("android: the native bridge supplies the transport the browser does not have", async () => {

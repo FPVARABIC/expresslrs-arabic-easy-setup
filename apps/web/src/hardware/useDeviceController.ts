@@ -35,6 +35,7 @@ import {
   nativeBridgeNavigator,
   readNativeHardwareBridge,
 } from "./native-bridge";
+import { targetPackCovers, targetPackManifest } from "./target-pack";
 import { loadOfficialExpressLrsCatalog } from "./official-catalog";
 import {
   devicePathBlocker,
@@ -681,6 +682,29 @@ export function useDeviceController({
     selectedTarget !== null,
     message("wb.need.target"),
   ] as const;
+  /**
+   * Whether the frozen pack carries this Target's hardware layout.
+   *
+   * A Target the mirror has published since the pack was validated stays
+   * visible and selectable — it is a real device and hiding it would leave an
+   * operator staring at an absent entry. It cannot be *packaged*, because
+   * packaging reads exact layout bytes from the pack and never from the live
+   * mirror, and the reason says precisely that rather than blaming the build.
+   */
+  const packCoversTarget = [
+    selectedTarget === null ||
+      targetPackCovers(
+        // Upstream reads a receiver's layout directory even under rx-as-tx.
+        selectedTarget.role === "tx" ? "TX" : "RX",
+        selectedTarget.config.layoutFile,
+      ),
+    message("wb.need.targetPack", {
+      target: selectedTarget?.config.productName ?? "",
+      layout: selectedTarget?.config.layoutFile ?? "",
+      pack: String(targetPackManifest.packVersion),
+      targetsSha: targetPackManifest.targetsRepository.sha.slice(0, 12),
+    }),
+  ] as const;
 
   const bindingPreconditions = [
     notBusy,
@@ -724,6 +748,7 @@ export function useDeviceController({
       firmwareWrite: readinessFrom([
         notBusy,
         targetChosen,
+        packCoversTarget,
         portClean,
         journalReady,
         noPendingCheckpoint,
@@ -754,6 +779,7 @@ export function useDeviceController({
       recovery: readinessFrom([
         notBusy,
         targetChosen,
+        packCoversTarget,
         portClean,
         journalReady,
         [
@@ -764,6 +790,7 @@ export function useDeviceController({
       ]),
       rxAsTx: readinessFrom([
         targetChosen,
+        packCoversTarget,
         [
           rxAsTxSupport.supported,
           rxAsTxSupport.supported
