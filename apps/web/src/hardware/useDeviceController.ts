@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PhysicalAcceptanceContextSnapshot } from "../acceptance/physical-acceptance";
+import { readBackMatches } from "../easy/easyOperations";
 
+import {
+  BindingLinkObserver,
+  gradeBindingEvidence,
+  isMachineVerifiedBinding,
+  type BindingEvidence,
+  type BindingEvidenceLevel,
+} from "./binding-evidence";
 import { verifyObservedFirmwareBuild } from "./build-verification";
 import { copyToArrayBuffer } from "./byte-utils";
 import type { CrsfFrame, CrsfParameter } from "./crsf";
@@ -51,6 +59,7 @@ import {
   connectUserHardwareSession,
   type HardwareDriverConnector,
   type SafeSettingsBackup,
+  type UserHardwareConnectOutcome,
   type UserHardwareSession,
   type WritableCrsfParameter,
 } from "./userSession";
@@ -116,6 +125,49 @@ export const METHOD_LABELS: Readonly<Record<ExpressLrsFlashMethod, string>> =
     stlink: "STM32 DFU",
     download: "تنزيل فقط",
   });
+
+/** How long to watch link telemetry after a bind command before grading it. */
+const BIND_OBSERVATION_MS = 8_000;
+const LINK_POLL_INTERVAL_MS = 250;
+
+/**
+ * Waits for the observer to reach the link threshold, or for the budget to run
+ * out. Lives outside the hook so the clock is never read during render.
+ */
+async function waitForObservedLink(
+  observer: BindingLinkObserver,
+  budgetMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  while (!observer.linked && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, LINK_POLL_INTERVAL_MS));
+  }
+  return observer.linked;
+}
+
+/**
+ * What a destructive operation actually established. `verified` is true only
+ * when the device came back and its identity and version were read and
+ * matched; a write that merely finished is not a verified update.
+ */
+export interface DeviceOperationResult {
+  readonly verified: boolean;
+  readonly message: string;
+}
+
+/** What a bind attempt established, with the text that describes it. */
+export interface BindingOperationResult {
+  /** null when the attempt was refused before any command was sent. */
+  readonly evidence: BindingEvidence | null;
+  readonly message: string;
+}
+
+/** What a settings write established, with the text that describes it. */
+export interface SettingWriteResult {
+  /** null when the attempt was refused before any command was sent. */
+  readonly applied: boolean | null;
+  readonly message: string;
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -314,6 +366,9 @@ export function useDeviceController({
   const [recoveryJournalState, setRecoveryJournalState] = useState<
     "loading" | "ready" | "error"
   >("loading");
+  const [bindEvidence, setBindEvidence] = useState<BindingEvidenceLevel | null>(
+    null,
+  );
   const [hardwareCloseUncertain, setHardwareCloseUncertain] = useState(false);
   const [hardwareCloseInProgress, setHardwareCloseInProgress] = useState(false);
 
@@ -324,6 +379,7 @@ export function useDeviceController({
   const catalogAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
   const optionsRevisionRef = useRef(0);
+  const lastRefusalRef = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -656,7 +712,9 @@ export function useDeviceController({
         : {}),
     });
     if (!decision.granted) {
-      setStatus(writeDenialMessage(decision.reason));
+      const message = writeDenialMessage(decision.reason);
+      lastRefusalRef.current = message;
+      setStatus(message);
       return false;
     }
     const consumed = writeAuthorityRef.current.consume(decision.capability, {
@@ -665,12 +723,33 @@ export function useDeviceController({
       operation,
     });
     if (consumed === null) {
-      setStatus(
-        "تغيّرت جلسة الجهاز أو هويته بعد التصريح؛ أعد التعريف ثم حاول مجددًا.",
-      );
+      const message =
+        "تغيّرت جلسة الجهاز أو هويته بعد التصريح؛ أعد التعريف ثم حاول مجددًا.";
+      lastRefusalRef.current = message;
+      setStatus(message);
       return false;
     }
+    lastRefusalRef.current = null;
     return true;
+  }
+
+  /**
+   * Reports a refusal that stopped an operation before anything was written.
+   * The message names the missing condition, never a locked feature.
+   */
+  function refused(message: string): DeviceOperationResult {
+    setStatus(message);
+    return Object.freeze({ verified: false, message });
+  }
+
+  function refusedBinding(message: string): BindingOperationResult {
+    setStatus(message);
+    return Object.freeze({ evidence: null, message });
+  }
+
+  function refusedSetting(message: string): SettingWriteResult {
+    setStatus(message);
+    return Object.freeze({ applied: null, message });
   }
 
   function deviceWriteLockMessage(): string {
@@ -770,8 +849,19 @@ export function useDeviceController({
     }
   }
 
-  async function connectHardware(): Promise<void> {
-    if (!(await disconnectHardware())) return;
+  /**
+   * Opens one CRSF session and confirms the device's identity. The role may be
+   * overridden by the caller so a view can connect with the role the operator
+   * just chose without waiting for a state update to land. The outcome is
+   * returned so a view can present its own wording; null means a precondition
+   * stopped the attempt before any port was opened.
+   */
+  async function connectHardware(override?: {
+    readonly role?: ExpressLrsDeviceRole;
+  }): Promise<UserHardwareConnectOutcome | null> {
+    if (!(await disconnectHardware())) return null;
+    const requestedRole = override?.role ?? role;
+    if (requestedRole !== role) setRole(requestedRole);
     const controller = new AbortController();
     operationAbortRef.current = controller;
     setCancellable(true);
@@ -781,7 +871,7 @@ export function useDeviceController({
     );
     try {
       const outcome = await connectUserHardwareSession({
-        role,
+        role: requestedRole,
         ...(hardwareConnector === undefined
           ? {}
           : { connector: hardwareConnector }),
@@ -791,10 +881,10 @@ export function useDeviceController({
       if (outcome.status !== "CONNECTED") {
         if (outcome.status === "CLEANUP_UNCONFIRMED") {
           latchUnconfirmedHardwareClose(outcome.message);
-          return;
+          return outcome;
         }
         setStatus(`لم يكتمل التعرف: ${outcome.message}`);
-        return;
+        return outcome;
       }
       if (hardwareCloseUncertainRef.current) {
         try {
@@ -802,7 +892,7 @@ export function useDeviceController({
         } catch {
           // The existing latch already requires a page reload.
         }
-        return;
+        return null;
       }
       sessionRef.current = outcome.session;
       sessionCounterRef.current += 1;
@@ -850,8 +940,10 @@ export function useDeviceController({
           `تم إثبات CRSF وهوية الجهاز. مطابقة Target: ${match?.confidence ?? "NOT_FOUND"}؛ اختر Target الرسمي وأكّد مفتاحه قبل التفليش.`,
         );
       }
+      return outcome;
     } catch (error: unknown) {
       setStatus(`توقفت جلسة التعرف: ${safeMessage(error)}`);
+      return null;
     } finally {
       operationAbortRef.current = null;
       setCancellable(false);
@@ -859,17 +951,25 @@ export function useDeviceController({
     }
   }
 
-  async function writeSetting(): Promise<void> {
+  /**
+   * Writes one declared setting and reports whether the device read it back as
+   * requested. Returns null when the attempt was refused before any command was
+   * sent, so a view can distinguish a refusal from a failed write.
+   */
+  async function writeSetting(): Promise<SettingWriteResult> {
     const session = sessionRef.current;
-    if (session === null || selectedSetting === undefined) return;
+    if (session === null || selectedSetting === undefined) {
+      return refusedSetting("اختر إعدادًا معلنًا من الجهاز قبل الكتابة.");
+    }
     if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
-      setStatus(deviceWriteLockMessage());
-      return;
+      return refusedSetting(deviceWriteLockMessage());
     }
     const requestedValue = Number(settingDraft);
     if (!Number.isSafeInteger(requestedValue)) {
-      setStatus("أدخل قيمة صحيحة قبل حفظ الإعداد.");
-      return;
+      return refusedSetting("أدخل قيمة صحيحة قبل حفظ الإعداد.");
+    }
+    if (!authorizeDeviceOperation("SETTINGS_WRITE")) {
+      return refusedSetting(lastRefusalRef.current ?? deviceWriteLockMessage());
     }
     operationAbortRef.current?.abort();
     const controller = new AbortController();
@@ -887,11 +987,21 @@ export function useDeviceController({
       setParameters(session.parameters);
       setWritableParameters(session.writableParameters);
       setSettingDraft(String(result.requestedValue));
-      setStatus(
-        `تم حفظ ${selectedSetting.name} والتحقق من القيمة بالقراءة الرجعية.`,
-      );
+      // The session throws unless an independent read-back matched, so this
+      // is a verified value, not a command that merely returned.
+      const applied =
+        result.verified && result.parameter.kind !== "command"
+          ? readBackMatches(requestedValue, result.parameter)
+          : false;
+      const message = applied
+        ? `تم حفظ ${selectedSetting.name} وأُعيدت قراءته من الجهاز بالقيمة نفسها.`
+        : `لم تطابق القراءة الرجعية القيمة المطلوبة لـ${selectedSetting.name}، فلا يُعلن الإعداد مطبَّقًا.`;
+      setStatus(message);
+      return Object.freeze({ applied, message });
     } catch (error: unknown) {
-      setStatus(`تعذر حفظ الإعداد: ${safeMessage(error)}`);
+      const message = `تعذر حفظ الإعداد: ${safeMessage(error)}`;
+      setStatus(message);
+      return Object.freeze({ applied: false, message });
     } finally {
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
@@ -908,6 +1018,7 @@ export function useDeviceController({
       setStatus(deviceWriteLockMessage());
       return;
     }
+    if (!authorizeDeviceOperation("SETTINGS_RESTORE")) return;
     operationAbortRef.current?.abort();
     const controller = new AbortController();
     operationAbortRef.current = controller;
@@ -934,12 +1045,28 @@ export function useDeviceController({
     }
   }
 
-  async function startBinding(): Promise<void> {
+  /**
+   * Sends the bind command the device itself declares, watching link telemetry
+   * across the attempt. The returned evidence says what was actually observed:
+   * a command that was acknowledged is not a link, and only telemetry showing a
+   * live RF link counts as machine verification. Returns null when the attempt
+   * was refused before any command was sent.
+   */
+  async function startBinding(): Promise<BindingOperationResult> {
     const session = sessionRef.current;
-    if (session === null || !bindingAcknowledged) return;
+    if (session === null) {
+      return refusedBinding("وصّل الجهاز وعرّفه قبل إرسال أمر الربط.");
+    }
+    if (!bindingAcknowledged) {
+      return refusedBinding(
+        "أكّد جاهزية الطرف الآخر والطاقة والهوائيات قبل إرسال أمر الربط.",
+      );
+    }
     if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
-      setStatus(deviceWriteLockMessage());
-      return;
+      return refusedBinding(deviceWriteLockMessage());
+    }
+    if (!authorizeDeviceOperation("BINDING")) {
+      return refusedBinding(lastRefusalRef.current ?? deviceWriteLockMessage());
     }
     operationAbortRef.current?.abort();
     const controller = new AbortController();
@@ -948,18 +1075,40 @@ export function useDeviceController({
     setBusy(true);
     setBindingAcknowledged(false);
     setStatus("جارٍ إرسال أمر الربط الحقيقي الذي يعلنه الجهاز عبر CRSF…");
+    const observer = new BindingLinkObserver();
+    let unsubscribe: (() => void) | null = null;
     try {
+      unsubscribe = subscribeFrames((frame) => {
+        observer.observe(frame);
+      });
       const result = await session.startBinding({
         confirmedByUser: true,
         signal: controller.signal,
       });
       assertCurrentDeviceOperation(session, controller.signal);
-      setStatus(
-        `اكتمل أمر الربط، لكن نجاح رابط RF يتطلب مشاهدة الطرفين: ${result.information}`,
-      );
+      // Only wait for telemetry a transport can actually deliver; making the
+      // operator watch a timer that can never resolve is worse than asking.
+      if (canObserveFrames()) {
+        await waitForObservedLink(observer, BIND_OBSERVATION_MS);
+        assertCurrentDeviceOperation(session, controller.signal);
+      }
+      const evidence = gradeBindingEvidence({
+        observer,
+        userReportedLink: null,
+      });
+      setBindEvidence(evidence.level);
+      const message = isMachineVerifiedBinding(evidence)
+        ? `أبلغ الجهاز عن رابط RF حي (جودة الرابط ${evidence.statistics?.uplinkLinkQuality ?? 0}%). هذا دليل آلي.`
+        : `اكتمل أمر الربط، لكن لم تُرصد تلمترية رابط، فلا يُسجَّل الربط ناجحًا: ${result.information}`;
+      setStatus(message);
+      return Object.freeze({ evidence, message });
     } catch (error: unknown) {
-      setStatus(`توقف الربط: ${safeMessage(error)}`);
+      setBindEvidence(null);
+      const message = `توقف الربط: ${safeMessage(error)}`;
+      setStatus(message);
+      return Object.freeze({ evidence: null, message });
     } finally {
+      unsubscribe?.();
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
       }
@@ -1385,40 +1534,44 @@ export function useDeviceController({
     return Object.freeze({ port, resetMode: "no_reset" });
   }
 
-  async function flashPreparedFirmware(): Promise<void> {
+  async function flashPreparedFirmware(): Promise<DeviceOperationResult> {
     // Only an over-the-wire write needs device-write authority. Wi-Fi and
     // download hand the verified artifact to the device's own updater.
     if (firmwareWriteMethod && !authorizeDeviceOperation("FIRMWARE_WRITE")) {
-      return;
+      return refused(lastRefusalRef.current ?? deviceWriteLockMessage());
     }
     if (!hardwareCleanupGateOpen()) {
-      setStatus(deviceWriteLockMessage());
-      return;
+      return refused(deviceWriteLockMessage());
     }
     if (recoveryJournalState !== "ready") {
-      setStatus(
+      return refused(
         recoveryJournalState === "loading"
           ? "انتظر اكتمال فحص سجل الاستعادة قبل أي كتابة."
           : "تعذر التحقق من سجل الاستعادة؛ كل عمليات الكتابة مقفلة بأمان.",
       );
-      return;
     }
-    if (prepared === null || selectedTarget === null) return;
+    if (prepared === null || selectedTarget === null) {
+      return refused("جهّز حزمة Firmware واختر Target قبل الكتابة.");
+    }
     if (!writeReady) {
-      setStatus("لم تكتمل بوابات Target والاستعادة والطاقة والهوائي.");
-      return;
+      return refused("لم تكتمل بوابات Target والاستعادة والطاقة والهوائي.");
     }
     if (method === "download") {
       downloadFirmware();
-      return;
+      // A downloaded artifact is a handoff, not a device write: nothing was
+      // written and nothing was read back, so it is not a verified update.
+      return Object.freeze({
+        verified: false,
+        message: `تم بدء تنزيل ${prepared.primaryFileName}. لم تُكتب أي بيانات على الجهاز.`,
+      });
     }
     if (method === "wifi") {
       downloadFirmware();
       window.open("http://10.0.0.1/", "_blank", "noopener,noreferrer");
-      setStatus(
-        "تم تنزيل ملف OTA وفتح 10.0.0.1. اختر الملف المنزّل داخل صفحة الجهاز.",
-      );
-      return;
+      const message =
+        "تم تنزيل ملف OTA وفتح 10.0.0.1. اختر الملف المنزّل داخل صفحة الجهاز.";
+      setStatus(message);
+      return Object.freeze({ verified: false, message });
     }
 
     const controller = new AbortController();
@@ -1518,7 +1671,9 @@ export function useDeviceController({
         totalBytes,
         signal: controller.signal,
       });
-      setStatus("اكتمل التفليش وعاد الجهاز بالإصدار/Commit المتوقع.");
+      const message = "اكتمل التفليش وعاد الجهاز بالإصدار/Commit المتوقع.";
+      setStatus(message);
+      return Object.freeze({ verified: true, message });
     } catch (error: unknown) {
       const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
@@ -1532,9 +1687,9 @@ export function useDeviceController({
       } catch {
         // The visible recovery requirement remains even if IndexedDB is blocked.
       }
-      setStatus(
-        `توقف التفليش وتحتاج العملية إلى الاستعادة: ${message}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`,
-      );
+      const reported = `توقف التفليش وتحتاج العملية إلى الاستعادة: ${message}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`;
+      setStatus(reported);
+      return Object.freeze({ verified: false, message: reported });
     } finally {
       // Every flash or recovery is a distinct destructive attempt. Do not
       // carry Target, power, or antenna acknowledgements into another one.
@@ -1547,42 +1702,40 @@ export function useDeviceController({
     }
   }
 
-  async function recoverFromFile(file: File): Promise<void> {
+  async function recoverFromFile(file: File): Promise<DeviceOperationResult> {
     const authorized = authorizeDeviceOperation("RECOVERY");
-    if (!authorized) return;
+    if (!authorized) {
+      return refused(lastRefusalRef.current ?? deviceWriteLockMessage());
+    }
     if (!hardwareCleanupGateOpen()) {
-      setStatus(deviceWriteLockMessage());
-      return;
+      return refused(deviceWriteLockMessage());
     }
     if (recoveryJournalState !== "ready" || checkpoint === null) {
-      setStatus(
+      return refused(
         recoveryJournalState === "loading"
           ? "انتظر اكتمال فحص سجل الاستعادة قبل اختيار الحزمة."
           : "لا يمكن تشغيل الاستعادة دون سجل استعادة موثوق ومقروء.",
       );
-      return;
     }
     const trustedCheckpoint = checkpoint;
-    if (selectedTarget === null) return;
+    if (selectedTarget === null) {
+      return refused("اختر Target المطابق قبل تشغيل الاستعادة.");
+    }
     if (method === "wifi" || method === "download") {
-      setStatus(
+      return refused(
         "الاستعادة تتطلب مسار كتابة مباشرًا: UART أو Passthrough أو STM32 DFU.",
       );
-      return;
     }
     if (!manualTargetConfirmed) {
-      setStatus(
+      return refused(
         "أكّد مفتاح Target قبل تشغيل الاستعادة؛ منفذ الاستعادة اختيار جديد ولا يرث هوية CRSF السابقة.",
       );
-      return;
     }
     if (!powerAcknowledged) {
-      setStatus("أكّد ثبات الطاقة قبل تشغيل الاستعادة.");
-      return;
+      return refused("أكّد ثبات الطاقة قبل تشغيل الاستعادة.");
     }
     if (selectedTarget.role === "tx" && !antennaAcknowledged) {
-      setStatus("أكّد تثبيت هوائي جهاز الإرسال قبل تشغيل الاستعادة.");
-      return;
+      return refused("أكّد تثبيت هوائي جهاز الإرسال قبل تشغيل الاستعادة.");
     }
     operationAbortRef.current?.abort();
     const controller = new AbortController();
@@ -1696,7 +1849,9 @@ export function useDeviceController({
         totalBytes,
         signal: controller.signal,
       });
-      setStatus("اكتملت الاستعادة وعاد الجهاز بالإصدار/Commit المتوقع.");
+      const message = "اكتملت الاستعادة وعاد الجهاز بالإصدار/Commit المتوقع.";
+      setStatus(message);
+      return Object.freeze({ verified: true, message });
     } catch (error: unknown) {
       const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
@@ -1704,9 +1859,9 @@ export function useDeviceController({
           "تعذر إثبات إغلاق منفذ الكتابة بعد توقف الاستعادة",
         );
       }
-      setStatus(
-        `توقفت الاستعادة: ${safeMessage(error)}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`,
-      );
+      const reported = `توقفت الاستعادة: ${safeMessage(error)}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`;
+      setStatus(reported);
+      return Object.freeze({ verified: false, message: reported });
     } finally {
       setManualTargetConfirmation("");
       setPowerAcknowledged(false);
@@ -1872,6 +2027,7 @@ export function useDeviceController({
     deviceWriteLockMessage,
     subscribeFrames,
     canObserveFrames,
+    bindEvidence,
   } as const;
 }
 

@@ -8,7 +8,8 @@ import {
 } from "@elrs-easy/i18n";
 
 import { EasySetup } from "./EasySetup";
-import { ExpressLrsParityWorkbench } from "./ExpressLrsParityWorkbench";
+import { ExpressLrsParityWorkbenchView } from "./ExpressLrsParityWorkbench";
+import { useDeviceController } from "../hardware/useDeviceController";
 import type { HardwareDriverConnector } from "../hardware/userSession";
 
 export interface ProductShellProps {
@@ -20,12 +21,10 @@ export interface ProductShellProps {
 
 /**
  * The public entry point. Easy Mode is the default; the technical workbench is
- * reachable only by an explicit user choice. Both are presentations over the
- * same device services, and neither is given device-write authority: the
- * workbench is mounted with no props, so its default-locked write prop governs
- * the public build. Naming that prop here would be a policy change, and
- * `scripts/check-physical-acceptance-package.mjs` fails the build if this
- * module mentions it at all.
+ * reachable only by an explicit user choice. Both are views over one device
+ * controller created here, so switching modes keeps the same serial session,
+ * the same confirmed identity, and the same write authority — and a capability
+ * granted for one operation cannot be inherited by the other view.
  */
 export function ProductShell({
   initialLocale = defaultLocale,
@@ -37,6 +36,9 @@ export function ProductShell({
   const t = createTranslator(locale);
   const mainRef = useRef<HTMLElement | null>(null);
   const modeChangedRef = useRef(false);
+  const controller = useDeviceController(
+    hardwareConnector === undefined ? {} : { hardwareConnector },
+  );
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -100,7 +102,7 @@ export function ProductShell({
           <EasySetup
             locale={locale}
             onOpenAdvanced={() => setMode("advanced")}
-            {...(hardwareConnector === undefined ? {} : { hardwareConnector })}
+            controller={controller}
           />
         ) : (
           <>
@@ -111,7 +113,7 @@ export function ProductShell({
             >
               {t("easy.easyCta")}
             </button>
-            <ExpressLrsParityWorkbench />
+            <ExpressLrsParityWorkbenchView controller={controller} />
           </>
         )}
       </main>

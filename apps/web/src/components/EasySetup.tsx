@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { createTranslator, type Locale } from "@elrs-easy/i18n";
 
 import {
+  easyStateFromIdentity,
   easyStateFromOutcome,
   easyTechnicalDetail,
   type EasyDeviceState,
 } from "../easy/easyDeviceModel";
 import {
-  DENIAL_MESSAGE_KEYS,
   EASY_OPERATIONS,
   EASY_STEPS,
   OPERATION_DESCRIPTION_KEYS,
@@ -15,53 +15,27 @@ import {
   STEP_TITLE_KEYS,
   essentialSettings,
   operationCompatibility,
-  readBackMatches,
   stepStatuses,
   type EasyOperationId,
   type EasyStepId,
 } from "../easy/easyOperations";
 import type { CrsfParameter } from "../hardware/crsf";
-import type { ExpressLrsIdentity } from "../hardware/session";
-import {
-  connectUserHardwareSession,
-  type HardwareDriverConnector,
-  type UserHardwareSession,
-} from "../hardware/userSession";
-import {
-  BindingLinkObserver,
-  gradeBindingEvidence,
-  isMachineVerifiedBinding,
-} from "../hardware/binding-evidence";
-import {
-  DeviceWriteAuthority,
-  deviceFingerprint,
-  type DeviceOperationKind,
-} from "../hardware/write-authority";
-
-/** How long to watch link telemetry after a bind command before grading it. */
-const BIND_OBSERVATION_MS = 8_000;
-const LINK_POLL_INTERVAL_MS = 250;
-
-/**
- * Waits for the observer to reach the link threshold, or for the budget to run
- * out. Lives outside the component so the clock is never read during render.
- */
-async function waitForObservedLink(
-  observer: BindingLinkObserver,
-  budgetMs: number,
-): Promise<boolean> {
-  const deadline = Date.now() + budgetMs;
-  while (!observer.linked && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, LINK_POLL_INTERVAL_MS));
-  }
-  return observer.linked;
-}
+import { isMachineVerifiedBinding } from "../hardware/binding-evidence";
+import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
+import type {
+  BindingOperationResult,
+  DeviceController,
+} from "../hardware/useDeviceController";
 
 export interface EasySetupProps {
   readonly locale: Locale;
   readonly onOpenAdvanced: () => void;
-  /** Injected only by tests; production always uses the real Web Serial path. */
-  readonly hardwareConnector?: HardwareDriverConnector;
+  /**
+   * The one device controller. Easy Mode holds no session, no authority, and no
+   * write path of its own: every operation here is the same operation the
+   * Advanced view calls, on the same device, through the same gate.
+   */
+  readonly controller: DeviceController;
 }
 
 type Outcome =
@@ -94,222 +68,161 @@ function describeValue(parameter: CrsfParameter): string {
 export function EasySetup({
   locale,
   onOpenAdvanced,
-  hardwareConnector,
+  controller,
 }: EasySetupProps) {
   const t = createTranslator(locale);
+  const {
+    antennaAcknowledged,
+    availableMethods,
+    bindEvidence,
+    bindingAcknowledged,
+    buildFirmware,
+    busy,
+    cancelCurrentOperation,
+    cancellable,
+    catalog,
+    catalogState,
+    checkpoint,
+    connectHardware,
+    disconnectHardware,
+    downloadRecovery,
+    exactHardwareTarget,
+    flashPreparedFirmware,
+    flashProgress,
+    identity,
+    loadCatalog,
+    manualTargetConfirmation,
+    method,
+    options,
+    parameters,
+    powerAcknowledged,
+    prepared,
+    recoverFromFile,
+    recoveryDownloadStarted,
+    recoveryDownloaded,
+    regionChoices,
+    releases,
+    role,
+    roleTargets,
+    selectedRelease,
+    selectedTarget,
+    setAntennaAcknowledged,
+    setBindingAcknowledged,
+    setManualTargetConfirmation,
+    setMethod,
+    setPowerAcknowledged,
+    setRecoveryDownloaded,
+    setSelectedReleaseKey,
+    setSelectedSettingId,
+    setSettingDraft,
+    setTargetId,
+    settingDraft,
+    startBinding,
+    targetId,
+    updateOption,
+    writeReady,
+    writeSetting,
+  } = controller;
+
   const [operation, setOperation] = useState<EasyOperationId | null>(null);
-  const [role, setRole] = useState<"tx" | "rx">("tx");
+  const [chosenRole, setChosenRole] = useState<"tx" | "rx">(role);
   const [step, setStep] = useState<EasyStepId>("connect");
   const [failed, setFailed] = useState(false);
-  const [device, setDevice] = useState<EasyDeviceState>({ kind: "IDLE" });
-  const [parameters, setParameters] = useState<readonly CrsfParameter[]>([]);
-  const [identity, setIdentity] = useState<ExpressLrsIdentity | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
-  const [settingId, setSettingId] = useState("");
-  const [settingDraft, setSettingDraft] = useState("");
-  const [bindAwaitingObservation, setBindAwaitingObservation] = useState(false);
-  const [bindObserver, setBindObserver] = useState<BindingLinkObserver | null>(
+  const [connectFailure, setConnectFailure] = useState<EasyDeviceState | null>(
     null,
   );
-  const [bindEvidence, setBindEvidence] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
+  const [settingId, setSettingId] = useState("");
+  const [bindAwaitingObservation, setBindAwaitingObservation] = useState(false);
+  const [operatorBindEvidence, setOperatorBindEvidence] = useState<
+    string | null
+  >(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
-
-  const sessionRef = useRef<UserHardwareSession | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
-  const sessionCounterRef = useRef(0);
-  const authorityRef = useRef(new DeviceWriteAuthority());
-  const abortRef = useRef<AbortController | null>(null);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(
-    () => () => {
-      unsubscribeRef.current?.();
-      abortRef.current?.abort();
-      void sessionRef.current?.close();
-    },
-    [],
-  );
 
   useEffect(() => {
     if (operation !== null) panelRef.current?.focus();
   }, [operation]);
 
-  async function releaseSession(): Promise<void> {
-    unsubscribeRef.current?.();
-    unsubscribeRef.current = null;
-    authorityRef.current.revokeAll();
-    sessionIdRef.current = null;
-    const session = sessionRef.current;
-    sessionRef.current = null;
-    setIdentity(null);
-    if (session !== null) await session.close();
-  }
+  // Derived from the controller's live identity rather than mirrored into local
+  // state, so a device that goes away — an unplugged cable, a port detached for
+  // flashing — stops being shown as connected without a synchronising effect.
+  const live = easyStateFromIdentity(identity);
+  const device: EasyDeviceState =
+    live.kind === "IDLE" ? (connectFailure ?? live) : live;
 
   function startOperation(next: EasyOperationId): void {
     setOperation(next);
-    setStep(sessionRef.current === null ? "connect" : "compatibility");
+    setStep(identity === null ? "connect" : "compatibility");
     setFailed(false);
     setOutcome({ kind: "none" });
     setBindAwaitingObservation(false);
+    setOperatorBindEvidence(null);
+    setConnectFailure(null);
   }
 
   async function identify(): Promise<void> {
-    setBusy(true);
     setFailed(false);
     setOutcome({ kind: "none" });
     setStep("identify");
-    await releaseSession();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const result = await connectUserHardwareSession({
-        role,
-        signal: controller.signal,
-        ...(hardwareConnector === undefined
-          ? {}
-          : { connector: hardwareConnector }),
-      });
-      const next = easyStateFromOutcome(result);
-      if (result.status === "CONNECTED" && next.kind === "IDENTIFIED") {
-        sessionRef.current = result.session;
-        sessionCounterRef.current += 1;
-        sessionIdRef.current = `easy-${sessionCounterRef.current}`;
-        setParameters(result.parameters);
-        setIdentity(result.identity);
-        unsubscribeRef.current = result.session.onDisconnected(() => {
-          sessionRef.current = null;
-          sessionIdRef.current = null;
-          setIdentity(null);
-          setDevice({
-            kind: "FAILED",
-            messageKey: "easy.fail.UNKNOWN",
-            detail: "disconnected",
-          });
-          setFailed(true);
-        });
-        setDevice(next);
-        setStep("compatibility");
-      } else {
-        if (result.status === "CONNECTED") await result.session.close();
-        setDevice(next);
-        setFailed(true);
-      }
-    } catch (error: unknown) {
-      setDevice({
+    const result = await connectHardware({ role: chosenRole });
+    if (result === null) {
+      setConnectFailure({
         kind: "FAILED",
         messageKey: "easy.fail.CONNECT_FAILED",
-        detail: error instanceof Error ? error.message : "connect failed",
+        detail: "the attempt stopped before a device port was opened",
       });
       setFailed(true);
-    } finally {
-      abortRef.current = null;
-      setBusy(false);
+      return;
     }
+    const next = easyStateFromOutcome(result);
+    setConnectFailure(next.kind === "IDENTIFIED" ? null : next);
+    if (next.kind === "IDENTIFIED") setStep("compatibility");
+    else setFailed(true);
   }
 
-  /**
-   * Requests a single-use capability from the shared authority. Easy Mode has no
-   * private path to a device write: a refusal here names the missing condition,
-   * exactly as it does in the Advanced workbench.
-   */
-  function authorize(kind: DeviceOperationKind): boolean {
-    const fingerprint = identity === null ? null : deviceFingerprint(identity);
-    const decision = authorityRef.current.request({
-      operation: kind,
-      sessionId: sessionIdRef.current,
-      deviceFingerprint: fingerprint,
-      identityConfirmed: device.kind === "IDENTIFIED",
-      portCleanupConfirmed: true,
-      operationInProgress: busy,
-      recoveryJournalReadable: true,
-      pendingRecoveryCheckpoint: false,
-      userConfirmed: true,
-    });
-    if (!decision.granted) {
-      setOutcome({
-        kind: "failed",
-        text: t(DENIAL_MESSAGE_KEYS[decision.reason]),
-      });
+  function applyBindEvidence(result: BindingOperationResult): void {
+    setStep("verify");
+    const evidence = result.evidence;
+    if (evidence === null) {
+      // The controller names the specific missing condition; Easy Mode shows
+      // that, never a generic refusal.
       setFailed(true);
-      return false;
+      setOutcome({ kind: "failed", text: result.message });
+      return;
     }
-    return (
-      authorityRef.current.consume(decision.capability, {
-        sessionId: sessionIdRef.current,
-        deviceFingerprint: fingerprint,
-        operation: kind,
-      }) !== null
-    );
+    if (isMachineVerifiedBinding(evidence)) {
+      setFailed(false);
+      setOutcome({
+        kind: "verified",
+        text: t("easy.binding.telemetry", {
+          quality: evidence.statistics?.uplinkLinkQuality ?? 0,
+        }),
+      });
+      setOperatorBindEvidence(evidence.level);
+      return;
+    }
+    // No telemetry. Ask the operator, but never promote their answer to
+    // machine evidence.
+    setBindAwaitingObservation(true);
+    setOutcome({ kind: "info", text: t("easy.binding.sent") });
   }
 
   async function runBinding(): Promise<void> {
-    const session = sessionRef.current;
-    if (session === null || !authorize("BINDING")) return;
-    setBusy(true);
     setStep("execute");
-    const observer = new BindingLinkObserver();
-    let unsubscribe: (() => void) | null = null;
-    try {
-      // Watch link telemetry across the command, so a link that comes up is
-      // graded on the device's own report rather than on the acknowledgement.
-      unsubscribe = session.subscribeFrames((frame) => {
-        observer.observe(frame);
-      });
-      await session.startBinding({ confirmedByUser: true });
-      setStep("verify");
-      setOutcome({ kind: "info", text: t("easy.binding.observing") });
-
-      // Only wait for telemetry a transport can actually deliver. Making the
-      // operator watch a timer that can never resolve is worse than asking.
-      if (session.canObserveFrames) {
-        await waitForObservedLink(observer, BIND_OBSERVATION_MS);
-      }
-
-      if (observer.linked) {
-        const evidence = gradeBindingEvidence({
-          observer,
-          userReportedLink: null,
-        });
-        setOutcome({
-          kind: "verified",
-          text: t("easy.binding.telemetry", {
-            quality: evidence.statistics?.uplinkLinkQuality ?? 0,
-          }),
-        });
-        setBindEvidence(evidence.level);
-        setFailed(false);
-      } else {
-        // No telemetry. Ask the operator, but never promote their answer to
-        // machine evidence.
-        setBindObserver(observer);
-        setBindAwaitingObservation(true);
-        setOutcome({ kind: "info", text: t("easy.binding.sent") });
-      }
-    } catch (error: unknown) {
-      setFailed(true);
-      setOutcome({
-        kind: "failed",
-        text: error instanceof Error ? error.message : "binding failed",
-      });
-    } finally {
-      unsubscribe?.();
-      setBusy(false);
-    }
+    setOutcome({ kind: "info", text: t("easy.binding.observing") });
+    applyBindEvidence(await startBinding());
   }
 
   function confirmBindObservation(linked: boolean): void {
     setBindAwaitingObservation(false);
-    const evidence = gradeBindingEvidence({
-      observer: bindObserver ?? new BindingLinkObserver(),
-      userReportedLink: linked,
-    });
-    setBindEvidence(evidence.level);
+    setOperatorBindEvidence(
+      linked ? "USER_CONFIRMED_LINK" : "COMMAND_ACKNOWLEDGED_ONLY",
+    );
     // An operator's confirmation is recorded as their claim. It is never
     // machine-verified, so it is not presented as a verified success.
     setOutcome({
-      kind: isMachineVerifiedBinding(evidence) ? "verified" : "info",
+      kind: "info",
       text: linked
         ? t("easy.binding.userConfirmed")
         : t("easy.binding.commandOnly"),
@@ -318,40 +231,48 @@ export function EasySetup({
   }
 
   async function runSettingsWrite(): Promise<void> {
-    const session = sessionRef.current;
-    const selected = essentialSettings(parameters).find(
-      (parameter) => String(parameter.id) === settingId,
-    );
-    if (session === null || selected === undefined) return;
-    const requested = Number(settingDraft);
-    if (!Number.isFinite(requested)) return;
-    if (!authorize("SETTINGS_WRITE")) return;
-    setBusy(true);
     setStep("execute");
-    try {
-      // The shared session performs the write and reads the value back; Easy
-      // Mode does not implement a second write path. A write is only reported
-      // as applied when the device returns the value that was requested.
-      const written = await session.writeParameter(selected.id, requested);
-      setStep("verify");
-      const applied =
-        written.verified && readBackMatches(requested, written.parameter);
-      setParameters(session.parameters);
-      setOutcome(
-        applied
-          ? { kind: "verified", text: t("easy.settings.applied") }
-          : { kind: "failed", text: t("easy.settings.mismatch") },
-      );
-      setFailed(!applied);
-    } catch (error: unknown) {
+    const result = await writeSetting();
+    setStep("verify");
+    if (result.applied === null) {
       setFailed(true);
-      setOutcome({
-        kind: "failed",
-        text: error instanceof Error ? error.message : "settings write failed",
-      });
-    } finally {
-      setBusy(false);
+      setOutcome({ kind: "failed", text: result.message });
+      return;
     }
+    setOutcome(
+      result.applied
+        ? { kind: "verified", text: t("easy.settings.applied") }
+        : { kind: "failed", text: t("easy.settings.mismatch") },
+    );
+    setFailed(!result.applied);
+  }
+
+  async function runFirmwareWrite(): Promise<void> {
+    setStep("execute");
+    setOutcome({ kind: "none" });
+    const result = await flashPreparedFirmware();
+    setStep("verify");
+    // The controller clears the recovery checkpoint only after the device came
+    // back and its Target and version were read and matched, so that is the
+    // only evidence Easy Mode reports as a completed update.
+    setFailed(!result.verified);
+    setOutcome(
+      result.verified
+        ? { kind: "verified", text: t("easy.fw.verified") }
+        : { kind: "failed", text: result.message },
+    );
+  }
+
+  async function runRecovery(file: File): Promise<void> {
+    setStep("execute");
+    const result = await recoverFromFile(file);
+    setStep("verify");
+    setFailed(!result.verified);
+    setOutcome(
+      result.verified
+        ? { kind: "verified", text: t("easy.fw.verified") }
+        : { kind: "failed", text: result.message },
+    );
   }
 
   async function copyDetails(): Promise<void> {
@@ -379,6 +300,7 @@ export function EasySetup({
   const selectedSetting = settings.find(
     (parameter) => String(parameter.id) === settingId,
   );
+  const evidenceLevel = operatorBindEvidence ?? bindEvidence;
 
   if (operation === null) {
     return (
@@ -418,10 +340,7 @@ export function EasySetup({
       <button
         type="button"
         className="easy-advanced"
-        onClick={() => {
-          setOperation(null);
-          void releaseSession();
-        }}
+        onClick={() => setOperation(null)}
       >
         {t("easy.op.back")}
       </button>
@@ -452,8 +371,8 @@ export function EasySetup({
                     type="radio"
                     name="easy-role"
                     value={value}
-                    checked={role === value}
-                    onChange={() => setRole(value)}
+                    checked={chosenRole === value}
+                    onChange={() => setChosenRole(value)}
                   />
                   <span>
                     {value === "tx" ? t("easy.roleTx") : t("easy.roleRx")}
@@ -493,6 +412,20 @@ export function EasySetup({
               </div>
             ) : null}
 
+            {operation === "binding" && compatibility?.supported === true ? (
+              <label className="easy-check">
+                <input
+                  type="checkbox"
+                  checked={bindingAcknowledged}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setBindingAcknowledged(event.currentTarget.checked)
+                  }
+                />
+                <span>{t("easy.binding.ready")}</span>
+              </label>
+            ) : null}
+
             {operation === "settings" && compatibility?.supported === true ? (
               <div className="easy-settings">
                 <label>
@@ -500,10 +433,11 @@ export function EasySetup({
                   <select
                     value={settingId}
                     onChange={(event) => {
-                      setSettingId(event.currentTarget.value);
+                      const value = event.currentTarget.value;
+                      setSettingId(value);
+                      setSelectedSettingId(value);
                       const next = settings.find(
-                        (parameter) =>
-                          String(parameter.id) === event.currentTarget.value,
+                        (parameter) => String(parameter.id) === value,
                       );
                       setSettingDraft(
                         next === undefined
@@ -520,7 +454,7 @@ export function EasySetup({
                     ))}
                   </select>
                 </label>
-                {selectedSetting !== undefined ? (
+                {selectedSetting === undefined ? null : (
                   <>
                     <p>
                       {t("easy.settings.current")}:{" "}
@@ -537,12 +471,237 @@ export function EasySetup({
                       />
                     </label>
                   </>
-                ) : null}
+                )}
               </div>
             ) : null}
 
             {operation === "firmware" && compatibility?.supported === true ? (
-              <p className="easy-note">{t("easy.firmware.handoff")}</p>
+              <div className="easy-firmware">
+                {catalogState === "ready" ? (
+                  <>
+                    <p className="easy-note">
+                      {t("easy.fw.catalogReady", {
+                        releases: releases.length,
+                        targets: catalog?.targets.length ?? 0,
+                      })}
+                    </p>
+
+                    <label>
+                      <span>{t("easy.fw.release")}</span>
+                      <select
+                        value={
+                          selectedRelease === null
+                            ? ""
+                            : JSON.stringify([
+                                selectedRelease.channel,
+                                selectedRelease.label,
+                                selectedRelease.revision,
+                              ])
+                        }
+                        onChange={(event) =>
+                          setSelectedReleaseKey(event.currentTarget.value)
+                        }
+                      >
+                        <option value="">—</option>
+                        {releases.map((release) => {
+                          const key = JSON.stringify([
+                            release.channel,
+                            release.label,
+                            release.revision,
+                          ]);
+                          return (
+                            <option key={key} value={key}>
+                              {release.label}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>{t("easy.fw.target")}</span>
+                      <select
+                        value={targetId}
+                        onChange={(event) =>
+                          setTargetId(event.currentTarget.value)
+                        }
+                      >
+                        <option value="">—</option>
+                        {roleTargets.map((target) => (
+                          <option key={target.id} value={target.id}>
+                            {target.config.productName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {exactHardwareTarget ? (
+                      <p className="easy-note">{t("easy.fw.targetExact")}</p>
+                    ) : (
+                      <label>
+                        <span>{t("easy.fw.targetConfirm")}</span>
+                        <input
+                          type="text"
+                          value={manualTargetConfirmation}
+                          onChange={(event) =>
+                            setManualTargetConfirmation(
+                              event.currentTarget.value,
+                            )
+                          }
+                        />
+                      </label>
+                    )}
+
+                    <label>
+                      <span>{t("easy.fw.region")}</span>
+                      <select
+                        value={options.region}
+                        onChange={(event) =>
+                          updateOption("region", event.currentTarget.value)
+                        }
+                      >
+                        <option value="">—</option>
+                        {regionChoices.map((region) => (
+                          <option key={region.key} value={region.key}>
+                            {region.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>{t("easy.fw.method")}</span>
+                      <select
+                        value={method}
+                        onChange={(event) =>
+                          setMethod(
+                            event.currentTarget.value as ExpressLrsFlashMethod,
+                          )
+                        }
+                      >
+                        {availableMethods.map((item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => void buildFirmware()}
+                      disabled={
+                        busy ||
+                        selectedRelease === null ||
+                        selectedTarget === null ||
+                        options.region === ""
+                      }
+                    >
+                      {t("easy.fw.build")}
+                    </button>
+
+                    {prepared === null ? null : (
+                      <>
+                        <p className="easy-note">
+                          {t("easy.fw.prepared", {
+                            segments: prepared.segments.length,
+                          })}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => downloadRecovery()}
+                          disabled={busy}
+                        >
+                          {t("easy.fw.downloadRecovery")}
+                        </button>
+                        {recoveryDownloadStarted ? (
+                          <label className="easy-check">
+                            <input
+                              type="checkbox"
+                              checked={recoveryDownloaded}
+                              onChange={(event) =>
+                                setRecoveryDownloaded(
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />
+                            <span>{t("easy.fw.recoverySaved")}</span>
+                          </label>
+                        ) : null}
+                        <label className="easy-check">
+                          <input
+                            type="checkbox"
+                            checked={powerAcknowledged}
+                            onChange={(event) =>
+                              setPowerAcknowledged(event.currentTarget.checked)
+                            }
+                          />
+                          <span>{t("easy.fw.power")}</span>
+                        </label>
+                        {selectedTarget?.role === "tx" ? (
+                          <label className="easy-check">
+                            <input
+                              type="checkbox"
+                              checked={antennaAcknowledged}
+                              onChange={(event) =>
+                                setAntennaAcknowledged(
+                                  event.currentTarget.checked,
+                                )
+                              }
+                            />
+                            <span>{t("easy.fw.antenna")}</span>
+                          </label>
+                        ) : null}
+                        {writeReady ? null : (
+                          <p className="easy-note">
+                            {t("easy.fw.writeBlocked")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void loadCatalog()}
+                    disabled={busy}
+                  >
+                    {t("easy.fw.loadCatalog")}
+                  </button>
+                )}
+
+                {flashProgress === null ? null : (
+                  <p
+                    className="easy-note"
+                    data-flash-stage={flashProgress.stage}
+                  >
+                    {t("easy.fw.progress", {
+                      stage: flashProgress.stage,
+                      written: flashProgress.writtenBytes,
+                      total: flashProgress.totalBytes,
+                    })}
+                  </p>
+                )}
+
+                {checkpoint === null ? null : (
+                  <div className="easy-error">
+                    <p>{t("easy.fw.pending", { stage: checkpoint.stage })}</p>
+                    <p>{t("easy.fw.recoveryNote")}</p>
+                    <label>
+                      <span>{t("easy.fw.recoverFile")}</span>
+                      <input
+                        type="file"
+                        accept=".zip,application/zip"
+                        disabled={busy}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          if (file !== undefined) void runRecovery(file);
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
             ) : null}
 
             <div className="easy-actions">
@@ -552,12 +711,15 @@ export function EasySetup({
                   className="easy-primary"
                   disabled={
                     busy ||
-                    (operation === "settings" && selectedSetting === undefined)
+                    (operation === "binding" && !bindingAcknowledged) ||
+                    (operation === "settings" &&
+                      selectedSetting === undefined) ||
+                    (operation === "firmware" && !writeReady)
                   }
                   onClick={() => {
                     if (operation === "binding") void runBinding();
                     else if (operation === "settings") void runSettingsWrite();
-                    else onOpenAdvanced();
+                    else void runFirmwareWrite();
                   }}
                 >
                   {busy
@@ -566,13 +728,25 @@ export function EasySetup({
                       ? t("easy.run.binding")
                       : operation === "settings"
                         ? t("easy.run.settings")
-                        : t("easy.run.firmware")}
+                        : t("easy.fw.write")}
+                </button>
+              ) : null}
+              {busy && cancellable ? (
+                <button type="button" onClick={() => cancelCurrentOperation()}>
+                  {t("easy.fw.cancel")}
                 </button>
               ) : null}
               <button type="button" onClick={() => void copyDetails()}>
                 {copied === "done" ? t("easy.copied") : t("easy.copyDetails")}
               </button>
-              <button type="button" onClick={() => void releaseSession()}>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("connect");
+                  setConnectFailure(null);
+                  void disconnectHardware();
+                }}
+              >
                 {t("easy.disconnect")}
               </button>
             </div>
@@ -595,13 +769,13 @@ export function EasySetup({
               </div>
             ) : null}
 
-            {bindEvidence !== null ? (
-              <p className="easy-note" data-evidence={bindEvidence}>
-                {bindEvidence}
+            {evidenceLevel === null ? null : (
+              <p className="easy-note" data-evidence={evidenceLevel}>
+                {evidenceLevel}
               </p>
-            ) : null}
+            )}
 
-            {outcome.kind !== "none" ? (
+            {outcome.kind === "none" ? null : (
               <p
                 data-outcome={outcome.kind}
                 className={
@@ -610,7 +784,7 @@ export function EasySetup({
               >
                 {outcome.text}
               </p>
-            ) : null}
+            )}
             {copied === "failed" ? <p>{t("easy.copyFailed")}</p> : null}
           </>
         )}

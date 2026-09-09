@@ -2,6 +2,39 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+const firmwareMocks = vi.hoisted(() => ({
+  loadCatalog: vi.fn(),
+  preparePackage: vi.fn(),
+  downloadPreparedBytes: vi.fn(),
+  flashEspFirmware: vi.fn(),
+}));
+
+vi.mock("../hardware/official-catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hardware/official-catalog")>()),
+  loadOfficialExpressLrsCatalog: firmwareMocks.loadCatalog,
+}));
+
+vi.mock("../hardware/firmware-package", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hardware/firmware-package")>()),
+  prepareOfficialFirmwarePackage: firmwareMocks.preparePackage,
+  downloadPreparedBytes: firmwareMocks.downloadPreparedBytes,
+}));
+
+vi.mock("../hardware/esp-flasher", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hardware/esp-flasher")>()),
+  flashEspFirmware: firmwareMocks.flashEspFirmware,
+}));
+
+// A fresh browser has an empty recovery journal. Reading it is a precondition
+// for every device-changing operation, so the tests state that precondition
+// explicitly rather than depending on jsdom's storage.
+vi.mock("../hardware/recovery-package", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hardware/recovery-package")>()),
+  loadRecoveryCheckpoint: vi.fn().mockResolvedValue(null),
+  saveRecoveryCheckpoint: vi.fn().mockResolvedValue(undefined),
+  clearRecoveryCheckpoint: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { ProductShell } from "./ProductShell";
 import type { CrsfParameter } from "../hardware/crsf";
 import type { ExpressLrsIdentity } from "../hardware/session";
@@ -63,6 +96,7 @@ function connectedConnector(
     withBindCommand?: boolean;
     writeResult?: (requested: number) => { value: number; verified: boolean };
     bindFails?: boolean;
+    withBootloaderCommand?: boolean;
   }> = {},
 ): HardwareDriverConnector {
   const overrides = options.identity ?? {};
@@ -71,6 +105,9 @@ function connectedConnector(
   // actually left on it, which is what the session verifies independently.
   let currentValue = 1;
   if (options.withBindCommand !== false) parameters.push(command(2, "Bind"));
+  if (options.withBootloaderCommand === true) {
+    parameters.push(command(3, "Serial Update"));
+  }
   const identity: ExpressLrsIdentity = {
     validation: "CRSF_DEVICE_INFO",
     role: "tx",
@@ -132,6 +169,11 @@ function connectedConnector(
       acknowledged: true,
     }),
     verifyCurrentIdentity: vi.fn().mockResolvedValue(identity),
+    detachPortForBootloader: vi.fn().mockResolvedValue({
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      ondisconnect: null,
+    }),
     close: vi.fn().mockResolvedValue(true),
   } as unknown as HardwareSessionDriver;
   return connectorReturning({
@@ -141,6 +183,65 @@ function connectedConnector(
     parameters,
   } as HardwareDriverConnectOutcome);
 }
+
+/**
+ * The official catalog Easy Mode loads. The TX Target's product name is the
+ * one the reference device reports, so the identity match is EXACT and no
+ * manual Target confirmation is needed — exactly as in the Advanced view.
+ */
+const easyCatalog = {
+  source: "EXPRESSLRS_WEB_FLASHER_MIRROR",
+  loadedAt: "2026-09-04T00:00:00.000Z",
+  releases: [{ label: "4.1.0", revision: "release410", channel: "release" }],
+  targets: [
+    {
+      id: "vendor/tx_2400/module",
+      role: "tx",
+      vendorKey: "vendor",
+      vendorName: "Vendor",
+      radioKey: "tx_2400",
+      targetKey: "module",
+      config: {
+        productName: "Reference TX",
+        platform: "esp32",
+        firmware: "VENDOR_TX",
+        luaName: "vendor.lua",
+        layoutFile: null,
+        logoFile: null,
+        uploadMethods: ["uart", "edgetx", "passthru", "wifi", "download"],
+        minVersion: null,
+        customLayout: {},
+        overlay: null,
+        raw: {},
+      },
+    },
+  ],
+} as unknown as Parameters<typeof firmwareMocks.loadCatalog>[0];
+
+const easyPackage = {
+  schemaVersion: 1,
+  release: { label: "4.1.0", revision: "release410", channel: "release" },
+  optionsSummary: {
+    region: "FCC",
+    domain: 0,
+    bindingConfigured: false,
+    wifiConfigured: false,
+  },
+  segments: [
+    {
+      name: "firmware.bin",
+      address: 0x10000,
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    },
+  ],
+  primaryFileName: "module-4.1.0.bin",
+  primaryDownload: new Uint8Array([1, 2, 3]),
+  primaryMimeType: "application/octet-stream",
+  recoveryFileName: "module-4.1.0-recovery.zip",
+  recoveryArchive: new Uint8Array([4, 5, 6]),
+  createdAt: "2026-09-04T00:00:00.000Z",
+};
 
 describe("public product shell", () => {
   it("opens in Arabic Easy Mode, not the technical workbench", () => {
@@ -245,6 +346,9 @@ describe("public product shell", () => {
     await screen.findByText("Reference TX");
 
     await user.click(
+      screen.getByRole("checkbox", { name: /الطرف الآخر جاهز للربط/u }),
+    );
+    await user.click(
       screen.getByRole("button", { name: "أدخل الجهاز في وضع الربط" }),
     );
 
@@ -274,6 +378,9 @@ describe("public product shell", () => {
     );
     await user.click(screen.getByRole("button", { name: "تعرّف على جهازي" }));
     await screen.findByText("Reference TX");
+    await user.click(
+      screen.getByRole("checkbox", { name: /الطرف الآخر جاهز للربط/u }),
+    );
     await user.click(
       screen.getByRole("button", { name: "أدخل الجهاز في وضع الربط" }),
     );
@@ -367,6 +474,76 @@ describe("public product shell", () => {
       },
       { timeout: 10_000 },
     );
+  });
+
+  it("completes a firmware update inside Easy Mode without handing off", async () => {
+    const user = userEvent.setup();
+    firmwareMocks.loadCatalog.mockResolvedValue(easyCatalog);
+    firmwareMocks.preparePackage.mockResolvedValue({
+      ...easyPackage,
+      target: (easyCatalog as unknown as { targets: unknown[] }).targets[0],
+    });
+    firmwareMocks.flashEspFirmware.mockResolvedValue({
+      chipName: "ESP32",
+      bytesWritten: 3,
+      cleanupVerified: true,
+    });
+    render(
+      <ProductShell
+        hardwareConnector={connectedConnector({ withBootloaderCommand: true })}
+      />,
+    );
+
+    await user.click(
+      screen.getAllByRole("button", { name: "ابدأ" })[2] as HTMLElement,
+    );
+    await user.click(screen.getByRole("button", { name: "تعرّف على جهازي" }));
+    await screen.findByText("Reference TX");
+
+    // Easy Mode does the whole update itself: source, package, recovery,
+    // bench confirmation, write, and post-reboot verification.
+    await user.click(
+      screen.getByRole("button", { name: "جهّز مصدر التحديث الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Reference TX" });
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "جهّز الحزمة الرسمية وتحقق منها" }),
+    );
+
+    const write = await screen.findByRole("button", {
+      name: "اكتب Firmware إلى الجهاز",
+    });
+    // Nothing may be written before the recovery package exists and the bench
+    // has been confirmed.
+    expect(write).toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", { name: "نزّل حزمة الاستعادة" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: /حفظ حزمة الاستعادة/u }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: /الطاقة ثابتة/u }));
+    await user.click(screen.getByRole("checkbox", { name: /هوائي جهاز/u }));
+
+    expect(write).toBeEnabled();
+    await user.click(write);
+
+    await waitFor(() =>
+      expect(firmwareMocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    // The update is reported as done only because the device came back and its
+    // Target and version were read and matched.
+    expect(
+      await screen.findByText(
+        /عاد الجهاز وأعلن Target والإصدار المتوقعين بعد الإقلاع/u,
+      ),
+    ).toBeInTheDocument();
+    expect(document.querySelector('[data-outcome="verified"]')).not.toBeNull();
   });
 
   it("exposes a skip link and a focusable main region for keyboard users", () => {

@@ -101,7 +101,7 @@ export const ar = {
     "وصّل الجهاز عبر USB ثم اختر منفذه من نافذة المتصفح.",
   "easy.run.binding": "أدخل الجهاز في وضع الربط",
   "easy.run.settings": "طبّق التغيير",
-  "easy.run.firmware": "أكمل في الوضع المتقدم",
+  "easy.run.firmware": "ابدأ تحديث Firmware",
   "easy.run.busy": "جارٍ التنفيذ…",
   "easy.binding.sent":
     "قبل الجهاز أمر الربط. قرّب الطرف الآخر الآن وأكّد أدناه ما إذا قام الرابط فعلًا.",
@@ -147,4 +147,34 @@ export const ar = {
     "سُجِّل بتأكيدك أنت. لم يُبلغ الجهاز عن تلمترية رابط، فهذه مشاهدتك وليست دليلًا آليًا.",
   "easy.binding.commandOnly":
     "قُبل الأمر، لكن لم يُرصد رابط ولم يُبلَّغ عنه. لا يُسجَّل الربط ناجحًا.",
+  "easy.binding.ready":
+    "الطرف الآخر جاهز للربط، والطاقة والهوائيات في حالة آمنة",
+  "easy.fw.loadCatalog": "جهّز مصدر التحديث الرسمي",
+  "easy.fw.catalogReady":
+    "تم تحميل {releases} إصدارًا قابلاً للبناء و{targets} Target رسميًا.",
+  "easy.fw.release": "إصدار ExpressLRS",
+  "easy.fw.target": "Target هذا الجهاز",
+  "easy.fw.targetExact":
+    "طوبق بـTarget رسمي واحد من الهوية التي أعلنها الجهاز.",
+  "easy.fw.targetConfirm": "اكتب مفتاح Target حرفيًا لتأكيد أنه يخص هذا الجهاز",
+  "easy.fw.region": "المنطقة التنظيمية",
+  "easy.fw.method": "مسار التحديث",
+  "easy.fw.build": "جهّز الحزمة الرسمية وتحقق منها",
+  "easy.fw.prepared":
+    "جُهّز {segments} قطاعًا مع SHA-256 لكل قطاع. نزّل حزمة الاستعادة قبل أي كتابة.",
+  "easy.fw.downloadRecovery": "نزّل حزمة الاستعادة",
+  "easy.fw.recoverySaved": "تحققت من حفظ حزمة الاستعادة على جهازي",
+  "easy.fw.power": "الطاقة ثابتة ولن تنقطع أثناء الكتابة",
+  "easy.fw.antenna": "هوائي جهاز الإرسال مركّب",
+  "easy.fw.write": "اكتب Firmware إلى الجهاز",
+  "easy.fw.writeBlocked":
+    "تبقى الكتابة غير متاحة حتى تكتمل كل الشروط أعلاه، وكل شرط ناقص مذكور هناك.",
+  "easy.fw.progress": "{stage}: {written} من {total} بايت",
+  "easy.fw.cancel": "أوقف الخطوة الجارية",
+  "easy.fw.pending":
+    "توجد عملية تحديث متوقفة تنتظر الاستعادة عند مرحلة {stage}. اختر حزمة الاستعادة المطابقة لإكمالها.",
+  "easy.fw.recoverFile": "اختر حزمة الاستعادة",
+  "easy.fw.recoveryNote":
+    "الاستعادة تفتح المنفذ من جديد وتكتب الحزمة المحفوظة قبل هذا التحديث، ثم تقرأ الهوية بعدها.",
+  "easy.fw.verified": "عاد الجهاز وأعلن Target والإصدار المتوقعين بعد الإقلاع.",
 } satisfies Partial<Record<MessageKey, string>>;

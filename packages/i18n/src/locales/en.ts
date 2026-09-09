@@ -108,7 +108,7 @@ export const en = {
     "Connect the device over USB, then choose its port in the browser prompt.",
   "easy.run.binding": "Put the device into bind mode",
   "easy.run.settings": "Apply the change",
-  "easy.run.firmware": "Continue in advanced mode",
+  "easy.run.firmware": "Start the firmware update",
   "easy.run.busy": "Working…",
   "easy.binding.sent":
     "The device accepted the bind command. Bring the other side into bind range now and confirm below whether the link came up.",
@@ -159,6 +159,40 @@ export const en = {
     "Recorded as confirmed by you. The device did not report link telemetry, so this is your observation and not machine evidence.",
   "easy.binding.commandOnly":
     "The command was accepted, but no link was observed and none was reported. Binding is not recorded as successful.",
+  "easy.binding.ready":
+    "The other side is ready to bind, and power and antennas are in a safe state",
+  "easy.fw.loadCatalog": "Prepare the official update source",
+  "easy.fw.catalogReady":
+    "Loaded {releases} buildable versions and {targets} official Targets.",
+  "easy.fw.release": "ExpressLRS version",
+  "easy.fw.target": "Target for this device",
+  "easy.fw.targetExact":
+    "Matched to one official Target from the identity the device reported.",
+  "easy.fw.targetConfirm":
+    "Type the Target key exactly to confirm it belongs to this device",
+  "easy.fw.region": "Regulatory region",
+  "easy.fw.method": "Update path",
+  "easy.fw.build": "Prepare and verify the official package",
+  "easy.fw.prepared":
+    "Prepared {segments} segments with a SHA-256 for each. Download the recovery package before any write.",
+  "easy.fw.downloadRecovery": "Download the recovery package",
+  "easy.fw.recoverySaved":
+    "I checked the recovery package is saved on my computer",
+  "easy.fw.power":
+    "Power is stable and will not be interrupted during the write",
+  "easy.fw.antenna": "The transmitter antenna is fitted",
+  "easy.fw.write": "Write the firmware to the device",
+  "easy.fw.writeBlocked":
+    "The write stays unavailable until every condition above is met. Each unmet one is listed there.",
+  "easy.fw.progress": "{stage}: {written} of {total} bytes",
+  "easy.fw.cancel": "Stop the current step",
+  "easy.fw.pending":
+    "An interrupted update is waiting for recovery at stage {stage}. Choose the matching recovery package to finish it.",
+  "easy.fw.recoverFile": "Choose the recovery package",
+  "easy.fw.recoveryNote":
+    "Recovery reopens the port and writes the package saved before this update, then reads the identity back.",
+  "easy.fw.verified":
+    "The device came back and reported the expected Target and version after rebooting.",
 } as const;
 
 export type MessageKey = keyof typeof en;

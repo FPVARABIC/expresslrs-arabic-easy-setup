@@ -104,7 +104,7 @@ describe("Easy Mode device model", () => {
     });
 
     expect(detail).toContain("hardware-validation: NONE");
-    expect(detail).toContain("device-writes: LOCKED");
+    expect(detail).toContain("device-writes: EVIDENCE_GATED");
     expect(detail).not.toContain("usbVendorId");
     expect(detail).not.toContain("4f54");
   });

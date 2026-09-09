@@ -86,15 +86,27 @@ export function easyStateFromOutcome(
       detail: outcome.message,
     });
   }
-  const identity = easyIdentityView(outcome.identity);
-  if (identity.confidence !== "CONFIRMED") {
+  return easyStateFromIdentity(outcome.identity);
+}
+
+/**
+ * The same rule applied to whatever identity the shared session currently
+ * holds, so a device that goes away or is replaced is never left on screen as
+ * a recognised device.
+ */
+export function easyStateFromIdentity(
+  identity: ExpressLrsIdentity | null,
+): EasyDeviceState {
+  if (identity === null) return Object.freeze({ kind: "IDLE" as const });
+  const view = easyIdentityView(identity);
+  if (view.confidence !== "CONFIRMED") {
     return Object.freeze({
       kind: "FAILED" as const,
       messageKey: "easy.fail.UNKNOWN" as MessageKey,
       detail: "identity evidence was not confirmed",
     });
   }
-  return Object.freeze({ kind: "IDENTIFIED" as const, identity });
+  return Object.freeze({ kind: "IDENTIFIED" as const, identity: view });
 }
 
 /**
@@ -115,6 +127,8 @@ export function easyTechnicalDetail(input: {
     `build: ${input.buildSha}`,
     `observed: ${input.at}`,
     "hardware-validation: NONE",
-    "device-writes: LOCKED",
+    // Writes are gated on live evidence, not disabled. Saying "LOCKED" here
+    // would misreport the product to whoever reads this export.
+    "device-writes: EVIDENCE_GATED",
   ].join("\n");
 }

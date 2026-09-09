@@ -45,6 +45,7 @@ export function ExpressLrsParityWorkbenchView({
   const {
     antennaAcknowledged,
     availableMethods,
+    bindEvidence,
     bindingAcknowledged,
     buildFirmware,
     busy,
@@ -668,6 +669,11 @@ export function ExpressLrsParityWorkbenchView({
                   </span>
                 </label>
               ) : null}
+              {bindEvidence === null ? null : (
+                <p className="parity-note" data-evidence={bindEvidence}>
+                  مستوى دليل الربط: {bindEvidence}
+                </p>
+              )}
             </div>
           </>
         )}

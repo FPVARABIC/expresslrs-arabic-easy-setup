@@ -898,9 +898,14 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(bind);
 
     await waitFor(() => expect(hardware.startBinding).toHaveBeenCalledTimes(1));
+    // The command was acknowledged and no link telemetry arrived, so the
+    // result is graded as exactly that and not as a successful bind.
     expect(
-      screen.getByText(/نجاح رابط RF يتطلب مشاهدة الطرفين/u),
+      await screen.findByText(/لا يُسجَّل الربط ناجحًا/u),
     ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-evidence="COMMAND_ACKNOWLEDGED_ONLY"]'),
+    ).not.toBeNull();
   });
 
   it("makes an in-flight binding command cancellable", async () => {
