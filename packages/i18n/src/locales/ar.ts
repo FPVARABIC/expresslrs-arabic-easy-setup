@@ -1,8 +1,10 @@
 import type { MessageKey } from "./en";
+import { acceptanceAr } from "./acceptance-ar";
 import { workbenchAr } from "./workbench-ar";
 
 export const ar = {
   ...workbenchAr,
+  ...acceptanceAr,
   "app.name": "إعداد ExpressLRS بسهولة",
   "app.independent":
     "متوافق مع ExpressLRS — مشروع مجتمعي مستقل، غير تابع أو معتمد من ExpressLRS LLC",

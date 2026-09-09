@@ -262,4 +262,137 @@ export const workbenchAr = {
   "wb.recovery.stopped": "توقفت الاستعادة: {detail}",
   "wb.recovery.savedConfirmed":
     "سُجل تأكيدك اليدوي بأن حزمة الاستعادة محفوظة؛ احتفظ بها حتى اكتمال التحقق بعد الإقلاع.",
+
+  // --- per-operation readiness --------------------------------------------
+  "wb.need.identity": "وصّل الجهاز ودع التطبيق يقرأ هويته أولًا.",
+  "wb.need.identityForUart":
+    "الكتابة المباشرة عبر UART تحتاج هوية جهاز حيّة؛ وصّل الجهاز أولًا.",
+  "wb.need.recoveryJournal":
+    "تعذّرت قراءة سجل الاستعادة. أعد تحميل الصفحة ليتم التحقق منه.",
+  "wb.need.clearCheckpoint":
+    "تركت عملية سابقة نقطة استعادة مفتوحة. أكمل تلك الاستعادة أو امسحها أولًا.",
+  "wb.need.portCleanup":
+    "لم يثبت إغلاق المنفذ السابق. افصل الجهاز بأمان وأعد تحميل الصفحة.",
+  "wb.need.idle": "هناك عملية جارية. انتظر انتهاءها أو ألغِها.",
+  "wb.need.target": "اختر Target الرسمي لهذا الجهاز أولًا.",
+  "wb.need.writableSetting": "اختر إعدادًا قابلًا للكتابة من القائمة أولًا.",
+  "wb.need.settingsBackup":
+    "أنشئ نسخة احتياطية للإعدادات أولًا حتى يوجد ما تستعيده.",
+  "wb.need.bindingAcknowledgement":
+    "أكّد فهمك أن الربط يغيّر الرابط، ثم أعد المحاولة.",
+  "wb.need.preparedPackage": "ابنِ حزمة Firmware أولًا.",
+  "wb.need.recoveryDownload":
+    "نزّل أرشيف الاستعادة أولًا حتى يمكن إرجاع الجهاز.",
+  "wb.need.powerAcknowledgement":
+    "أكّد أن الجهاز على طاقة ثابتة لن تنقطع أثناء الكتابة.",
+  "wb.need.antennaAcknowledgement": "أكّد تركيب هوائي المرسل قبل أن يبث.",
+  "wb.need.targetConfirmation":
+    "اكتب اسم Target للتأكيد، لأن هوية الجهاز لا تحدده بدقة.",
+  "wb.need.recoveryPackage":
+    "اختر حزمة الاستعادة المراد كتابتها، أو استأنف نقطة الاستعادة المفتوحة.",
+
+  // --- Advanced Mode interface --------------------------------------------
+  "wb.ui.kicker": "ELRS السهل · Hardware Lab",
+  "wb.ui.title": "إعداد وتحديث ExpressLRS",
+  "wb.ui.subtitle":
+    "مصدر رسمي، تعريف CRSF، إعدادات حقيقية، استعادة إلزامية، ونجاح مشروط بعودة الجهاز المتوقع.",
+  "wb.ui.statusLabel": "الحالة",
+  "wb.ui.cancelOperation": "إلغاء العملية",
+  "wb.ui.pendingRecovery": "استعادة معلّقة ·",
+  "wb.ui.confirmTargetForRecovery": "تأكيد Target للاستعادة",
+  "wb.ui.typeExactly": "اكتب حرفيًا:",
+  "wb.ui.powerStableRecovery": "ثبات الطاقة أثناء الاستعادة",
+  "wb.ui.antennaFittedRecovery": "هوائي جهاز الإرسال مثبت أثناء الاستعادة",
+  "wb.ui.chooseRecoveryPackage": "اختيار حزمة الاستعادة",
+  "wb.ui.journalChecking":
+    "جارٍ فحص سجل الاستعادة؛ عمليات الكتابة مقفلة مؤقتًا.",
+  "wb.ui.journalUnreadable":
+    "تعذر التحقق من سجل الاستعادة؛ عمليات التفليش والاستعادة مقفلة بأمان.",
+  "wb.ui.catalogHeading": "الإصدار وTarget",
+  "wb.ui.catalogSubtitle":
+    "الإصدارات وTargets وطرق التحديث تأتي من مصادر ExpressLRS الرسمية.",
+  "wb.ui.release": "الإصدار",
+  "wb.ui.chooseRelease": "اختر إصدارًا",
+  "wb.ui.vendor": "الشركة",
+  "wb.ui.bandFamily": "النطاق / العائلة",
+  "wb.ui.regulatoryRegion": "المنطقة التنظيمية",
+  "wb.ui.chooseRegion": "اختر المنطقة",
+  "wb.ui.updateMethod": "طريقة التحديث",
+  "wb.ui.platform": "المنصة",
+  "wb.ui.officialTargetMethods": "طرق Target الرسمية",
+  "wb.ui.deviceHeading": "تعريف الجهاز وإعداداته",
+  "wb.ui.deviceSubtitle":
+    "لا تُعرض هوية قبل Device Info صحيح وCRC صالح، ولا يتطلب ذلك تحميل الكتالوج.",
+  "wb.ui.identifyOverCrsf": "تعريف الجهاز عبر CRSF",
+  "wb.ui.closeSession": "إغلاق الجلسة",
+  "wb.ui.usePortNote":
+    "استخدم منفذ وحدة ELRS المباشر. منفذ Joystick أو منفذ الراديو العام لا يحقق بوابة CRSF.",
+  "wb.ui.device": "الجهاز",
+  "wb.ui.targetMatch": "مطابقة Target",
+  "wb.ui.awaitingCatalog": "بانتظار الكتالوج",
+  "wb.ui.targetAutoMatched": "Target المختار مطابق تلقائيًا لهوية CRSF.",
+  "wb.ui.identityPinnedLoadLater":
+    "هوية CRSF مثبتة. حمّل الكتالوج لاحقًا فقط لمطابقة Target وتجهيز Firmware.",
+  "wb.ui.identityPinnedNeedsManual":
+    "CRSF مثبت، لكن Target يحتاج اختيارًا وتأكيدًا يدويًا قبل التفليش. الإعدادات والربط يعتمدان على المعاملات التي أعلنها الجهاز نفسه.",
+  "wb.ui.connectToReadSettings":
+    "وصّل الجهاز وعرّفه لقراءة إعداداته الحقيقية؛ كل كتابة تُقرأ رجعيًا بعدها للتحقق من أنها ثبتت فعلًا.",
+  "wb.ui.setting": "الإعداد",
+  "wb.ui.value": "القيمة",
+  "wb.ui.saveWithReadBack": "حفظ مع قراءة رجعية",
+  "wb.ui.restoreSnapshot": "استعادة اللقطة",
+  "wb.ui.runRealBinding": "تشغيل الربط الحقيقي",
+  "wb.ui.bindingAcknowledgement":
+    "الطرف الآخر جاهز للربط، والطاقة والهوائيات في حالة آمنة",
+  "wb.ui.bindEvidenceLevel": "مستوى دليل الربط:",
+  "wb.ui.optionsHeading": "خيارات Firmware",
+  "wb.ui.optionsSubtitle":
+    "العبارة وكلمة Wi-Fi تبقيان في الذاكرة حتى بناء الحزمة.",
+  "wb.ui.bindPhrase": "عبارة الربط",
+  "wb.ui.bindPhraseNote":
+    "اكتب العبارة نفسها في جهاز الإرسال وجهاز الاستقبال. أي اختلاف بينهما يعني أن الرابط لن يقوم. الجهاز لا يعلن UID عبر CRSF، لذلك تطابق العبارة يثبته قيام رابط حي لا هذه الكتابة.",
+  "wb.ui.bindPhraseInvalid":
+    "عبارة الربط غير صالحة: تجاوز الطول، أو مسافات فقط، أو محرف خفي.",
+  "wb.ui.wifiSsid": "اسم شبكة Wi-Fi",
+  "wb.ui.wifiPassword": "كلمة مرور Wi-Fi",
+  "wb.ui.wifiAutoOn": "تشغيل Wi-Fi تلقائيًا بعد (ثانية)",
+  "wb.ui.uartInverted": "UART مقلوب",
+  "wb.ui.unlockHigherPower": "فتح مستويات الطاقة الأعلى",
+  "wb.ui.receiverInvertTx": "عكس خرج TX للمستقبل",
+  "wb.ui.lockOnFirstConnection": "قفل أول اتصال",
+  "wb.ui.packageHeading": "بناء الحزمة والتفليش",
+  "wb.ui.packageSubtitle": "كل قطاع موثق بـSHA-256 وحزمة الاستعادة إلزامية.",
+  "wb.ui.buildOfficialFirmware": "بناء Firmware الرسمي",
+  "wb.ui.noPackageYet": "لم تُبنَ حزمة بعد.",
+  "wb.ui.downloadFirmware": "تنزيل Firmware / OTA",
+  "wb.ui.downloadRecovery": "تنزيل حزمة الاستعادة",
+  "wb.ui.downloadLua": "تنزيل ملف Lua",
+  "wb.ui.recoveryKeptConfirmed":
+    "أكد المستخدم أن حزمة الاستعادة محفوظة خارج التطبيق.",
+  "wb.ui.recoveryKeptCheckbox":
+    "أؤكد أن ملف حزمة الاستعادة حُفظ ويمكنني الوصول إليه دون هذا التطبيق",
+  "wb.ui.recoveryFirstNote":
+    "الكتابة مقفلة حتى بدء التنزيل ثم تأكيدك اليدوي أن حزمة الاستعادة حُفظت.",
+  "wb.ui.confirmTarget": "تأكيد Target",
+  "wb.ui.powerStableFlash": "ثبات الطاقة أثناء التفليش",
+  "wb.ui.antennaFitted": "هوائي جهاز الإرسال مثبت",
+  "wb.ui.sourceOfficial": "المصدر: ExpressLRS الرسمي",
+  "wb.ui.hardwareObservedNote":
+    "لا يظهر HARDWARE_OBSERVED إلا بعد جلسة جهاز فعلية.",
+  "wb.ui.noCrsfSession": "لا توجد جلسة CRSF",
+  "wb.ui.crsfConnected": "CRSF متصل",
+  "wb.ui.loadCatalog": "تحميل الكتالوج الرسمي",
+  "wb.ui.loading": "جارٍ التحميل…",
+  "wb.ui.deviceType": "نوع الجهاز",
+  "wb.ui.deviceTx": "جهاز إرسال TX",
+  "wb.ui.deviceRx": "جهاز استقبال RX",
+  "wb.ui.experimentalSuffix": " · تجريبي",
+  "wb.ui.downloadOpenWifi": "تنزيل وفتح صفحة Wi-Fi",
+  "wb.ui.downloadPackage": "تنزيل الحزمة",
+  "wb.ui.startStm32Dfu": "بدء STM32 DFU",
+  "wb.ui.startRealFlash": "بدء التفليش الحقيقي",
+
+  "wb.ui.recoveryPickSameTarget":
+    "اختر نفس Target وطريقة الاستعادة ثم حزمة الاستعادة المطابقة.",
+  "wb.ui.flashNeeds": "التفليش ينتظر:",
 } satisfies Record<keyof typeof workbenchEn, string>;

@@ -70,6 +70,27 @@ import {
   type RxAsTxSupport,
 } from "./rx-as-tx";
 
+/** The operations the workbench and Easy Mode can each ask about. */
+export type DeviceOperation =
+  | "connect"
+  | "diagnostics"
+  | "settingsWrite"
+  | "settingsRestore"
+  | "binding"
+  | "firmwareWrite"
+  | "recovery"
+  | "rxAsTx"
+  | "airport";
+
+/**
+ * Whether one operation can run right now, and if not, every live prerequisite
+ * that is missing. `missing` is empty exactly when `ready` is true.
+ */
+export interface OperationReadiness {
+  readonly ready: boolean;
+  readonly missing: readonly ControllerMessage[];
+}
+
 /** One mode's answer, so the UI can explain each independently. */
 export interface RxAsTxModeSupport {
   readonly mode: RxAsTxActiveMode;
@@ -615,6 +636,139 @@ export function useDeviceController({
     (selectedTarget.role !== "tx" || antennaAcknowledged) &&
     (!operationNeedsTargetConfirmation || manualTargetConfirmed) &&
     (!firmwareWriteMethod || method !== "uart" || identity !== null);
+
+  /**
+   * Readiness, one answer per operation.
+   *
+   * A single `deviceWritesReady` flag could only ever say "something is
+   * missing"; these say *which* prerequisite is missing for *this* operation
+   * and what satisfies it. Every entry describes a live condition — no device,
+   * an unread recovery journal, an incompatible Target, an operation already
+   * running — never a build stage or a release phase. A feature is never
+   * disabled because it has not shipped yet; it is disabled because a real
+   * precondition is not met right now, and the reason says how to meet it.
+   */
+  function readinessFrom(
+    requirements: readonly (readonly [boolean, ControllerMessage])[],
+  ): OperationReadiness {
+    const missing = requirements
+      .filter(([satisfied]) => !satisfied)
+      .map(([, reason]) => reason);
+    return Object.freeze({ ready: missing.length === 0, missing });
+  }
+
+  const liveDevice = [identity !== null, message("wb.need.identity")] as const;
+  const journalReady = [
+    recoveryJournalState === "ready",
+    message("wb.need.recoveryJournal"),
+  ] as const;
+  const noPendingCheckpoint = [
+    checkpoint === null,
+    message("wb.need.clearCheckpoint"),
+  ] as const;
+  const portClean = [
+    hardwareCleanupReady,
+    message("wb.need.portCleanup"),
+  ] as const;
+  const notBusy = [!busy, message("wb.need.idle")] as const;
+  const targetChosen = [
+    selectedTarget !== null,
+    message("wb.need.target"),
+  ] as const;
+
+  const readiness: Readonly<Record<DeviceOperation, OperationReadiness>> =
+    Object.freeze({
+      connect: readinessFrom([notBusy, portClean]),
+      diagnostics: readinessFrom([]),
+      settingsWrite: readinessFrom([
+        notBusy,
+        liveDevice,
+        portClean,
+        journalReady,
+        noPendingCheckpoint,
+        [
+          selectedSetting !== undefined,
+          message("wb.need.writableSetting"),
+        ] as const,
+      ]),
+      settingsRestore: readinessFrom([
+        notBusy,
+        liveDevice,
+        portClean,
+        journalReady,
+        noPendingCheckpoint,
+        [settingsBackup !== null, message("wb.need.settingsBackup")] as const,
+      ]),
+      binding: readinessFrom([
+        notBusy,
+        liveDevice,
+        portClean,
+        journalReady,
+        noPendingCheckpoint,
+        [
+          bindingAcknowledged,
+          message("wb.need.bindingAcknowledgement"),
+        ] as const,
+      ]),
+      firmwareWrite: readinessFrom([
+        notBusy,
+        targetChosen,
+        portClean,
+        journalReady,
+        noPendingCheckpoint,
+        [prepared !== null, message("wb.need.preparedPackage")] as const,
+        [recoveryDownloaded, message("wb.need.recoveryDownload")] as const,
+        [powerAcknowledged, message("wb.need.powerAcknowledgement")] as const,
+        [
+          selectedTarget === null ||
+            selectedTarget.role !== "tx" ||
+            antennaAcknowledged,
+          message("wb.need.antennaAcknowledgement"),
+        ] as const,
+        [
+          !operationNeedsTargetConfirmation || manualTargetConfirmed,
+          message("wb.need.targetConfirmation"),
+        ] as const,
+        // Wi-Fi and download hand a verified artifact to the device's own
+        // updater, so they legitimately need no live USB identity.
+        [
+          !firmwareWriteMethod || method !== "uart" || identity !== null,
+          message("wb.need.identityForUart"),
+        ] as const,
+        [
+          !firmwareWriteMethod || identity !== null,
+          message("wb.need.identity"),
+        ] as const,
+      ]),
+      recovery: readinessFrom([
+        notBusy,
+        targetChosen,
+        portClean,
+        journalReady,
+        [
+          checkpoint !== null || recoveryDownloaded,
+          message("wb.need.recoveryPackage"),
+        ] as const,
+        [powerAcknowledged, message("wb.need.powerAcknowledgement")] as const,
+      ]),
+      rxAsTx: readinessFrom([
+        targetChosen,
+        [
+          rxAsTxSupport.supported,
+          rxAsTxSupport.supported
+            ? message("wb.need.target")
+            : message(
+                `workbench.rxAsTx.${rxAsTxSupport.reason}` as MessageKey,
+                {
+                  target: rxAsTxSupport.targetName,
+                  platform: rxAsTxSupport.platform,
+                  modes: rxAsTxSupport.availableModes.join(", "),
+                },
+              ),
+        ] as const,
+      ]),
+      airport: readinessFrom([targetChosen]),
+    });
 
   /**
    * Drops the secrets the operator typed as soon as they have been compiled
@@ -2318,6 +2472,7 @@ export function useDeviceController({
     checkpoint,
     connectHardware,
     deviceWritesReady,
+    readiness,
     disconnectHardware,
     downloadFirmware,
     downloadLuaScript,

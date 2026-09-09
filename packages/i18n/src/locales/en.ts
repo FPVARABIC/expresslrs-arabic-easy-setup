@@ -1,7 +1,9 @@
+import { acceptanceEn } from "./acceptance-en";
 import { workbenchEn } from "./workbench-en";
 
 export const en = {
   ...workbenchEn,
+  ...acceptanceEn,
   "app.name": "ExpressLRS Easy Setup",
   "app.independent":
     "Compatible with ExpressLRS — independent community project, not affiliated with or endorsed by ExpressLRS LLC",

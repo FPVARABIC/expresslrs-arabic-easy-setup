@@ -308,4 +308,142 @@ export const workbenchEn = {
   "wb.recovery.stopped": "The recovery stopped: {detail}",
   "wb.recovery.savedConfirmed":
     "Your manual confirmation that the recovery package is saved was recorded; keep it until the post-reboot verification completes.",
+
+  // --- per-operation readiness --------------------------------------------
+  "wb.need.identity": "Connect the device and let its identity be read first.",
+  "wb.need.identityForUart":
+    "A direct UART write needs a live device identity; connect the device first.",
+  "wb.need.recoveryJournal":
+    "The recovery journal could not be read. Reload the page so it can be verified.",
+  "wb.need.clearCheckpoint":
+    "An earlier operation left a recovery checkpoint open. Finish or clear that recovery first.",
+  "wb.need.portCleanup":
+    "The previous port was not proven closed. Unplug the device safely and reload the page.",
+  "wb.need.idle":
+    "Another operation is running. Wait for it to finish or cancel it.",
+  "wb.need.target": "Choose the official Target for this device first.",
+  "wb.need.writableSetting": "Choose a writable setting from the list first.",
+  "wb.need.settingsBackup":
+    "Create a settings backup first, so there is something to restore.",
+  "wb.need.bindingAcknowledgement":
+    "Confirm you understand binding changes the link, then try again.",
+  "wb.need.preparedPackage": "Build the firmware package first.",
+  "wb.need.recoveryDownload":
+    "Download the recovery archive first, so the device can be put back.",
+  "wb.need.powerAcknowledgement":
+    "Confirm the device is on stable power that will not drop mid-write.",
+  "wb.need.antennaAcknowledgement":
+    "Confirm the transmitter's antenna is fitted before it can transmit.",
+  "wb.need.targetConfirmation":
+    "Type the Target name to confirm it, because the device identity does not pin it exactly.",
+  "wb.need.recoveryPackage":
+    "Select the recovery package to restore, or resume the open checkpoint.",
+
+  // --- Advanced Mode interface --------------------------------------------
+  "wb.ui.kicker": "Easy ELRS · Hardware Lab",
+  "wb.ui.title": "Set up and update ExpressLRS",
+  "wb.ui.subtitle":
+    "Official sources, CRSF identification, real settings, mandatory recovery, and success conditional on the expected device coming back.",
+  "wb.ui.statusLabel": "Status",
+  "wb.ui.cancelOperation": "Cancel the operation",
+  "wb.ui.pendingRecovery": "Recovery pending ·",
+  "wb.ui.confirmTargetForRecovery": "Confirm the Target for recovery",
+  "wb.ui.typeExactly": "Type it exactly:",
+  "wb.ui.powerStableRecovery": "Power stays stable throughout the recovery",
+  "wb.ui.antennaFittedRecovery":
+    "The transmitter's antenna is fitted throughout the recovery",
+  "wb.ui.chooseRecoveryPackage": "Choose the recovery package",
+  "wb.ui.journalChecking":
+    "Checking the recovery journal. Writes wait until that check finishes.",
+  "wb.ui.journalUnreadable":
+    "The recovery journal could not be verified, so flashing and recovery stay closed until it can be. Reload the page to try again.",
+  "wb.ui.catalogHeading": "Release and Target",
+  "wb.ui.catalogSubtitle":
+    "Releases, Targets, and update methods all come from the official ExpressLRS sources.",
+  "wb.ui.release": "Release",
+  "wb.ui.chooseRelease": "Choose a release",
+  "wb.ui.vendor": "Vendor",
+  "wb.ui.bandFamily": "Band / family",
+  "wb.ui.regulatoryRegion": "Regulatory region",
+  "wb.ui.chooseRegion": "Choose the region",
+  "wb.ui.updateMethod": "Update method",
+  "wb.ui.platform": "Platform",
+  "wb.ui.officialTargetMethods": "Official Target methods",
+  "wb.ui.deviceHeading": "Device identity and settings",
+  "wb.ui.deviceSubtitle":
+    "No identity is shown before a valid Device Info with a valid CRC, and that needs no catalog download.",
+  "wb.ui.identifyOverCrsf": "Identify the device over CRSF",
+  "wb.ui.closeSession": "Close the session",
+  "wb.ui.usePortNote":
+    "Use the ELRS module's direct port. A joystick port or the radio's general port does not satisfy the CRSF gate.",
+  "wb.ui.device": "Device",
+  "wb.ui.targetMatch": "Target match",
+  "wb.ui.awaitingCatalog": "Awaiting the catalog",
+  "wb.ui.targetAutoMatched":
+    "The chosen Target matches the CRSF identity automatically.",
+  "wb.ui.identityPinnedLoadLater":
+    "The CRSF identity is pinned. Load the catalog later, only to match a Target and prepare firmware.",
+  "wb.ui.identityPinnedNeedsManual":
+    "CRSF is pinned, but the Target still needs a manual choice and confirmation before flashing. Settings and binding rely on the parameters the device itself declared.",
+  "wb.ui.connectToReadSettings":
+    "Connect and identify the device to read its real settings. Every write is read back afterwards to confirm it actually took.",
+  "wb.ui.setting": "Setting",
+  "wb.ui.value": "Value",
+  "wb.ui.saveWithReadBack": "Save, with read-back",
+  "wb.ui.restoreSnapshot": "Restore the snapshot",
+  "wb.ui.runRealBinding": "Run the real binding",
+  "wb.ui.bindingAcknowledgement":
+    "The other end is ready to bind, and power and antennas are in a safe state",
+  "wb.ui.bindEvidenceLevel": "Binding evidence level:",
+  "wb.ui.optionsHeading": "Firmware options",
+  "wb.ui.optionsSubtitle":
+    "The binding phrase and the Wi-Fi password stay in memory only until the package is built.",
+  "wb.ui.bindPhrase": "Binding phrase",
+  "wb.ui.bindPhraseNote":
+    "Type the same phrase into the transmitter and the receiver. Any difference between them means the link will not come up. The device does not report its UID over CRSF, so a matching phrase is proven by a live link, not by this write.",
+  "wb.ui.bindPhraseInvalid":
+    "The binding phrase is not valid: it is too long, only spaces, or contains a hidden character.",
+  "wb.ui.wifiSsid": "Wi-Fi network name",
+  "wb.ui.wifiPassword": "Wi-Fi password",
+  "wb.ui.wifiAutoOn": "Turn Wi-Fi on automatically after (seconds)",
+  "wb.ui.uartInverted": "UART inverted",
+  "wb.ui.unlockHigherPower": "Unlock the higher power levels",
+  "wb.ui.receiverInvertTx": "Invert the receiver's TX output",
+  "wb.ui.lockOnFirstConnection": "Lock on first connection",
+  "wb.ui.packageHeading": "Build the package and flash",
+  "wb.ui.packageSubtitle":
+    "Every segment is documented with a SHA-256, and the recovery package is mandatory.",
+  "wb.ui.buildOfficialFirmware": "Build the official firmware",
+  "wb.ui.noPackageYet": "No package has been built yet.",
+  "wb.ui.downloadFirmware": "Download the firmware / OTA",
+  "wb.ui.downloadRecovery": "Download the recovery package",
+  "wb.ui.downloadLua": "Download the Lua script",
+  "wb.ui.recoveryKeptConfirmed":
+    "The operator confirmed the recovery package is saved outside this application.",
+  "wb.ui.recoveryKeptCheckbox":
+    "I confirm the recovery package file is saved and I can reach it without this application",
+  "wb.ui.recoveryFirstNote":
+    "Writing waits until the download has started and you have confirmed the recovery package is saved.",
+  "wb.ui.confirmTarget": "Confirm the Target",
+  "wb.ui.powerStableFlash": "Power stays stable throughout the flash",
+  "wb.ui.antennaFitted": "The transmitter's antenna is fitted",
+  "wb.ui.sourceOfficial": "Source: official ExpressLRS",
+  "wb.ui.hardwareObservedNote":
+    "HARDWARE_OBSERVED appears only after a session with a real device.",
+  "wb.ui.noCrsfSession": "No CRSF session",
+  "wb.ui.crsfConnected": "CRSF connected",
+  "wb.ui.loadCatalog": "Load the official catalog",
+  "wb.ui.loading": "Loading…",
+  "wb.ui.deviceType": "Device type",
+  "wb.ui.deviceTx": "TX transmitter",
+  "wb.ui.deviceRx": "RX receiver",
+  "wb.ui.experimentalSuffix": " · experimental",
+  "wb.ui.downloadOpenWifi": "Download and open the Wi-Fi page",
+  "wb.ui.downloadPackage": "Download the package",
+  "wb.ui.startStm32Dfu": "Start STM32 DFU",
+  "wb.ui.startRealFlash": "Start the real flash",
+
+  "wb.ui.recoveryPickSameTarget":
+    "Choose the same Target and recovery method, then the matching recovery package.",
+  "wb.ui.flashNeeds": "Flashing is waiting on:",
 } as const;

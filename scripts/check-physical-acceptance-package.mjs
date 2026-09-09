@@ -73,8 +73,26 @@ if (!model.includes('"elrs-easy:physical-acceptance:v1"')) {
   }
 }
 
-if (!panel.includes("كل خطوة متاحة من البداية ولا توجد تبعية إجبارية")) {
+// The claim now lives in the shared catalog, so it is checked where it is
+// defined (in both locales) and where the panel renders it.
+if (!panel.includes('t("accp.subheading")')) {
   failures.push("the recorder must state that tests have no sequential lock");
+}
+for (const [locale, file] of [
+  ["Arabic", "packages/i18n/src/locales/acceptance-ar.ts"],
+  ["English", "packages/i18n/src/locales/acceptance-en.ts"],
+]) {
+  const catalog = await readFile(path.join(root, file), "utf8");
+  if (!catalog.includes('"accp.subheading"')) {
+    failures.push(
+      `the ${locale} catalog is missing the no-sequential-lock statement`,
+    );
+  }
+  if (!catalog.includes('"accp.recordingAlwaysOpen"')) {
+    failures.push(
+      `the ${locale} catalog must state the recorder is always open`,
+    );
+  }
 }
 if (!panel.includes("serializePhysicalAcceptanceJson")) {
   failures.push("JSON export is not wired to the recorder");

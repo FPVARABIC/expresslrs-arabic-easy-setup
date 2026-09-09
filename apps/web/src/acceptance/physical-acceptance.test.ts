@@ -1,3 +1,5 @@
+import { createTranslator, defaultLocale } from "@elrs-easy/i18n";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -298,7 +300,10 @@ describe("physical acceptance model", () => {
       fixedNow,
     );
 
-    const markdown = serializePhysicalAcceptanceMarkdown(value);
+    const markdown = serializePhysicalAcceptanceMarkdown(
+      value,
+      createTranslator(defaultLocale),
+    );
     const json = serializePhysicalAcceptanceJson(value);
 
     expect(markdown).not.toContain("lab-network");
