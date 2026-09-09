@@ -11,7 +11,8 @@ above the evidence that supports it.
 | Level | What it means | What produces it |
 | --- | --- | --- |
 | `IMPLEMENTED` | The code exists and is reachable from the shipped entry point. Nothing is claimed about running it. | Source plus the write-path and UI-honesty gates |
-| `EMULATOR_VERIFIED` | Behaviour is proven against a stubbed transport in jsdom. | `pnpm test` |
+| `EMULATOR_VERIFIED` | Behaviour is proven against a stubbed transport in jsdom, or — for the Android host — on an emulator against a fake USB backend. | `pnpm test`; `gradle connectedDebugAndroidTest` |
+| `RUNTIME_AVAILABLE` | The control was observed refused, and then observed becoming available once exactly the prerequisites the application names were satisfied — driven through the shipped entry point. | `pnpm check:availability` — see [RUNTIME_AVAILABILITY.md](RUNTIME_AVAILABILITY.md) |
 | `BROWSER_VERIFIED` | Behaviour is proven in a real browser against the built application and its shipped headers. | `pnpm qa:browser` — see [browser QA](testing/browser-qa.md) |
 | `HARDWARE_VERIFIED` | Behaviour is proven against a physical ExpressLRS device. | A recorded physical acceptance session |
 | `UNSUPPORTED_WITH_EVIDENCE` | The path cannot work here, and the evidence for that is recorded. | A named, checkable observation |
@@ -79,6 +80,14 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 Control → readiness → driver → write authority → verification → recovery, for
 every operation the shipped application offers. Reachability of each driver
 from `apps/web/src/main.tsx` is enforced by `pnpm check:reachability`.
+
+That gate is static, and a static gate cannot settle the question that matters:
+`disabled={expr}` looks dynamic and can still evaluate false forever.
+[RUNTIME_AVAILABILITY.md](RUNTIME_AVAILABILITY.md) is the runtime half — every
+operation below was driven through the shipped `ProductShell`, observed
+refused, and then observed becoming available once its named prerequisites were
+satisfied. `pnpm check:availability` fails the build if any operation never
+opens, has no recorded row, or turns out to be gated on nothing.
 
 | Operation | Control | Handler | Readiness gate (live prerequisites) | Driver | Write authority | Success requires | On failure |
 | --- | --- | --- | --- | --- | --- | --- | --- |
