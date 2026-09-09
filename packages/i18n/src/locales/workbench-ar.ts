@@ -73,8 +73,8 @@ export const workbenchAr = {
     "توجد استعادة معلقة؛ أكملها قبل إرسال أي أمر يغيّر الجهاز.",
 
   "wb.catalog.loading": "جارٍ تحميل فهرس الإصدارات وكتالوج Targets الرسميين…",
-  "wb.catalog.progressIndex": "فهرس الإصدارات",
-  "wb.catalog.progressTargets": "كتالوج Targets",
+  "wb.catalog.progressIndex": "فهرس الإصدارات: {received}{total}",
+  "wb.catalog.progressTargets": "كتالوج Targets: {received}{total}",
   "wb.catalog.progress": "{stage}: {received}{total}",
   "wb.catalog.loaded":
     "تم تحميل {releases} إصدارًا قابلاً للبناء و{targets} Target رسميًا.",
@@ -117,4 +117,142 @@ export const workbenchAr = {
     "اكتمل أمر الربط، لكن لم تُرصد تلمترية رابط، فلا يُسجَّل الربط ناجحًا: {information}",
   "wb.bind.stopped": "توقف الربط: {detail}",
   "wb.bind.evidenceLevel": "مستوى دليل الربط: {level}",
+  "wb.fw.needRegion": "اختر المنطقة التنظيمية صراحة قبل بناء Firmware.",
+  "wb.fw.preparing": "جارٍ تنزيل الحزمة الرسمية وتجهيز Firmware لهذا Target…",
+  "wb.fw.optionsChanged":
+    "تغيرت الخيارات أثناء البناء؛ تم تجاهل الحزمة القديمة.",
+  "wb.fw.prepared":
+    "تم تجهيز {segments} قطاعًا والتحقق من SHA-256. نزّل حزمة الاستعادة قبل أي كتابة.",
+  "wb.fw.preparedWithPhrase":
+    "تم تجهيز {segments} قطاعًا والتحقق من SHA-256، مع عبارة ربط مضمّنة. نزّل حزمة الاستعادة قبل أي كتابة.",
+  "wb.fw.prepareFailed": "تعذر تجهيز Firmware: {detail}",
+  "wb.fw.downloadStarted": "تم بدء تنزيل {file}.",
+  "wb.fw.recoveryDownloadStarted":
+    "بدأ المتصفح طلب تنزيل حزمة الاستعادة، لكن التطبيق لا يستطيع إثبات حفظها. بعد التحقق من وجود الملف، أكّد ذلك يدويًا.",
+  "wb.fw.luaDownloading":
+    "جارٍ تنزيل ملف Lua الرسمي المتوافق مع إصدار ExpressLRS…",
+  "wb.fw.luaFailed": "تعذر تنزيل ملف Lua: {detail}",
+
+  "wb.reconnect.prompt": "أعد اختيار منفذ الجهاز بعد الإقلاع",
+  "wb.reconnect.promptStatus":
+    "أعد اختيار منفذ الجهاز بعد الإقلاع لإثبات الهوية والإصدار.",
+  "wb.reconnect.failed": "تعذرت إعادة قراءة الجهاز: {detail}",
+  "wb.reconnect.isolateFailed":
+    "تعذر عزل جلسة إعادة الاتصال بعد فشل تنظيف سابق",
+  "wb.reconnect.afterUnprovenClose":
+    "اكتملت إعادة قراءة الجهاز بعد رصد منفذ سابق غير مثبت الإغلاق.",
+  "wb.reconnect.readingIdentity": "قراءة هوية الجهاز بعد الإقلاع",
+  "wb.reconnect.closeMismatchedFailed":
+    "تعذر تأكيد إغلاق جلسة إعادة الاتصال غير المطابقة",
+  "wb.reconnect.targetMismatch":
+    "عاد جهاز، لكن أدلة Target لا تطابق العملية المخططة ({reason}).",
+  "wb.reconnect.confirmingTarget": "تأكيد مطابقة Target المقروء",
+  "wb.reconnect.closeVersionMismatchFailed":
+    "تعذر تأكيد إغلاق جلسة الإصدار غير المطابق",
+  "wb.reconnect.versionMismatch":
+    "عاد الجهاز، لكن الإصدار/Commit لا يطابق {expected}.",
+  "wb.reconnect.confirmingVersion": "تأكيد الإصدار/Commit المقروء",
+  "wb.reconnect.closePreviousFailed":
+    "تعذر تأكيد إغلاق جلسة CRSF السابقة بعد إعادة الاتصال",
+  "wb.reconnect.closeFallbackFailed":
+    "تعذر تأكيد إغلاق جلسة إعادة الاتصال الاحتياطية",
+  "wb.reconnect.previousCloseUnproven":
+    "تعذر إثبات إغلاق جلسة CRSF السابقة؛ أُوقفت إعادة الاتصال بأمان.",
+  "wb.reconnect.closeAfterGateChange":
+    "تعذر تأكيد إغلاق جلسة إعادة الاتصال بعد تغير بوابة التنظيف",
+  "wb.reconnect.gateChangedDuring":
+    "تغيرت جلسة الجهاز أو بوابة تنظيف المنفذ أثناء إعادة الاتصال؛ عُزلت الجلسة الجديدة.",
+  "wb.reconnect.gateChangedBefore":
+    "تغيرت جلسة الجهاز أو بوابة تنظيف المنفذ قبل اعتماد إعادة الاتصال.",
+  "wb.reconnect.complete":
+    "أُثبتت الهوية وTarget والإصدار، وأُغلق سجل الاستعادة",
+
+  "wb.transport.cleanupUnproven":
+    "إغلاق منفذ جهاز سابق غير مثبت؛ أُوقف فتح أي منفذ كتابة جديد.",
+  "wb.transport.crsfClosed": "جلسة CRSF المباشرة مغلقة.",
+  "wb.transport.gateChangedDuringIdentity":
+    "تغيرت حالة تنظيف منفذ الجهاز أثناء التحقق من الهوية؛ أُوقفت الكتابة.",
+  "wb.transport.roleMismatch": "نوع الجهاز تغير أو لا يطابق Target المختار.",
+  "wb.transport.liveIdentityDrifted":
+    "هوية الجهاز الحية لم تعد تطابق Target الذي حصل على إعفاء التأكيد اليدوي.",
+  "wb.transport.bootloaderTargetMismatch":
+    "Bootloader أبلغ Target مختلفًا: {target}",
+  "wb.transport.noBootloaderCommand":
+    "الجهاز لا يعلن أمر Bootloader صالحًا؛ أُوقفت الكتابة بأمان.",
+  "wb.transport.detachFailed":
+    "فشل تحرير منفذ CRSF للتفليش، لذلك لا يمكن إثبات إغلاقه: {detail}",
+  "wb.transport.closeAfterCancel":
+    "تعذر تأكيد إغلاق المنفذ الذي اختير بعد إلغاء عملية التفليش",
+  "wb.transport.gateChangedDuringPort":
+    "تغيرت حالة تنظيف منفذ الجهاز أثناء اختيار المنفذ؛ أُوقفت الكتابة.",
+
+  "wb.flash.journalLoading": "انتظر اكتمال فحص سجل الاستعادة قبل أي كتابة.",
+  "wb.flash.journalUnreadable":
+    "تعذر التحقق من سجل الاستعادة؛ كل عمليات الكتابة مرفوضة بأمان.",
+  "wb.flash.needPackage": "جهّز حزمة Firmware واختر Target قبل الكتابة.",
+  "wb.flash.gatesIncomplete":
+    "لم تكتمل بوابات Target والاستعادة والطاقة والهوائي.",
+  "wb.flash.downloadOnly":
+    "تم بدء تنزيل {file}. لم تُكتب أي بيانات على الجهاز.",
+  "wb.flash.wifiHandoff":
+    "تم تنزيل ملف OTA وفتح 10.0.0.1. اختر الملف المنزّل داخل صفحة الجهاز.",
+  "wb.flash.gateChangedBeforePort":
+    "تغيرت حالة تنظيف منفذ الجهاز؛ أُوقفت الكتابة قبل فتح منفذ جديد.",
+  "wb.flash.platformUnsupported": "منصة Target غير مدعومة داخل التطبيق.",
+  "wb.flash.dfuPlatformMismatch": "STM32 DFU لا يطابق منصة Target المختار.",
+  "wb.flash.stm32MissingFirmware": "حزمة STM32 لا تحتوي firmware.bin.",
+  "wb.flash.stm32CleanupUnproven":
+    "اكتملت كتابة STM32 لكن تعذر إثبات تحرير واجهة USB وإغلاقها",
+  "wb.flash.stm32CloseUnproven":
+    "تعذر تأكيد إغلاق منفذ STM32 بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+  "wb.flash.espCleanupUnproven":
+    "اكتملت كتابة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
+  "wb.flash.espCloseUnproven":
+    "تعذر تأكيد إغلاق منفذ ESP بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+  "wb.flash.complete": "اكتمل التفليش وعاد الجهاز بالإصدار/Commit المتوقع.",
+  "wb.flash.writeCloseUnproven":
+    "تعذر إثبات إغلاق منفذ الكتابة بعد توقف التفليش",
+  "wb.flash.stopped": "توقف التفليش وتحتاج العملية إلى الاستعادة: {detail}",
+  "wb.flash.reloadFirst": "أعد تحميل الصفحة قبل فتح أي منفذ آخر.",
+
+  "wb.recovery.journalLoading":
+    "انتظر اكتمال فحص سجل الاستعادة قبل اختيار الحزمة.",
+  "wb.recovery.journalUnreadable":
+    "لا يمكن تشغيل الاستعادة دون سجل استعادة موثوق ومقروء.",
+  "wb.recovery.needTarget": "اختر Target المطابق قبل تشغيل الاستعادة.",
+  "wb.recovery.needDirectPath":
+    "الاستعادة تتطلب مسار كتابة مباشرًا: UART أو Passthrough أو STM32 DFU.",
+  "wb.recovery.needTargetKey":
+    "أكّد مفتاح Target قبل تشغيل الاستعادة؛ منفذ الاستعادة اختيار جديد ولا يرث هوية CRSF السابقة.",
+  "wb.recovery.needPower": "أكّد ثبات الطاقة قبل تشغيل الاستعادة.",
+  "wb.recovery.needAntenna":
+    "أكّد تثبيت هوائي جهاز الإرسال قبل تشغيل الاستعادة.",
+  "wb.recovery.validating": "جارٍ فحص حزمة الاستعادة وSHA-256 لكل قطاع…",
+  "wb.recovery.packageMismatch":
+    "الحزمة المختارة لا تطابق بصمة جلسة الاستعادة المعلقة.",
+  "wb.recovery.gateChangedBeforePort":
+    "تغيرت حالة تنظيف منفذ الجهاز؛ أُوقفت الاستعادة قبل فتح منفذ جديد.",
+  "wb.recovery.missingFirmware": "حزمة الاستعادة لا تحتوي firmware.bin.",
+  "wb.recovery.stm32CleanupUnproven":
+    "اكتملت استعادة STM32 لكن تعذر إثبات تحرير واجهة USB وإغلاقها",
+  "wb.recovery.stm32CloseUnproven":
+    "تعذر تأكيد إغلاق منفذ STM32 بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+  "wb.recovery.closeAfterCancel":
+    "تعذر تأكيد إغلاق المنفذ الذي اختير بعد إلغاء الاستعادة",
+  "wb.recovery.gateChangedDuringPort":
+    "تغيرت حالة تنظيف منفذ الجهاز أثناء اختيار منفذ الاستعادة؛ أُوقفت الكتابة.",
+  "wb.recovery.espCleanupUnproven":
+    "اكتملت استعادة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
+  "wb.recovery.espCloseUnproven":
+    "تعذر تأكيد إغلاق منفذ ESP بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
+  "wb.recovery.platformUnsupported": "منصة الاستعادة غير مدعومة.",
+  "wb.recovery.complete":
+    "اكتملت الاستعادة وعاد الجهاز بالإصدار/Commit المتوقع.",
+  "wb.recovery.writeCloseUnproven":
+    "تعذر إثبات إغلاق منفذ الكتابة بعد توقف الاستعادة",
+  "wb.recovery.incomplete":
+    "اكتملت كتابة الاستعادة لكن تعذّر إثبات عودة الجهاز، فبقيت العملية غير مكتملة: {detail}",
+  "wb.recovery.stopped": "توقفت الاستعادة: {detail}",
+  "wb.recovery.savedConfirmed":
+    "سُجل تأكيدك اليدوي بأن حزمة الاستعادة محفوظة؛ احتفظ بها حتى اكتمال التحقق بعد الإقلاع.",
 } satisfies Record<keyof typeof workbenchEn, string>;

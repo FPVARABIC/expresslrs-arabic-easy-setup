@@ -37,9 +37,10 @@ export function ProductShell({
   const t = createTranslator(locale);
   const mainRef = useRef<HTMLElement | null>(null);
   const modeChangedRef = useRef(false);
-  const controller = useDeviceController(
-    hardwareConnector === undefined ? {} : { hardwareConnector },
-  );
+  const controller = useDeviceController({
+    ...(hardwareConnector === undefined ? {} : { hardwareConnector }),
+    locale,
+  });
 
   useEffect(() => {
     document.documentElement.lang = locale;

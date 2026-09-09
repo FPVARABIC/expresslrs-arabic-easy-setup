@@ -109,11 +109,26 @@ const shell = await readFile(
 if (!main.includes("<ProductShell />")) {
   failures.push("the public entrypoint must mount the product shell");
 }
+if (!/<ExpressLrsParityWorkbenchView\b/u.test(shell)) {
+  failures.push("the product shell must mount the canonical workbench");
+}
+// The workbench must render the shell's controller and the operator's chosen
+// locale. It used to hardcode Arabic and `dir="rtl"`, so choosing English left
+// the technical view in the wrong language and the wrong direction.
 if (
-  !shell.includes("<ExpressLrsParityWorkbenchView controller={controller} />")
+  !/<ExpressLrsParityWorkbenchView[\s\S]{0,200}?controller=\{controller\}/u.test(
+    shell,
+  )
 ) {
   failures.push(
-    "the product shell must mount the canonical workbench over the shared controller",
+    "the product shell must mount the workbench over the shared controller",
+  );
+}
+if (
+  !/<ExpressLrsParityWorkbenchView[\s\S]{0,200}?locale=\{locale\}/u.test(shell)
+) {
+  failures.push(
+    "the product shell must pass the chosen locale to the workbench",
   );
 }
 if (!shell.includes("<EasySetup")) {

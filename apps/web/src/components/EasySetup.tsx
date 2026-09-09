@@ -120,6 +120,7 @@ export function EasySetup({
     setSettingDraft,
     setTargetId,
     settingDraft,
+    renderMessage,
     startBinding,
     targetId,
     updateOption,
@@ -191,7 +192,7 @@ export function EasySetup({
       // The controller names the specific missing condition; Easy Mode shows
       // that, never a generic refusal.
       setFailed(true);
-      setOutcome({ kind: "failed", text: result.message });
+      setOutcome({ kind: "failed", text: renderMessage(result.message) });
       return;
     }
     if (isMachineVerifiedBinding(evidence)) {
@@ -239,7 +240,7 @@ export function EasySetup({
     setStep("verify");
     if (result.applied === null) {
       setFailed(true);
-      setOutcome({ kind: "failed", text: result.message });
+      setOutcome({ kind: "failed", text: renderMessage(result.message) });
       return;
     }
     setOutcome(
@@ -262,7 +263,7 @@ export function EasySetup({
     setOutcome(
       result.verified
         ? { kind: "verified", text: t("easy.fw.verified") }
-        : { kind: "failed", text: result.message },
+        : { kind: "failed", text: renderMessage(result.message) },
     );
   }
 
@@ -274,7 +275,7 @@ export function EasySetup({
     setOutcome(
       result.verified
         ? { kind: "verified", text: t("easy.fw.verified") }
-        : { kind: "failed", text: result.message },
+        : { kind: "failed", text: renderMessage(result.message) },
     );
   }
 

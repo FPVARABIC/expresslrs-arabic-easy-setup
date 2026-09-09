@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  createTranslator,
+  defaultLocale,
+  type Locale,
+  type MessageKey,
+  type TranslationParameters,
+} from "@elrs-easy/i18n";
 
 import type { PhysicalAcceptanceContextSnapshot } from "../acceptance/physical-acceptance";
 import { buildSha } from "../build-identity";
@@ -88,30 +95,25 @@ import {
   type WriteDenialReason,
 } from "./write-authority";
 
-const WRITE_DENIAL_MESSAGES: Readonly<Record<WriteDenialReason, string>> =
+const WRITE_DENIAL_KEYS: Readonly<Record<WriteDenialReason, MessageKey>> =
   Object.freeze({
-    NO_DEVICE_SESSION: "وصّل الجهاز وعرّفه أولًا؛ لا يمكن تغيير جهاز غير متصل.",
-    IDENTITY_UNCONFIRMED:
-      "هوية الجهاز غير مؤكدة؛ أعد التعريف عبر CRSF قبل أي تغيير.",
-    PORT_CLEANUP_UNCONFIRMED:
-      "إغلاق منفذ سابق غير مثبت؛ أعد تحميل الصفحة بعد فصل الجهاز بأمان.",
-    OPERATION_IN_PROGRESS: "هناك عملية جارية؛ انتظر انتهاءها أو ألغِها.",
-    RECOVERY_JOURNAL_UNREADABLE:
-      "تعذر قراءة سجل الاستعادة؛ لا تُسمح الكتابة بلا مسار استعادة معروف.",
-    PENDING_RECOVERY_CHECKPOINT:
-      "توجد استعادة معلقة من عملية سابقة؛ أكملها أولًا.",
-    NO_PENDING_RECOVERY: "لا توجد عملية متوقفة تحتاج استعادة.",
-    TARGET_NOT_MATCHED: "اختر Target مطابقًا للجهاز المتصل قبل الكتابة.",
-    BAND_NOT_MATCHED: "النطاق لا يطابق الجهاز المتصل؛ صحّح الاختيار.",
-    ARTIFACT_NOT_VERIFIED: "جهّز حزمة Firmware وتحقق منها قبل الكتابة.",
-    RECOVERY_NOT_AVAILABLE: "نزّل حزمة الاستعادة أولًا حتى يمكن التراجع.",
-    BENCH_NOT_ACKNOWLEDGED:
-      "أكّد ثبات الطاقة، وتركيب هوائي TX، قبل بدء الكتابة.",
-    USER_CONFIRMATION_MISSING: "أكّد العملية قبل تنفيذها.",
+    NO_DEVICE_SESSION: "wb.deny.NO_DEVICE_SESSION",
+    IDENTITY_UNCONFIRMED: "wb.deny.IDENTITY_UNCONFIRMED",
+    PORT_CLEANUP_UNCONFIRMED: "wb.deny.PORT_CLEANUP_UNCONFIRMED",
+    OPERATION_IN_PROGRESS: "wb.deny.OPERATION_IN_PROGRESS",
+    RECOVERY_JOURNAL_UNREADABLE: "wb.deny.RECOVERY_JOURNAL_UNREADABLE",
+    PENDING_RECOVERY_CHECKPOINT: "wb.deny.PENDING_RECOVERY_CHECKPOINT",
+    NO_PENDING_RECOVERY: "wb.deny.NO_PENDING_RECOVERY",
+    TARGET_NOT_MATCHED: "wb.deny.TARGET_NOT_MATCHED",
+    BAND_NOT_MATCHED: "wb.deny.BAND_NOT_MATCHED",
+    ARTIFACT_NOT_VERIFIED: "wb.deny.ARTIFACT_NOT_VERIFIED",
+    RECOVERY_NOT_AVAILABLE: "wb.deny.RECOVERY_NOT_AVAILABLE",
+    BENCH_NOT_ACKNOWLEDGED: "wb.deny.BENCH_NOT_ACKNOWLEDGED",
+    USER_CONFIRMATION_MISSING: "wb.deny.USER_CONFIRMATION_MISSING",
   });
 
-function writeDenialMessage(reason: WriteDenialReason): string {
-  return WRITE_DENIAL_MESSAGES[reason];
+function writeDenialMessage(reason: WriteDenialReason): ControllerMessage {
+  return message(WRITE_DENIAL_KEYS[reason]);
 }
 
 const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
@@ -132,16 +134,68 @@ const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
   receiverAsTransmitter: false,
 });
 
-export const METHOD_LABELS: Readonly<Record<ExpressLrsFlashMethod, string>> =
-  Object.freeze({
-    uart: "USB مباشر / UART",
-    betaflight: "عبر متحكم الطيران",
-    edgetx: "عبر جهاز التحكم",
-    passthru: "Passthrough جاهز",
-    wifi: "Wi-Fi",
-    stlink: "STM32 DFU",
-    download: "تنزيل فقط",
-  });
+export const METHOD_LABEL_KEYS: Readonly<
+  Record<ExpressLrsFlashMethod, MessageKey>
+> = Object.freeze({
+  uart: "wb.method.uart",
+  betaflight: "wb.method.betaflight",
+  edgetx: "wb.method.edgetx",
+  passthru: "wb.method.passthru",
+  wifi: "wb.method.wifi",
+  stlink: "wb.method.stlink",
+  download: "wb.method.download",
+});
+
+/**
+ * A message the controller wants shown, named rather than written.
+ *
+ * The controller used to build Arabic sentences directly, which is why the
+ * technical workbench stayed Arabic when the operator chose English. It now
+ * emits a catalog key plus its parameters and the view translates it, so both
+ * locales are complete by construction.
+ */
+export interface ControllerMessage {
+  readonly key: MessageKey;
+  readonly params?: TranslationParameters;
+  /**
+   * An optional second sentence. It is itself a named message rather than a
+   * pre-rendered string, so a composed status stays translatable.
+   */
+  readonly detail?: ControllerMessage;
+}
+
+function message(
+  key: MessageKey,
+  params?: TranslationParameters,
+  detail?: ControllerMessage,
+): ControllerMessage {
+  return Object.freeze({
+    key,
+    ...(params === undefined ? {} : { params }),
+    ...(detail === undefined ? {} : { detail }),
+  }) as ControllerMessage;
+}
+
+/** An error carrying a named message, so a refusal survives translation. */
+class ControllerError extends Error {
+  public constructor(public readonly controllerMessage: ControllerMessage) {
+    super(controllerMessage.key);
+    this.name = "ControllerError";
+  }
+}
+
+/**
+ * The message for a caught error: a controller error keeps its own name, and
+ * anything else is framed by the caller with its technical text as a detail.
+ */
+function errorMessage(
+  error: unknown,
+  frame: MessageKey,
+  extra: TranslationParameters = {},
+): ControllerMessage {
+  if (error instanceof ControllerError) return error.controllerMessage;
+  return message(frame, { ...extra, detail: safeMessage(error) });
+}
 
 /** How long to watch link telemetry after a bind command before grading it. */
 const BIND_OBSERVATION_MS = 8_000;
@@ -169,21 +223,21 @@ async function waitForObservedLink(
  */
 export interface DeviceOperationResult {
   readonly verified: boolean;
-  readonly message: string;
+  readonly message: ControllerMessage;
 }
 
 /** What a bind attempt established, with the text that describes it. */
 export interface BindingOperationResult {
   /** null when the attempt was refused before any command was sent. */
   readonly evidence: BindingEvidence | null;
-  readonly message: string;
+  readonly message: ControllerMessage;
 }
 
 /** What a settings write established, with the text that describes it. */
 export interface SettingWriteResult {
   /** null when the attempt was refused before any command was sent. */
   readonly applied: boolean | null;
-  readonly message: string;
+  readonly message: ControllerMessage;
 }
 
 function nowIso(): string {
@@ -199,9 +253,7 @@ function normalized(value: string): string {
 }
 
 function safeMessage(error: unknown): string {
-  return (
-    error instanceof Error ? error.message : "توقفت العملية بسبب خطأ غير معروف"
-  )
+  return (error instanceof Error ? error.message : "unknown error")
     .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
     .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
     .replace(/\s+/gu, " ")
@@ -274,8 +326,8 @@ async function boundedFileBytes(
   maximumBytes: number,
 ): Promise<Uint8Array> {
   if (file.size < 1 || file.size > maximumBytes) {
-    throw new RangeError(
-      `الملف يجب أن يكون بين 1 بايت و${formatBytes(maximumBytes)}`,
+    throw new ControllerError(
+      message("wb.status.fileBounds", { maximum: formatBytes(maximumBytes) }),
     );
   }
   return new Uint8Array(await file.arrayBuffer());
@@ -330,11 +382,27 @@ export function releaseSelectionKey(release: OfficialRelease): string {
  */
 export interface DeviceControllerInput {
   readonly hardwareConnector?: HardwareDriverConnector;
+  /**
+   * Used only where a message must be rendered into an exported artifact —
+   * the diagnostics report and the acceptance context. Live status stays a
+   * named message so the view re-renders it when the operator switches
+   * language.
+   */
+  readonly locale?: Locale;
 }
 
 export function useDeviceController({
   hardwareConnector,
+  locale = defaultLocale,
 }: DeviceControllerInput = {}) {
+  const translate = createTranslator(locale);
+  /** Renders a named message, including its optional second sentence. */
+  const renderMessage = (value: ControllerMessage): string => {
+    const head = translate(value.key, value.params);
+    return value.detail === undefined
+      ? head
+      : `${head} ${renderMessage(value.detail)}`;
+  };
   const [catalog, setCatalog] = useState<OfficialCatalog | null>(null);
   const [catalogState, setCatalogState] = useState<
     "idle" | "loading" | "ready" | "failed"
@@ -347,8 +415,8 @@ export function useDeviceController({
   const [method, setMethod] = useState<ExpressLrsFlashMethod>("uart");
   const [options, setOptions] =
     useState<ExpressLrsFirmwareOptions>(DEFAULT_OPTIONS);
-  const [status, setStatus] = useState(
-    "يمكنك تعريف الجهاز مباشرة؛ حمّل الكتالوج فقط عند تجهيز Firmware رسمي.",
+  const [status, setStatus] = useState<ControllerMessage>(() =>
+    message("wb.status.idle"),
   );
   const [busy, setBusy] = useState(false);
   const writeAuthorityRef = useRef(new DeviceWriteAuthority());
@@ -408,7 +476,7 @@ export function useDeviceController({
   const catalogAbortRef = useRef<AbortController | null>(null);
   const operationAbortRef = useRef<AbortController | null>(null);
   const optionsRevisionRef = useRef(0);
-  const lastRefusalRef = useRef<string | null>(null);
+  const lastRefusalRef = useRef<ControllerMessage | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -422,7 +490,9 @@ export function useDeviceController({
         if (!active) return;
         setRecoveryJournalState("error");
         setStatus(
-          `تعذر التحقق من سجل الاستعادة؛ بقيت كل عمليات الكتابة مقفلة: ${safeMessage(error)}`,
+          message("wb.status.recoveryJournalUnreadable", {
+            detail: safeMessage(error),
+          }),
         );
       });
     return () => {
@@ -573,7 +643,7 @@ export function useDeviceController({
     setBindingAcknowledged(false);
   }
 
-  function latchUnconfirmedHardwareClose(detail?: string): void {
+  function latchUnconfirmedHardwareClose(detail?: ControllerMessage): void {
     hardwareCloseUncertainRef.current = true;
     setHardwareCloseUncertain(true);
     operationAbortRef.current?.abort(
@@ -589,9 +659,7 @@ export function useDeviceController({
       void session.close().catch(() => undefined);
     }
     clearHardwarePresentation();
-    setStatus(
-      `تعذر تأكيد إغلاق جلسة الجهاز؛ أُخفيت أي هوية وتوقفت إعادة الاتصال حتى إعادة تحميل الصفحة.${detail === undefined ? "" : ` ${detail}`}`,
-    );
+    setStatus(message("wb.status.sessionCloseUnproven", {}, detail));
   }
 
   function hardwareCleanupGateOpen(): boolean {
@@ -603,7 +671,7 @@ export function useDeviceController({
 
   async function closePortOrLatch(
     port: HardwareSerialPort,
-    detail: string,
+    detail: ControllerMessage,
   ): Promise<boolean> {
     let closeTask: Promise<void>;
     try {
@@ -639,8 +707,8 @@ export function useDeviceController({
     ) {
       return;
     }
-    throw new Error(
-      "تغيرت جلسة الجهاز أو حالة تنظيف المنفذ أثناء العملية؛ تم تجاهل النتيجة المتأخرة.",
+    throw new ControllerError(
+      message("wb.status.sessionChangedDuringOperation"),
     );
   }
 
@@ -653,16 +721,14 @@ export function useDeviceController({
       writeAuthorityRef.current.revokeAll();
       disconnectUnsubscribeRef.current = null;
       clearHardwarePresentation();
-      setStatus("انقطع اتصال الجهاز. أعد اختياره يدويًا للمتابعة.");
+      setStatus(message("wb.status.disconnected"));
     });
   }
 
   async function disconnectHardware(): Promise<boolean> {
     if (hardwareCloseUncertainRef.current) {
       clearHardwarePresentation();
-      setStatus(
-        "لا يمكن فتح جلسة أجهزة جديدة لأن إغلاق المنفذ السابق غير مثبت؛ أعد تحميل الصفحة بعد فصل الجهاز بأمان.",
-      );
+      setStatus(message("wb.status.cannotOpenNewSession"));
       return false;
     }
     const pendingClose = hardwareCloseInProgressRef.current;
@@ -688,7 +754,9 @@ export function useDeviceController({
         },
         (error: unknown) => {
           latchUnconfirmedHardwareClose(
-            `تعذر إغلاق المنفذ بأمان: ${safeMessage(error)}`,
+            message("wb.status.portCloseFailed", {
+              detail: safeMessage(error),
+            }),
           );
           return false;
         },
@@ -706,13 +774,19 @@ export function useDeviceController({
 
   async function closeSessionOrLatch(
     session: UserHardwareSession,
-    detail: string,
+    detail: ControllerMessage,
   ): Promise<boolean> {
     let closed = false;
     try {
       closed = await session.close();
     } catch (error: unknown) {
-      latchUnconfirmedHardwareClose(`${detail}: ${safeMessage(error)}`);
+      latchUnconfirmedHardwareClose(
+        message(
+          "wb.status.portCloseFailed",
+          { detail: safeMessage(error) },
+          detail,
+        ),
+      );
       return false;
     }
     if (!closed) latchUnconfirmedHardwareClose(detail);
@@ -764,9 +838,9 @@ export function useDeviceController({
         : {}),
     });
     if (!decision.granted) {
-      const message = writeDenialMessage(decision.reason);
-      lastRefusalRef.current = message;
-      setStatus(message);
+      const denial = writeDenialMessage(decision.reason);
+      lastRefusalRef.current = denial;
+      setStatus(denial);
       return false;
     }
     const consumed = writeAuthorityRef.current.consume(decision.capability, {
@@ -775,10 +849,9 @@ export function useDeviceController({
       operation,
     });
     if (consumed === null) {
-      const message =
-        "تغيّرت جلسة الجهاز أو هويته بعد التصريح؛ أعد التعريف ثم حاول مجددًا.";
-      lastRefusalRef.current = message;
-      setStatus(message);
+      const stale = message("wb.status.authorizationStale");
+      lastRefusalRef.current = stale;
+      setStatus(stale);
       return false;
     }
     lastRefusalRef.current = null;
@@ -789,38 +862,38 @@ export function useDeviceController({
    * Reports a refusal that stopped an operation before anything was written.
    * The message names the missing condition, never a locked feature.
    */
-  function refused(message: string): DeviceOperationResult {
-    setStatus(message);
-    return Object.freeze({ verified: false, message });
+  function refused(reason: ControllerMessage): DeviceOperationResult {
+    setStatus(reason);
+    return Object.freeze({ verified: false, message: reason });
   }
 
-  function refusedBinding(message: string): BindingOperationResult {
-    setStatus(message);
-    return Object.freeze({ evidence: null, message });
+  function refusedBinding(reason: ControllerMessage): BindingOperationResult {
+    setStatus(reason);
+    return Object.freeze({ evidence: null, message: reason });
   }
 
-  function refusedSetting(message: string): SettingWriteResult {
-    setStatus(message);
-    return Object.freeze({ applied: null, message });
+  function refusedSetting(reason: ControllerMessage): SettingWriteResult {
+    setStatus(reason);
+    return Object.freeze({ applied: null, message: reason });
   }
 
-  function deviceWriteLockMessage(): string {
+  function deviceWriteLockMessage(): ControllerMessage {
     if (identity === null) {
-      return "وصّل الجهاز وعرّفه أولًا؛ أوامر تغيير الجهاز تحتاج هوية مؤكدة.";
+      return message("wb.lock.needIdentity");
     }
     if (recoveryJournalState === "loading") {
-      return "انتظر اكتمال فحص سجل الاستعادة قبل تغيير الجهاز.";
+      return message("wb.lock.journalLoading");
     }
     if (recoveryJournalState === "error") {
-      return "تعذر التحقق من سجل الاستعادة؛ كل أوامر تغيير الجهاز مقفلة بأمان.";
+      return message("wb.lock.journalUnreadable");
     }
     if (hardwareCloseUncertainRef.current) {
-      return "إغلاق منفذ جهاز سابق غير مثبت؛ أعد تحميل الصفحة بعد فصل الجهاز بأمان.";
+      return message("wb.lock.portCleanupUnproven");
     }
     if (hardwareCloseInProgressRef.current !== null) {
-      return "انتظر حتى يثبت إغلاق جلسة الجهاز السابقة.";
+      return message("wb.lock.closePending");
     }
-    return "توجد استعادة معلقة؛ أكملها قبل إرسال أي أمر يغيّر الجهاز.";
+    return message("wb.lock.pendingRecovery");
   }
 
   function cancelCurrentOperation(): void {
@@ -836,13 +909,22 @@ export function useDeviceController({
     setCancellable(true);
     setBusy(true);
     setCatalogState("loading");
-    setStatus("جارٍ تحميل فهرس الإصدارات وكتالوج Targets الرسميين…");
+    setStatus(message("wb.catalog.loading"));
     try {
       const loaded = await loadOfficialExpressLrsCatalog({
         signal: controller.signal,
         onProgress(stage, receivedBytes, totalBytes) {
           setStatus(
-            `${stage === "INDEX" ? "فهرس الإصدارات" : "كتالوج Targets"}: ${formatBytes(receivedBytes)}${totalBytes === null ? "" : ` / ${formatBytes(totalBytes)}`}`,
+            message(
+              stage === "INDEX"
+                ? "wb.catalog.progressIndex"
+                : "wb.catalog.progressTargets",
+              {
+                received: formatBytes(receivedBytes),
+                total:
+                  totalBytes === null ? "" : ` / ${formatBytes(totalBytes)}`,
+              },
+            ),
           );
         },
       });
@@ -878,20 +960,27 @@ export function useDeviceController({
       resetPreparedState();
       if (connectedIdentity === null) {
         setStatus(
-          `تم تحميل ${buildableReleases.length} إصدارًا قابلاً للبناء و${loaded.targets.length} Target رسميًا.`,
+          message("wb.catalog.loaded", {
+            releases: buildableReleases.length,
+            targets: loaded.targets.length,
+          }),
         );
       } else if (match?.confidence === "EXACT") {
         setStatus(
-          `تم تحميل الكتالوج ومطابقة ${connectedIdentity.productName} بـTarget رسمي واحد.`,
+          message("wb.catalog.loadedExact", {
+            product: connectedIdentity.productName,
+          }),
         );
       } else {
         setStatus(
-          `تم تحميل الكتالوج مع بقاء هوية CRSF مثبتة. مطابقة Target: ${match?.confidence ?? "NOT_FOUND"}.`,
+          message("wb.catalog.loadedNoMatch", {
+            confidence: match?.confidence ?? "NOT_FOUND",
+          }),
         );
       }
     } catch (error: unknown) {
       setCatalogState("failed");
-      setStatus(`تعذر تحميل المصدر الرسمي: ${safeMessage(error)}`);
+      setStatus(errorMessage(error, "wb.catalog.failed"));
     } finally {
       if (catalogAbortRef.current === controller) {
         catalogAbortRef.current = null;
@@ -918,9 +1007,7 @@ export function useDeviceController({
     operationAbortRef.current = controller;
     setCancellable(true);
     setBusy(true);
-    setStatus(
-      "اختر منفذ وحدة ExpressLRS المباشر؛ جارٍ إرسال CRSF Device Ping…",
-    );
+    setStatus(message("wb.connect.prompt"));
     try {
       // A native host that implements the bridge supplies the serial API; the
       // rest of the device path is the same code either way.
@@ -934,14 +1021,21 @@ export function useDeviceController({
           ? { navigatorObject: nativeBridgeNavigator(bridge) }
           : {}),
         signal: controller.signal,
-        onCleanupUnconfirmed: latchUnconfirmedHardwareClose,
+        onCleanupUnconfirmed: (detail: string) =>
+          latchUnconfirmedHardwareClose(
+            message("wb.status.portCloseFailed", { detail }),
+          ),
       });
       if (outcome.status !== "CONNECTED") {
         if (outcome.status === "CLEANUP_UNCONFIRMED") {
-          latchUnconfirmedHardwareClose(outcome.message);
+          latchUnconfirmedHardwareClose(
+            message("wb.status.portCloseFailed", { detail: outcome.message }),
+          );
           return outcome;
         }
-        setStatus(`لم يكتمل التعرف: ${outcome.message}`);
+        setStatus(
+          message("wb.connect.incomplete", { detail: outcome.message }),
+        );
         return outcome;
       }
       if (hardwareCloseUncertainRef.current) {
@@ -987,20 +1081,26 @@ export function useDeviceController({
         setOptions((current) => ({ ...current, region: "", domain: -1 }));
         resetPreparedState();
         setStatus(
-          `تم إثبات CRSF ومطابقة ${outcome.identity.productName} بـTarget رسمي واحد.`,
+          message("wb.connect.exactMatch", {
+            product: outcome.identity.productName,
+          }),
         );
       } else if (catalog === null) {
         setStatus(
-          `تم إثبات CRSF وهوية ${outcome.identity.productName}. يمكنك تحميل الكتالوج لاحقًا لمطابقة Target وتجهيز التحديث.`,
+          message("wb.connect.noCatalog", {
+            product: outcome.identity.productName,
+          }),
         );
       } else {
         setStatus(
-          `تم إثبات CRSF وهوية الجهاز. مطابقة Target: ${match?.confidence ?? "NOT_FOUND"}؛ اختر Target الرسمي وأكّد مفتاحه قبل التفليش.`,
+          message("wb.connect.noMatch", {
+            confidence: match?.confidence ?? "NOT_FOUND",
+          }),
         );
       }
       return outcome;
     } catch (error: unknown) {
-      setStatus(`توقفت جلسة التعرف: ${safeMessage(error)}`);
+      setStatus(errorMessage(error, "wb.connect.stopped"));
       return null;
     } finally {
       operationAbortRef.current = null;
@@ -1017,14 +1117,14 @@ export function useDeviceController({
   async function writeSetting(): Promise<SettingWriteResult> {
     const session = sessionRef.current;
     if (session === null || selectedSetting === undefined) {
-      return refusedSetting("اختر إعدادًا معلنًا من الجهاز قبل الكتابة.");
+      return refusedSetting(message("wb.settings.chooseFirst"));
     }
     if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
       return refusedSetting(deviceWriteLockMessage());
     }
     const requestedValue = Number(settingDraft);
     if (!Number.isSafeInteger(requestedValue)) {
-      return refusedSetting("أدخل قيمة صحيحة قبل حفظ الإعداد.");
+      return refusedSetting(message("wb.settings.invalidValue"));
     }
     if (!authorizeDeviceOperation("SETTINGS_WRITE")) {
       return refusedSetting(lastRefusalRef.current ?? deviceWriteLockMessage());
@@ -1034,7 +1134,7 @@ export function useDeviceController({
     operationAbortRef.current = controller;
     setCancellable(true);
     setBusy(true);
-    setStatus(`جارٍ كتابة ${selectedSetting.name} ثم إعادة قراءته…`);
+    setStatus(message("wb.settings.writing", { name: selectedSetting.name }));
     try {
       const result = await session.writeParameter(
         selectedSetting.id,
@@ -1051,15 +1151,16 @@ export function useDeviceController({
         result.verified && result.parameter.kind !== "command"
           ? readBackMatches(requestedValue, result.parameter)
           : false;
-      const message = applied
-        ? `تم حفظ ${selectedSetting.name} وأُعيدت قراءته من الجهاز بالقيمة نفسها.`
-        : `لم تطابق القراءة الرجعية القيمة المطلوبة لـ${selectedSetting.name}، فلا يُعلن الإعداد مطبَّقًا.`;
-      setStatus(message);
-      return Object.freeze({ applied, message });
+      const reported = message(
+        applied ? "wb.settings.applied" : "wb.settings.mismatch",
+        { name: selectedSetting.name },
+      );
+      setStatus(reported);
+      return Object.freeze({ applied, message: reported });
     } catch (error: unknown) {
-      const message = `تعذر حفظ الإعداد: ${safeMessage(error)}`;
-      setStatus(message);
-      return Object.freeze({ applied: false, message });
+      const reported = errorMessage(error, "wb.settings.failed");
+      setStatus(reported);
+      return Object.freeze({ applied: false, message: reported });
     } finally {
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
@@ -1082,7 +1183,7 @@ export function useDeviceController({
     operationAbortRef.current = controller;
     setCancellable(true);
     setBusy(true);
-    setStatus("جارٍ استعادة لقطة الإعدادات والتحقق من كل قيمة…");
+    setStatus(message("wb.settings.restoring"));
     try {
       const results = await session.restoreBackup(settingsBackup, {
         confirmedByUser: true,
@@ -1091,9 +1192,9 @@ export function useDeviceController({
       assertCurrentDeviceOperation(session, controller.signal);
       setParameters(session.parameters);
       setWritableParameters(session.writableParameters);
-      setStatus(`اكتملت استعادة ${results.length} قيمة مع قراءة رجعية.`);
+      setStatus(message("wb.settings.restored", { count: results.length }));
     } catch (error: unknown) {
-      setStatus(`توقفت استعادة الإعدادات: ${safeMessage(error)}`);
+      setStatus(errorMessage(error, "wb.settings.restoreFailed"));
     } finally {
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
@@ -1113,12 +1214,10 @@ export function useDeviceController({
   async function startBinding(): Promise<BindingOperationResult> {
     const session = sessionRef.current;
     if (session === null) {
-      return refusedBinding("وصّل الجهاز وعرّفه قبل إرسال أمر الربط.");
+      return refusedBinding(message("wb.bind.needIdentity"));
     }
     if (!bindingAcknowledged) {
-      return refusedBinding(
-        "أكّد جاهزية الطرف الآخر والطاقة والهوائيات قبل إرسال أمر الربط.",
-      );
+      return refusedBinding(message("wb.bind.needAcknowledgement"));
     }
     if (!deviceWritesReady || !hardwareCleanupGateOpen()) {
       return refusedBinding(deviceWriteLockMessage());
@@ -1132,7 +1231,7 @@ export function useDeviceController({
     setCancellable(true);
     setBusy(true);
     setBindingAcknowledged(false);
-    setStatus("جارٍ إرسال أمر الربط الحقيقي الذي يعلنه الجهاز عبر CRSF…");
+    setStatus(message("wb.bind.sending"));
     const observer = new BindingLinkObserver();
     let unsubscribe: (() => void) | null = null;
     try {
@@ -1155,16 +1254,18 @@ export function useDeviceController({
         userReportedLink: null,
       });
       setBindEvidence(evidence.level);
-      const message = isMachineVerifiedBinding(evidence)
-        ? `أبلغ الجهاز عن رابط RF حي (جودة الرابط ${evidence.statistics?.uplinkLinkQuality ?? 0}%). هذا دليل آلي.`
-        : `اكتمل أمر الربط، لكن لم تُرصد تلمترية رابط، فلا يُسجَّل الربط ناجحًا: ${result.information}`;
-      setStatus(message);
-      return Object.freeze({ evidence, message });
+      const reported = isMachineVerifiedBinding(evidence)
+        ? message("wb.bind.telemetry", {
+            quality: evidence.statistics?.uplinkLinkQuality ?? 0,
+          })
+        : message("wb.bind.commandOnly", { information: result.information });
+      setStatus(reported);
+      return Object.freeze({ evidence, message: reported });
     } catch (error: unknown) {
       setBindEvidence(null);
-      const message = `توقف الربط: ${safeMessage(error)}`;
-      setStatus(message);
-      return Object.freeze({ evidence: null, message });
+      const reported = errorMessage(error, "wb.bind.stopped");
+      setStatus(reported);
+      return Object.freeze({ evidence: null, message: reported });
     } finally {
       unsubscribe?.();
       if (operationAbortRef.current === controller) {
@@ -1179,7 +1280,7 @@ export function useDeviceController({
     if (selectedRelease === null || selectedTarget === null) return;
     const region = regulatoryRegionByKey(options.region);
     if (region === null) {
-      setStatus("اختر المنطقة التنظيمية صراحة قبل بناء Firmware.");
+      setStatus(message("wb.fw.needRegion"));
       return;
     }
     operationAbortRef.current?.abort();
@@ -1194,7 +1295,7 @@ export function useDeviceController({
     });
     setBusy(true);
     resetPreparedState();
-    setStatus("جارٍ تنزيل الحزمة الرسمية وتجهيز Firmware لهذا Target…");
+    setStatus(message("wb.fw.preparing"));
     try {
       const result = await prepareOfficialFirmwarePackage({
         release: selectedRelease,
@@ -1203,12 +1304,19 @@ export function useDeviceController({
         signal: controller.signal,
         onProgress(progress) {
           setStatus(
-            `${progress.stage}: ${formatBytes(progress.receivedBytes)}${progress.totalBytes === null ? "" : ` / ${formatBytes(progress.totalBytes)}`}`,
+            message("wb.catalog.progress", {
+              stage: progress.stage,
+              received: formatBytes(progress.receivedBytes),
+              total:
+                progress.totalBytes === null
+                  ? ""
+                  : ` / ${formatBytes(progress.totalBytes)}`,
+            }),
           );
         },
       });
       if (inputRevision !== optionsRevisionRef.current) {
-        setStatus("تغيرت الخيارات أثناء البناء؛ تم تجاهل الحزمة القديمة.");
+        setStatus(message("wb.fw.optionsChanged"));
         return;
       }
       setPrepared(result);
@@ -1216,10 +1324,15 @@ export function useDeviceController({
       // the plaintext is dropped rather than kept for a possible rebuild.
       wipeSecretOptions();
       setStatus(
-        `تم تجهيز ${result.segments.length} قطاعًا والتحقق من SHA-256${result.optionsSummary.bindingConfigured ? " مع عبارة ربط مضمّنة" : ""}. نزّل حزمة الاستعادة قبل أي كتابة.`,
+        message("wb.fw.prepared", {
+          segments: result.segments.length,
+          binding: result.optionsSummary.bindingConfigured
+            ? "wb.fw.preparedWithPhrase"
+            : "",
+        }),
       );
     } catch (error: unknown) {
-      setStatus(`تعذر تجهيز Firmware: ${safeMessage(error)}`);
+      setStatus(errorMessage(error, "wb.fw.prepareFailed"));
     } finally {
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
@@ -1236,7 +1349,9 @@ export function useDeviceController({
       prepared.primaryFileName,
       prepared.primaryMimeType,
     );
-    setStatus(`تم بدء تنزيل ${prepared.primaryFileName}.`);
+    setStatus(
+      message("wb.fw.downloadStarted", { file: prepared.primaryFileName }),
+    );
   }
 
   function downloadRecovery(): void {
@@ -1248,9 +1363,7 @@ export function useDeviceController({
     );
     setRecoveryDownloadStarted(true);
     setRecoveryDownloaded(false);
-    setStatus(
-      "بدأ المتصفح طلب تنزيل حزمة الاستعادة، لكن التطبيق لا يستطيع إثبات حفظها. بعد التحقق من وجود الملف، أكّد ذلك يدويًا.",
-    );
+    setStatus(message("wb.fw.recoveryDownloadStarted"));
   }
 
   async function downloadLuaScript(): Promise<void> {
@@ -1266,7 +1379,7 @@ export function useDeviceController({
     operationAbortRef.current = controller;
     setCancellable(true);
     setBusy(true);
-    setStatus("جارٍ تنزيل ملف Lua الرسمي المتوافق مع إصدار ExpressLRS…");
+    setStatus(message("wb.fw.luaDownloading"));
     try {
       const script = await acquireOfficialLuaScript({
         release: selectedRelease,
@@ -1274,9 +1387,9 @@ export function useDeviceController({
         signal: controller.signal,
       });
       downloadPreparedBytes(script.bytes, script.fileName, "text/plain");
-      setStatus(`تم بدء تنزيل ${script.fileName}.`);
+      setStatus(message("wb.fw.downloadStarted", { file: script.fileName }));
     } catch (error: unknown) {
-      setStatus(`تعذر تنزيل ملف Lua: ${safeMessage(error)}`);
+      setStatus(errorMessage(error, "wb.fw.luaFailed"));
     } finally {
       if (operationAbortRef.current === controller) {
         operationAbortRef.current = null;
@@ -1342,31 +1455,37 @@ export function useDeviceController({
       stage: "RECONNECT",
       writtenBytes: input.totalBytes,
       totalBytes: input.totalBytes,
-      detail: "أعد اختيار منفذ الجهاز بعد الإقلاع",
+      detail: "",
+      detailKey: "wb.reconnect.prompt",
     });
-    setStatus("أعد اختيار منفذ الجهاز بعد الإقلاع لإثبات الهوية والإصدار.");
+    setStatus(message("wb.reconnect.promptStatus"));
     const outcome = await connectUserHardwareSession({
       role: input.target.role,
       ...(hardwareConnector === undefined
         ? {}
         : { connector: hardwareConnector }),
       signal: input.signal,
-      onCleanupUnconfirmed: latchUnconfirmedHardwareClose,
+      onCleanupUnconfirmed: (detail: string) =>
+        latchUnconfirmedHardwareClose(
+          message("wb.status.portCloseFailed", { detail }),
+        ),
     });
     if (outcome.status !== "CONNECTED") {
       if (outcome.status === "CLEANUP_UNCONFIRMED") {
-        latchUnconfirmedHardwareClose(outcome.message);
+        latchUnconfirmedHardwareClose(
+          message("wb.status.portCloseFailed", { detail: outcome.message }),
+        );
       }
-      throw new Error(`تعذرت إعادة قراءة الجهاز: ${outcome.message}`);
+      throw new ControllerError(
+        message("wb.reconnect.failed", { detail: outcome.message }),
+      );
     }
     if (hardwareCloseUncertainRef.current || input.signal.aborted) {
       await closeSessionOrLatch(
         outcome.session,
-        "تعذر عزل جلسة إعادة الاتصال بعد فشل تنظيف سابق",
+        message("wb.reconnect.isolateFailed"),
       );
-      throw new Error(
-        "اكتملت إعادة قراءة الجهاز بعد رصد منفذ سابق غير مثبت الإغلاق.",
-      );
+      throw new ControllerError(message("wb.reconnect.afterUnprovenClose"));
     }
     // Each step of the post-write sequence is reported as it is reached, so
     // "the device came back" is never a single opaque claim.
@@ -1374,7 +1493,8 @@ export function useDeviceController({
       stage: "RECONNECT",
       writtenBytes: input.totalBytes,
       totalBytes: input.totalBytes,
-      detail: "قراءة هوية الجهاز بعد الإقلاع",
+      detail: "",
+      detailKey: "wb.reconnect.readingIdentity",
     });
     const match = matchHardwareIdentityToOfficialTargets({
       identity: outcome.identity,
@@ -1390,17 +1510,20 @@ export function useDeviceController({
     if (!targetVerification.verified) {
       await closeSessionOrLatch(
         outcome.session,
-        "تعذر تأكيد إغلاق جلسة إعادة الاتصال غير المطابقة",
+        message("wb.reconnect.closeMismatchedFailed"),
       );
-      throw new Error(
-        `عاد جهاز، لكن أدلة Target لا تطابق العملية المخططة (${targetVerification.reason}).`,
+      throw new ControllerError(
+        message("wb.reconnect.targetMismatch", {
+          reason: targetVerification.reason,
+        }),
       );
     }
     setFlashProgress({
       stage: "RECONNECT",
       writtenBytes: input.totalBytes,
       totalBytes: input.totalBytes,
-      detail: "تأكيد مطابقة Target المقروء",
+      detail: "",
+      detailKey: "wb.reconnect.confirmingTarget",
     });
     const build = verifyObservedFirmwareBuild({
       release: input.release,
@@ -1410,17 +1533,18 @@ export function useDeviceController({
     if (!build.verified) {
       await closeSessionOrLatch(
         outcome.session,
-        "تعذر تأكيد إغلاق جلسة الإصدار غير المطابق",
+        message("wb.reconnect.closeVersionMismatchFailed"),
       );
-      throw new Error(
-        `عاد الجهاز، لكن الإصدار/Commit لا يطابق ${build.expected}.`,
+      throw new ControllerError(
+        message("wb.reconnect.versionMismatch", { expected: build.expected }),
       );
     }
     setFlashProgress({
       stage: "RECONNECT",
       writtenBytes: input.totalBytes,
       totalBytes: input.totalBytes,
-      detail: "تأكيد الإصدار/Commit المقروء",
+      detail: "",
+      detailKey: "wb.reconnect.confirmingVersion",
     });
     const oldSession = sessionRef.current;
     disconnectUnsubscribeRef.current?.();
@@ -1428,7 +1552,7 @@ export function useDeviceController({
     if (oldSession !== null && oldSession !== outcome.session) {
       const oldClosed = await closeSessionOrLatch(
         oldSession,
-        "تعذر تأكيد إغلاق جلسة CRSF السابقة بعد إعادة الاتصال",
+        message("wb.reconnect.closePreviousFailed"),
       );
       if (!oldClosed) {
         sessionRef.current = null;
@@ -1436,10 +1560,10 @@ export function useDeviceController({
         writeAuthorityRef.current.revokeAll();
         await closeSessionOrLatch(
           outcome.session,
-          "تعذر تأكيد إغلاق جلسة إعادة الاتصال الاحتياطية",
+          message("wb.reconnect.closeFallbackFailed"),
         );
-        throw new Error(
-          "تعذر إثبات إغلاق جلسة CRSF السابقة؛ أُوقفت إعادة الاتصال بأمان.",
+        throw new ControllerError(
+          message("wb.reconnect.previousCloseUnproven"),
         );
       }
     }
@@ -1456,11 +1580,9 @@ export function useDeviceController({
       }
       await closeSessionOrLatch(
         outcome.session,
-        "تعذر تأكيد إغلاق جلسة إعادة الاتصال بعد تغير بوابة التنظيف",
+        message("wb.reconnect.closeAfterGateChange"),
       );
-      throw new Error(
-        "تغيرت جلسة الجهاز أو بوابة تنظيف المنفذ أثناء إعادة الاتصال؛ عُزلت الجلسة الجديدة.",
-      );
+      throw new ControllerError(message("wb.reconnect.gateChangedDuring"));
     }
     sessionRef.current = outcome.session;
     sessionCounterRef.current += 1;
@@ -1500,18 +1622,17 @@ export function useDeviceController({
       }
       await closeSessionOrLatch(
         outcome.session,
-        "تعذر تأكيد إغلاق جلسة إعادة الاتصال بعد تغير بوابة التنظيف",
+        message("wb.reconnect.closeAfterGateChange"),
       );
-      throw new Error(
-        "تغيرت جلسة الجهاز أو بوابة تنظيف المنفذ قبل اعتماد إعادة الاتصال.",
-      );
+      throw new ControllerError(message("wb.reconnect.gateChangedBefore"));
     }
     setCheckpoint(null);
     setFlashProgress({
       stage: "COMPLETE",
       writtenBytes: input.totalBytes,
       totalBytes: input.totalBytes,
-      detail: "أُثبتت الهوية وTarget والإصدار، وأُغلق سجل الاستعادة",
+      detail: "",
+      detailKey: "wb.reconnect.complete",
     });
   }
 
@@ -1527,26 +1648,24 @@ export function useDeviceController({
     }>
   > {
     if (!hardwareCleanupGateOpen()) {
-      throw new Error(
-        "إغلاق منفذ جهاز سابق غير مثبت؛ أُوقف فتح أي منفذ كتابة جديد.",
-      );
+      throw new ControllerError(message("wb.transport.cleanupUnproven"));
     }
     if (input.selectedMethod === "uart") {
       const session = sessionRef.current;
       if (session === null) {
-        throw new Error("جلسة CRSF المباشرة مغلقة.");
+        throw new ControllerError(message("wb.transport.crsfClosed"));
       }
       const liveIdentity = await session.verifyCurrentIdentity(input.signal);
       if (!hardwareCleanupGateOpen()) {
-        throw new Error(
-          "تغيرت حالة تنظيف منفذ الجهاز أثناء التحقق من الهوية؛ أُوقفت الكتابة.",
+        throw new ControllerError(
+          message("wb.transport.gateChangedDuringIdentity"),
         );
       }
       if (
         selectedTarget === null ||
         liveIdentity.role !== selectedTarget.role
       ) {
-        throw new Error("نوع الجهاز تغير أو لا يطابق Target المختار.");
+        throw new ControllerError(message("wb.transport.roleMismatch"));
       }
       if (input.exactTargetIdentityRequired) {
         const liveMatch = matchHardwareIdentityToOfficialTargets({
@@ -1557,8 +1676,8 @@ export function useDeviceController({
           liveMatch.confidence !== "EXACT" ||
           liveMatch.selected?.id !== selectedTarget.id
         ) {
-          throw new Error(
-            "هوية الجهاز الحية لم تعد تطابق Target الذي حصل على إعفاء التأكيد اليدوي.",
+          throw new ControllerError(
+            message("wb.transport.liveIdentityDrifted"),
           );
         }
       }
@@ -1581,15 +1700,17 @@ export function useDeviceController({
               (candidate.includes(observed) || observed.includes(candidate)),
           )
         ) {
-          throw new Error(
-            `Bootloader أبلغ Target مختلفًا: ${bootloader.target}`,
+          throw new ControllerError(
+            message("wb.transport.bootloaderTargetMismatch", {
+              target: bootloader.target,
+            }),
           );
         }
       } else if (selectedTarget.role === "tx") {
         const command = commandForBootloader(parameters);
         if (command === null) {
-          throw new Error(
-            "الجهاز لا يعلن أمر Bootloader صالحًا؛ أُوقفت الكتابة بأمان.",
+          throw new ControllerError(
+            message("wb.transport.noBootloaderCommand"),
           );
         }
         await session.enterTransmitterBootloader({
@@ -1607,7 +1728,7 @@ export function useDeviceController({
         });
       } catch (error: unknown) {
         latchUnconfirmedHardwareClose(
-          `فشل تحرير منفذ CRSF للتفليش، لذلك لا يمكن إثبات إغلاقه: ${safeMessage(error)}`,
+          message("wb.transport.detachFailed", { detail: safeMessage(error) }),
         );
         throw error;
       } finally {
@@ -1621,13 +1742,8 @@ export function useDeviceController({
 
     const port = await requestHardwarePort();
     if (!hardwareCleanupGateOpen() || input.signal.aborted) {
-      await closePortOrLatch(
-        port,
-        "تعذر تأكيد إغلاق المنفذ الذي اختير بعد إلغاء عملية التفليش",
-      );
-      throw new Error(
-        "تغيرت حالة تنظيف منفذ الجهاز أثناء اختيار المنفذ؛ أُوقفت الكتابة.",
-      );
+      await closePortOrLatch(port, message("wb.transport.closeAfterCancel"));
+      throw new ControllerError(message("wb.transport.gateChangedDuringPort"));
     }
     await initializeSerialPassthrough({
       method: input.selectedMethod as PassthroughMethod,
@@ -1649,16 +1765,18 @@ export function useDeviceController({
     }
     if (recoveryJournalState !== "ready") {
       return refused(
-        recoveryJournalState === "loading"
-          ? "انتظر اكتمال فحص سجل الاستعادة قبل أي كتابة."
-          : "تعذر التحقق من سجل الاستعادة؛ كل عمليات الكتابة مقفلة بأمان.",
+        message(
+          recoveryJournalState === "loading"
+            ? "wb.flash.journalLoading"
+            : "wb.flash.journalUnreadable",
+        ),
       );
     }
     if (prepared === null || selectedTarget === null) {
-      return refused("جهّز حزمة Firmware واختر Target قبل الكتابة.");
+      return refused(message("wb.flash.needPackage"));
     }
     if (!writeReady) {
-      return refused("لم تكتمل بوابات Target والاستعادة والطاقة والهوائي.");
+      return refused(message("wb.flash.gatesIncomplete"));
     }
     if (method === "download") {
       downloadFirmware();
@@ -1666,16 +1784,17 @@ export function useDeviceController({
       // written and nothing was read back, so it is not a verified update.
       return Object.freeze({
         verified: false,
-        message: `تم بدء تنزيل ${prepared.primaryFileName}. لم تُكتب أي بيانات على الجهاز.`,
+        message: message("wb.flash.downloadOnly", {
+          file: prepared.primaryFileName,
+        }),
       });
     }
     if (method === "wifi") {
       downloadFirmware();
       window.open("http://10.0.0.1/", "_blank", "noopener,noreferrer");
-      const message =
-        "تم تنزيل ملف OTA وفتح 10.0.0.1. اختر الملف المنزّل داخل صفحة الجهاز.";
-      setStatus(message);
-      return Object.freeze({ verified: false, message });
+      const reported = message("wb.flash.wifiHandoff");
+      setStatus(reported);
+      return Object.freeze({ verified: false, message: reported });
     }
 
     const controller = new AbortController();
@@ -1692,24 +1811,22 @@ export function useDeviceController({
     try {
       await saveCheckpoint(prepared, "PACKAGE_SAVED");
       if (!hardwareCleanupGateOpen()) {
-        throw new Error(
-          "تغيرت حالة تنظيف منفذ الجهاز؛ أُوقفت الكتابة قبل فتح منفذ جديد.",
-        );
+        throw new ControllerError(message("wb.flash.gateChangedBeforePort"));
       }
       const family = platformFamily(selectedTarget);
       if (family === "other") {
-        throw new Error("منصة Target غير مدعومة داخل التطبيق.");
+        throw new ControllerError(message("wb.flash.platformUnsupported"));
       }
       await saveCheckpoint(prepared, "BOOTLOADER");
       if (method === "stlink") {
         if (family !== "stm32") {
-          throw new Error("STM32 DFU لا يطابق منصة Target المختار.");
+          throw new ControllerError(message("wb.flash.dfuPlatformMismatch"));
         }
         const firmware = prepared.segments.find(
           (segment) => segment.name === "firmware.bin",
         );
         if (firmware === undefined) {
-          throw new Error("حزمة STM32 لا تحتوي firmware.bin.");
+          throw new ControllerError(message("wb.flash.stm32MissingFirmware"));
         }
         await saveCheckpoint(prepared, "WRITING");
         const flashResult = await flashStm32DfuFirmware({
@@ -1720,11 +1837,9 @@ export function useDeviceController({
         });
         if (!flashResult.cleanupVerified) {
           latchUnconfirmedHardwareClose(
-            "اكتملت كتابة STM32 لكن تعذر إثبات تحرير واجهة USB وإغلاقها",
+            message("wb.flash.stm32CleanupUnproven"),
           );
-          throw new Error(
-            "تعذر تأكيد إغلاق منفذ STM32 بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
-          );
+          throw new ControllerError(message("wb.flash.stm32CloseUnproven"));
         }
       } else {
         const serial = await prepareSerialTransport({
@@ -1745,18 +1860,16 @@ export function useDeviceController({
           });
           if (!flashResult.cleanupVerified) {
             latchUnconfirmedHardwareClose(
-              "اكتملت كتابة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
+              message("wb.flash.espCleanupUnproven"),
             );
-            throw new Error(
-              "تعذر تأكيد إغلاق منفذ ESP بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
-            );
+            throw new ControllerError(message("wb.flash.espCloseUnproven"));
           }
         } else {
           const firmware = prepared.segments.find(
             (segment) => segment.name === "firmware.bin",
           );
           if (firmware === undefined) {
-            throw new Error("حزمة STM32 لا تحتوي firmware.bin.");
+            throw new ControllerError(message("wb.flash.stm32MissingFirmware"));
           }
           await flashXmodemFirmware({
             port: serial.port,
@@ -1775,23 +1888,24 @@ export function useDeviceController({
         totalBytes,
         signal: controller.signal,
       });
-      const message = "اكتمل التفليش وعاد الجهاز بالإصدار/Commit المتوقع.";
-      setStatus(message);
-      return Object.freeze({ verified: true, message });
+      const reported = message("wb.flash.complete");
+      setStatus(reported);
+      return Object.freeze({ verified: true, message: reported });
     } catch (error: unknown) {
       const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
-        latchUnconfirmedHardwareClose(
-          "تعذر إثبات إغلاق منفذ الكتابة بعد توقف التفليش",
-        );
+        latchUnconfirmedHardwareClose(message("wb.flash.writeCloseUnproven"));
       }
-      const message = safeMessage(error);
+      const detailText = safeMessage(error);
       try {
-        await saveCheckpoint(prepared, "RECOVERY_REQUIRED", message);
+        await saveCheckpoint(prepared, "RECOVERY_REQUIRED", detailText);
       } catch {
         // The visible recovery requirement remains even if IndexedDB is blocked.
       }
-      const reported = `توقف التفليش وتحتاج العملية إلى الاستعادة: ${message}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`;
+      const reported = message("wb.flash.stopped", {
+        detail: detailText,
+        reload: cleanupUnconfirmed ? "wb.flash.reloadFirst" : "",
+      });
       setStatus(reported);
       return Object.freeze({ verified: false, message: reported });
     } finally {
@@ -1816,37 +1930,35 @@ export function useDeviceController({
     }
     if (recoveryJournalState !== "ready" || checkpoint === null) {
       return refused(
-        recoveryJournalState === "loading"
-          ? "انتظر اكتمال فحص سجل الاستعادة قبل اختيار الحزمة."
-          : "لا يمكن تشغيل الاستعادة دون سجل استعادة موثوق ومقروء.",
+        message(
+          recoveryJournalState === "loading"
+            ? "wb.recovery.journalLoading"
+            : "wb.recovery.journalUnreadable",
+        ),
       );
     }
     const trustedCheckpoint = checkpoint;
     if (selectedTarget === null) {
-      return refused("اختر Target المطابق قبل تشغيل الاستعادة.");
+      return refused(message("wb.recovery.needTarget"));
     }
     if (method === "wifi" || method === "download") {
-      return refused(
-        "الاستعادة تتطلب مسار كتابة مباشرًا: UART أو Passthrough أو STM32 DFU.",
-      );
+      return refused(message("wb.recovery.needDirectPath"));
     }
     if (!manualTargetConfirmed) {
-      return refused(
-        "أكّد مفتاح Target قبل تشغيل الاستعادة؛ منفذ الاستعادة اختيار جديد ولا يرث هوية CRSF السابقة.",
-      );
+      return refused(message("wb.recovery.needTargetKey"));
     }
     if (!powerAcknowledged) {
-      return refused("أكّد ثبات الطاقة قبل تشغيل الاستعادة.");
+      return refused(message("wb.recovery.needPower"));
     }
     if (selectedTarget.role === "tx" && !antennaAcknowledged) {
-      return refused("أكّد تثبيت هوائي جهاز الإرسال قبل تشغيل الاستعادة.");
+      return refused(message("wb.recovery.needAntenna"));
     }
     operationAbortRef.current?.abort();
     const controller = new AbortController();
     operationAbortRef.current = controller;
     setCancellable(true);
     setBusy(true);
-    setStatus("جارٍ فحص حزمة الاستعادة وSHA-256 لكل قطاع…");
+    setStatus(message("wb.recovery.validating"));
     let writeFinished = false;
     try {
       const bytes = await boundedFileBytes(file, 64 * 1024 * 1024);
@@ -1855,14 +1967,10 @@ export function useDeviceController({
         expectedTarget: selectedTarget,
       });
       if (trustedCheckpoint.packageSha256 !== validated.packageSha256) {
-        throw new Error(
-          "الحزمة المختارة لا تطابق بصمة جلسة الاستعادة المعلقة.",
-        );
+        throw new ControllerError(message("wb.recovery.packageMismatch"));
       }
       if (!hardwareCleanupGateOpen()) {
-        throw new Error(
-          "تغيرت حالة تنظيف منفذ الجهاز؛ أُوقفت الاستعادة قبل فتح منفذ جديد.",
-        );
+        throw new ControllerError(message("wb.recovery.gateChangedBeforePort"));
       }
       const family = platformFamily(selectedTarget);
       const totalBytes = validated.segments.reduce(
@@ -1871,13 +1979,13 @@ export function useDeviceController({
       );
       if (method === "stlink") {
         if (family !== "stm32") {
-          throw new Error("STM32 DFU لا يطابق منصة Target المختار.");
+          throw new ControllerError(message("wb.flash.dfuPlatformMismatch"));
         }
         const firmware = validated.segments.find(
           (segment) => segment.name === "firmware.bin",
         );
         if (firmware === undefined) {
-          throw new Error("حزمة الاستعادة لا تحتوي firmware.bin.");
+          throw new ControllerError(message("wb.recovery.missingFirmware"));
         }
         const flashResult = await flashStm32DfuFirmware({
           target: selectedTarget,
@@ -1887,21 +1995,16 @@ export function useDeviceController({
         });
         if (!flashResult.cleanupVerified) {
           latchUnconfirmedHardwareClose(
-            "اكتملت استعادة STM32 لكن تعذر إثبات تحرير واجهة USB وإغلاقها",
+            message("wb.recovery.stm32CleanupUnproven"),
           );
-          throw new Error(
-            "تعذر تأكيد إغلاق منفذ STM32 بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
-          );
+          throw new ControllerError(message("wb.recovery.stm32CloseUnproven"));
         }
       } else {
         const port = await requestHardwarePort();
         if (!hardwareCleanupGateOpen() || controller.signal.aborted) {
-          await closePortOrLatch(
-            port,
-            "تعذر تأكيد إغلاق المنفذ الذي اختير بعد إلغاء الاستعادة",
-          );
-          throw new Error(
-            "تغيرت حالة تنظيف منفذ الجهاز أثناء اختيار منفذ الاستعادة؛ أُوقفت الكتابة.",
+          await closePortOrLatch(port, message("wb.recovery.closeAfterCancel"));
+          throw new ControllerError(
+            message("wb.recovery.gateChangedDuringPort"),
           );
         }
         if (!["uart", "passthru"].includes(method)) {
@@ -1923,18 +2026,16 @@ export function useDeviceController({
           });
           if (!flashResult.cleanupVerified) {
             latchUnconfirmedHardwareClose(
-              "اكتملت استعادة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
+              message("wb.recovery.espCleanupUnproven"),
             );
-            throw new Error(
-              "تعذر تأكيد إغلاق منفذ ESP بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
-            );
+            throw new ControllerError(message("wb.recovery.espCloseUnproven"));
           }
         } else if (family === "stm32") {
           const firmware = validated.segments.find(
             (segment) => segment.name === "firmware.bin",
           );
           if (firmware === undefined) {
-            throw new Error("حزمة الاستعادة لا تحتوي firmware.bin.");
+            throw new ControllerError(message("wb.recovery.missingFirmware"));
           }
           await flashXmodemFirmware({
             port,
@@ -1943,7 +2044,7 @@ export function useDeviceController({
             onProgress: setFlashProgress,
           });
         } else {
-          throw new Error("منصة الاستعادة غير مدعومة.");
+          throw new ControllerError(message("wb.recovery.platformUnsupported"));
         }
       }
       // The write finished. That is not yet a recovery: the device still has
@@ -1957,14 +2058,14 @@ export function useDeviceController({
         totalBytes,
         signal: controller.signal,
       });
-      const message = "اكتملت الاستعادة وعاد الجهاز بالإصدار/Commit المتوقع.";
-      setStatus(message);
-      return Object.freeze({ verified: true, message });
+      const reported = message("wb.recovery.complete");
+      setStatus(reported);
+      return Object.freeze({ verified: true, message: reported });
     } catch (error: unknown) {
       const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
         latchUnconfirmedHardwareClose(
-          "تعذر إثبات إغلاق منفذ الكتابة بعد توقف الاستعادة",
+          message("wb.recovery.writeCloseUnproven"),
         );
       }
       const detail = safeMessage(error);
@@ -1982,7 +2083,11 @@ export function useDeviceController({
           // The visible pending recovery remains even if IndexedDB is blocked.
         }
       }
-      const reported = `${writeFinished ? "اكتملت كتابة الاستعادة لكن تعذّر إثبات عودة الجهاز، فبقيت العملية غير مكتملة" : "توقفت الاستعادة"}: ${detail}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`;
+      const reported = message(
+        writeFinished ? "wb.recovery.incomplete" : "wb.recovery.stopped",
+        { detail },
+        cleanupUnconfirmed ? message("wb.flash.reloadFirst") : undefined,
+      );
       setStatus(reported);
       return Object.freeze({ verified: false, message: reported });
     } finally {
@@ -2101,7 +2206,7 @@ export function useDeviceController({
         checkpointSafeError: checkpoint?.safeError ?? null,
       }),
       binding: Object.freeze({ evidenceLevel: bindEvidence }),
-      lastStatusMessage: status,
+      lastStatusMessage: renderMessage(status),
       evidence: Object.freeze({
         hardwareValidation: "NONE" as const,
         deviceWrites: "EVIDENCE_GATED" as const,
@@ -2144,7 +2249,7 @@ export function useDeviceController({
       recoveryDownloaded,
       checkpointStage: checkpoint?.stage ?? null,
       flashStage: flashProgress?.stage ?? null,
-      statusMessage: status,
+      statusMessage: renderMessage(status),
     });
 
   /**
@@ -2251,6 +2356,7 @@ export function useDeviceController({
     firmwareWriteMethod,
     recoveryPathKnown,
     deviceWriteLockMessage,
+    renderMessage,
     subscribeFrames,
     canObserveFrames,
     rxAsTxSupport,

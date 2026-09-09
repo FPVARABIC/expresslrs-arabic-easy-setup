@@ -121,7 +121,14 @@ export interface FirmwareFlashProgress {
     | "COMPLETE";
   readonly writtenBytes: number;
   readonly totalBytes: number;
+  /** Free technical text from a flasher; already English. */
   readonly detail: string;
+  /**
+   * A catalog key for the step this application itself reports, so the
+   * post-write sequence reads in the operator's language rather than in the
+   * one the controller happened to be written in.
+   */
+  readonly detailKey?: string;
 }
 
 export type FirmwareFlashProgressListener = (

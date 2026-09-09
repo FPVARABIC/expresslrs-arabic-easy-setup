@@ -11,7 +11,7 @@ import {
 import { regulatoryRegionByKey } from "../hardware/regulatory-domain";
 import type { HardwareDriverConnector } from "../hardware/userSession";
 import {
-  METHOD_LABELS,
+  METHOD_LABEL_KEYS,
   currentSettingValue,
   formatBytes,
   isStableRelease,
@@ -33,9 +33,10 @@ export function ExpressLrsParityWorkbench({
   hardwareConnector,
   locale = "ar",
 }: ExpressLrsParityWorkbenchProps = {}) {
-  const controller = useDeviceController(
-    hardwareConnector === undefined ? {} : { hardwareConnector },
-  );
+  const controller = useDeviceController({
+    ...(hardwareConnector === undefined ? {} : { hardwareConnector }),
+    locale,
+  });
   return (
     <ExpressLrsParityWorkbenchView controller={controller} locale={locale} />
   );
@@ -102,6 +103,7 @@ export function ExpressLrsParityWorkbenchView({
     radioKey,
     radios,
     recoverFromFile,
+    renderMessage,
     recoveryDownloadStarted,
     recoveryDownloaded,
     recoveryJournalState,
@@ -170,7 +172,7 @@ export function ExpressLrsParityWorkbenchView({
 
       <section className="parity-status" role="status" aria-live="polite">
         <strong>الحالة</strong>
-        <span>{status}</span>
+        <span>{renderMessage(status)}</span>
         {busy && cancellable ? (
           <button type="button" onClick={cancelCurrentOperation}>
             إلغاء العملية
@@ -459,7 +461,7 @@ export function ExpressLrsParityWorkbenchView({
             >
               {availableMethods.map((item) => (
                 <option key={item} value={item}>
-                  {METHOD_LABELS[item]}
+                  {t(METHOD_LABEL_KEYS[item])}
                 </option>
               ))}
             </select>
@@ -480,7 +482,7 @@ export function ExpressLrsParityWorkbenchView({
               <dt>طرق Target الرسمية</dt>
               <dd>
                 {selectedTarget.config.uploadMethods
-                  .map((item) => METHOD_LABELS[item])
+                  .map((item) => t(METHOD_LABEL_KEYS[item]))
                   .join(" · ")}
               </dd>
             </div>
@@ -1015,9 +1017,7 @@ export function ExpressLrsParityWorkbenchView({
                   onChange={(event) => {
                     if (!event.currentTarget.checked) return;
                     setRecoveryDownloaded(true);
-                    setStatus(
-                      "سُجل تأكيدك اليدوي بأن حزمة الاستعادة محفوظة؛ احتفظ بها حتى اكتمال التحقق بعد الإقلاع.",
-                    );
+                    setStatus({ key: "wb.recovery.savedConfirmed" });
                   }}
                 />
                 <span>
