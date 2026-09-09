@@ -120,6 +120,33 @@ const catalog: OfficialCatalog = {
   ],
 };
 
+/**
+ * An ESP32 receiver, which upstream *does* build transmitter firmware for. The
+ * catalog's other receiver is STM32, which is legitimately refused, so a
+ * positive rx-as-tx path needs this one.
+ */
+const espReceiver = {
+  id: "vendor/rx_2400/esp-receiver",
+  role: "rx" as const,
+  vendorKey: "vendor",
+  vendorName: "Vendor",
+  radioKey: "rx_2400",
+  targetKey: "esp-receiver",
+  config: {
+    productName: "Vendor ESP RX",
+    platform: "esp32",
+    firmware: "VENDOR_ESP_RX",
+    luaName: null,
+    layoutFile: null,
+    logoFile: null,
+    uploadMethods: ["uart", "betaflight", "download"] as const,
+    minVersion: null,
+    customLayout: {},
+    overlay: null,
+    raw: {},
+  },
+};
+
 const transportCatalog: OfficialCatalog = {
   ...catalog,
   targets: [
@@ -139,6 +166,7 @@ const transportCatalog: OfficialCatalog = {
       },
     },
     catalog.targets[1]!,
+    espReceiver,
   ],
 };
 
@@ -237,6 +265,8 @@ function deferred<T>(): Readonly<{
 function connectedHardware(
   input: {
     readonly productName?: string;
+    /** The role the emulated device reports, from its CRSF origin address. */
+    readonly role?: "tx" | "rx";
     readonly verifiedProductName?: string;
     readonly reportedParameterCount?: number;
     readonly closeResult?: boolean;
@@ -265,10 +295,12 @@ function connectedHardware(
   if (input.includeBootloaderCommand === true) {
     parameters.push(command(4, "Serial Update"));
   }
+  const deviceRole = input.role ?? "tx";
   const identity: ExpressLrsIdentity = {
     validation: "CRSF_DEVICE_INFO",
-    role: "tx",
-    address: CrsfAddress.transmitter,
+    role: deviceRole,
+    address:
+      deviceRole === "tx" ? CrsfAddress.transmitter : CrsfAddress.receiver,
     requestOrigin: CrsfAddress.usb,
     productName: input.productName ?? "Bench TX 2.4GHz",
     firmwareVersion: "4.1.0",
@@ -1662,6 +1694,91 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     expect(
       await screen.findByText(/استعادة معلّقة · RECOVERY_INCOMPLETE/u),
     ).toBeInTheDocument();
+    expect(mocks.clearCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("refuses to call an rx-as-tx flash a success when the device comes back a receiver", async () => {
+    // The whole point of rx-as-tx is a role change. A completed write, a clean
+    // reboot and a healthy reconnect prove none of it: if the device still
+    // answers from the receiver address, the conversion did not happen.
+    const user = userEvent.setup();
+    const hardware = connectedHardware({
+      productName: "Vendor ESP RX",
+      // Answers from 0xEC, and keeps answering from 0xEC after the write.
+      role: "rx",
+    });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.preparePackage.mockReset().mockResolvedValue({
+      ...preparedPackage,
+      target: espReceiver,
+      optionsSummary: {
+        ...preparedPackage.optionsSummary,
+        rxAsTxMode: "internal" as const,
+      },
+    });
+
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp-receiver",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+
+    // The receiver-as-transmitter selector is a real control for this Target.
+    const mode = screen.getByTestId("rx-as-tx-mode");
+    expect(mode).toBeEnabled();
+    await user.selectOptions(mode, "internal");
+
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    acknowledgeSavedRecoveryPackage();
+    // The live CRSF identity already pins this Target exactly, so no manual
+    // confirmation is asked for — and none is typed here.
+    expect(screen.queryByLabelText(/^تأكيد Target/u)).toBeNull();
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    // The real driver was reached — this is not a UI-only assertion.
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+
+    // The reconnected device reports the receiver role it always had, so the
+    // write is recorded as unproven and the checkpoint survives.
+    await waitFor(() =>
+      expect(mocks.saveCheckpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stage: "WRITE_COMPLETED_RECONNECT_UNVERIFIED",
+        }),
+      ),
+    );
     expect(mocks.clearCheckpoint).not.toHaveBeenCalled();
   });
 

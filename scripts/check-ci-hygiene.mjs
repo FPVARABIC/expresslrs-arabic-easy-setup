@@ -1,6 +1,15 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-const allowedWorkflows = new Set(["ci.yml", "deploy-pages.yml"]);
+// Each entry is a reviewed workflow. A new file here is a deliberate decision,
+// not something that appears by accident:
+//   ci.yml            the quality, license and security gates
+//   deploy-pages.yml  the GitHub Pages deploy
+//   upstream-live.yml the opt-in live suites against the official mirror
+const allowedWorkflows = new Set([
+  "ci.yml",
+  "deploy-pages.yml",
+  "upstream-live.yml",
+]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
   ".acceptance-stage",
@@ -83,11 +92,32 @@ if (!existsSync(canonicalCiPath)) {
     fail("ci.yml does not enforce interface honesty");
   }
 
+  const livePath = ".github/workflows/upstream-live.yml";
+  if (!existsSync(livePath)) {
+    fail(
+      "upstream-live.yml is missing; the live mirror suites would never run",
+    );
+  } else {
+    const live = readFileSync(livePath, "utf8");
+    if (!/EXPRESSLRS_LIVE_CATALOG:\s*"1"/u.test(live)) {
+      fail("upstream-live.yml does not enable the live catalog suites");
+    }
+    if (!/capture-upstream-manifest\.mjs/u.test(live)) {
+      fail("upstream-live.yml does not record what upstream served");
+    }
+  }
+
   // The corrective-review gates: Arabic left in the English interface, a pinned
   // locale or direction, a build-stage lock, a dead control, rx-as-tx conflated
   // with AirPort, or success claimed without verification.
   if (!/^\s*run:\s*pnpm check:ui-reality\s*$/mu.test(canonicalCi)) {
     fail("ci.yml does not enforce interface reality");
+  }
+
+  // Proves every driver is reachable from the shipped entry point, and that no
+  // module resembling a global write switch is in that graph.
+  if (!/^\s*run:\s*pnpm check:reachability\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce production reachability");
   }
 
   // The Pages deploy runs the tests with VITE_BUILD_SHA set for the whole job.

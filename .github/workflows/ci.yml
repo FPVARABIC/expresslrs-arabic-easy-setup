@@ -58,6 +58,9 @@ jobs:
       - name: Enforce interface reality
         run: pnpm check:ui-reality
 
+      - name: Enforce production reachability
+        run: pnpm check:reachability
+
       - name: Check formatting
         run: pnpm format:check
 

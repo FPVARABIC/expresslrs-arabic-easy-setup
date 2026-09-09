@@ -1644,6 +1644,11 @@ export function useDeviceController({
      * back reporting a transmitter role, or the operation failed.
      */
     readonly rxAsTxMode: RxAsTxMode;
+    /**
+     * Records that the write finished but the result is unproven, keeping the
+     * recovery checkpoint. Never called on a verified reconnect.
+     */
+    readonly markUnverified: (reason: string) => Promise<void>;
   }): Promise<void> {
     setFlashProgress({
       stage: "RECONNECT",
@@ -1707,6 +1712,11 @@ export function useDeviceController({
         outcome.session,
         message("wb.reconnect.closeMismatchedFailed"),
       );
+      // The write completed and the device answered, but what answered could
+      // not be proven to be what this write intended to produce. Record that
+      // as its own state so the checkpoint survives and nothing anywhere reads
+      // this as a success.
+      await input.markUnverified(targetVerification.reason);
       throw new ControllerError(
         message("wb.reconnect.targetMismatch", {
           reason: targetVerification.reason,
@@ -2083,6 +2093,12 @@ export function useDeviceController({
         totalBytes,
         signal: controller.signal,
         rxAsTxMode: prepared.optionsSummary.rxAsTxMode,
+        markUnverified: (reason) =>
+          saveCheckpoint(
+            prepared,
+            "WRITE_COMPLETED_RECONNECT_UNVERIFIED",
+            reason,
+          ),
       });
       const reported = message("wb.flash.complete");
       setStatus(reported);
@@ -2256,6 +2272,11 @@ export function useDeviceController({
         // Recovery restores the original receiver image, so the device must
         // come back in its original role.
         rxAsTxMode: "off",
+        // A recovery that writes but cannot be proven already has its own
+        // state: the catch below restages the checkpoint to
+        // RECOVERY_INCOMPLETE, which is the recovery-side equivalent and must
+        // not be overwritten here.
+        markUnverified: async () => undefined,
       });
       const reported = message("wb.recovery.complete");
       setStatus(reported);

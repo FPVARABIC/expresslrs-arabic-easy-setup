@@ -31,7 +31,18 @@ export interface RecoveryCheckpoint {
      * and matched afterwards. The checkpoint deliberately survives: a write
      * that completed is not evidence that the device came back.
      */
-    | "RECOVERY_INCOMPLETE";
+    | "RECOVERY_INCOMPLETE"
+    /**
+     * A firmware write finished and the device came back, but what came back
+     * could not be proven to be the device this write intended to produce —
+     * most importantly, a receiver flashed with transmitter firmware that did
+     * not return a transmitter role.
+     *
+     * This is a *verification* state, not a lock. Every operation stays
+     * available; what is withheld is the claim of success. The checkpoint
+     * survives so the original image can still be restored.
+     */
+    | "WRITE_COMPLETED_RECONNECT_UNVERIFIED";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly safeError: string | null;
@@ -536,6 +547,7 @@ export async function loadRecoveryCheckpoint(): Promise<RecoveryCheckpoint | nul
     "RECONNECTING",
     "RECOVERY_REQUIRED",
     "RECOVERY_INCOMPLETE",
+    "WRITE_COMPLETED_RECONNECT_UNVERIFIED",
   ]);
   const createdAt = safeString(value.createdAt);
   const updatedAt = safeString(value.updatedAt);
