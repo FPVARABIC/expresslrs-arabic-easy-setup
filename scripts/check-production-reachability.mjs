@@ -96,9 +96,13 @@ for (const [label, file] of Object.entries(REQUIRED)) {
 }
 
 // Nothing that reads as a global write switch may be in the production graph.
-// `software-readiness.ts` declares `realWritesEnabled: false` as a field of a
-// *report*, not a switch — but it reads like one, so its absence is enforced
-// rather than argued.
+//
+// `packages/workflows/src/software-readiness.ts` used to declare
+// `realWritesEnabled: false`. It was a field of a *report* rather than a
+// switch, and it was imported by nothing — but stale code that reads like a
+// lock is a trap for the next reader, so it was deleted rather than explained.
+// The rule stays as regression protection: if the file returns, or if a mock
+// platform reaches production, the build fails.
 const FORBIDDEN = [
   "packages/workflows/src/software-readiness.ts",
   "packages/platform-mock/src/index.ts",
@@ -110,6 +114,14 @@ for (const file of FORBIDDEN) {
       `${file} is reachable from ${ENTRY}; it must not be in the production graph`,
     );
   }
+}
+if (
+  existsSync(path.join(root, "packages/workflows/src/software-readiness.ts"))
+) {
+  fail(
+    "deleted-lock-module-returned",
+    "packages/workflows/src/software-readiness.ts was deleted for declaring realWritesEnabled: false; it must not come back",
+  );
 }
 
 if (process.argv.includes("--list")) {

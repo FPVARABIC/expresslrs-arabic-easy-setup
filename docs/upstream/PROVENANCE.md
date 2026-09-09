@@ -78,30 +78,53 @@ one release together:
 | Hardware layout | `/hardware/<RX\|TX>/<layout_file>` | The pin map appended to a firmware image is the mirror's current one |
 | Logo | `/hardware/logo/<logo_file>` | Cosmetic |
 
-### The honest statement about mixing
+### Determinism: the pack, not the mirror
 
-**This application does combine a release-scoped firmware image with a
-mirror-current hardware layout and Target catalog.** That is how the official
-mirror is laid out — it publishes a single `hardware/` tree rather than one per
-release — so any client reading it has the same property, upstream's own web
-flasher included. It is stated here rather than left implied.
+Earlier revisions of this document argued that combining a release-pinned
+firmware image with a mirror-current hardware layout was acceptable because
+upstream's own flasher does the same. That argument is withdrawn. What upstream
+tolerates for a one-shot flash is not good enough here: this application also
+*recovers* devices, and a recovery archive is worth nothing unless the image it
+restores is byte-identical to the image it saved. "It matched when you saved it"
+is not a property you can rely on if the layout can change underneath you.
 
-What bounds it:
+So the hardware layouts, the target catalog and the logos are no longer fetched
+at all. They are frozen into the build from an immutable Targets commit,
+hashed, and verified against a manifest before use:
 
-- Every Target entry declares `minVersion`, and packaging **refuses** a release
-  older than it (`firmware-package.ts`, `assertTargetSupportsRelease`). A
-  Target whose layout has moved on cannot be applied to a firmware release that
-  predates it.
-- A Target that declares no `minVersion` at all is refused outright rather than
-  packaged on a guess.
-- A branch build is refused for STM32, whose configuration-block version cannot
-  be established from a branch label.
+| Manifest field | What it pins |
+| --- | --- |
+| `packVersion`, `createdAt` | This pack's identity |
+| `provenance.claim` | `NOT_THE_RELEASE_SNAPSHOT`, with the reason |
+| `validatedReleases` | The ExpressLRS releases this pack was exercised against |
+| `targetsRepository.sha` | The immutable `ExpressLRS/targets` commit |
+| `targetsJsonSha256` | The catalog's exact bytes |
+| `layoutArchiveSha256`, `layoutSha256` | Every layout, individually and as a set |
+| `logoArchiveSha256`, `logoSha256` | Every logo, individually and as a set |
 
-What is not bounded: a layout change published *after* a release, for a Target
-whose `minVersion` was not raised, will be applied to that older release. If
-that matters for a given device, pin the layout by selecting a release whose
-`minVersion` covers it, and record the observed pin map in the physical
-acceptance sheet.
+**Why the pack cannot claim to be 4.1.0's own snapshot.** It is not one, and
+nobody could build one: `.github/workflows/build.yml` at tag `4.1.0` checks out
+`ExpressLRS/targets` with **no `ref:`**, so the release consumed whatever the
+default branch tip was when the job ran and recorded it nowhere. The manifest
+says exactly this in `provenance.reason` rather than implying a fidelity it
+does not have.
+
+**What happens on a mismatch.** An explicit `TargetPackIntegrityError` naming
+the file and both digests. There is deliberately no fallback to the live
+mirror: reaching for it would restore precisely the nondeterminism the pack
+removes.
+
+**What happens for a Target the pack does not carry.** It stays visible in the
+catalog and says it is newer than the validated pack, naming the pack version
+and the Targets commit. It is never hidden and never described as blocked by a
+build stage — validating a new pack makes it work, and the message says so.
+
+**Updating.** A catalog update means regenerating the pack
+(`scripts/build-target-pack.mjs --targets <checkout> --sha <40-hex>`), which
+produces a new `packVersion` with fresh digests. There is no in-place edit.
+
+**Offline.** Because the pack is in the bundle, a previously verified pack keeps
+working with no network at all.
 
 ## Integrity
 

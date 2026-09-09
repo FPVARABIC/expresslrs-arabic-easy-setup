@@ -104,7 +104,7 @@ Verified against the built bundle:
   removed after being shown unreachable from the entry point; Easy Mode was
   never built on them.
 
-Consequently the `realWritesEnabled: false` field in
+That module has since been deleted. Historically, the `realWritesEnabled: false` field in
 `packages/workflows/src/software-readiness.ts` is a field of a reporting
 object. It is **not** the control that keeps the public build read-only, and it
 must not be cited as one.

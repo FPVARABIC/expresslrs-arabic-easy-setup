@@ -4,6 +4,11 @@ import { copyToArrayBuffer } from "./byte-utils";
 import { expressLrsBindingUid, md5Bytes } from "./bind-phrase";
 import { validateFirmwareOptions } from "./firmware-options";
 import {
+  assertPackMatchesRelease,
+  targetPackLayout,
+  targetPackLogo,
+} from "./target-pack";
+import {
   applyRxAsTxLayout,
   rxAsTxFirmwareArtifact,
   RxAsTxLayoutError,
@@ -28,7 +33,6 @@ import type {
 } from "./parity-types";
 
 const MAX_FIRMWARE_ENTRY_BYTES = 16 * 1024 * 1024;
-const MAX_HARDWARE_ENTRY_BYTES = 4 * 1024 * 1024;
 const PRODUCT_BLOCK_BYTES = 128;
 const LUA_BLOCK_BYTES = 16;
 const OPTIONS_BLOCK_BYTES = 512;
@@ -109,25 +113,6 @@ function encodePathPart(value: string, description: string): string {
     );
   }
   return encodeURIComponent(value);
-}
-
-function encodeArtifactPath(value: string, description: string): string {
-  const normalized = value.replaceAll("\\", "/");
-  if (
-    normalized.length === 0 ||
-    normalized.length > 512 ||
-    normalized.startsWith("/") ||
-    normalized.endsWith("/")
-  ) {
-    throw new FirmwarePackageError(
-      "TARGET_NOT_FOUND",
-      `${description} contains an unsafe official artifact path`,
-    );
-  }
-  return normalized
-    .split("/")
-    .map((part) => encodePathPart(part, description))
-    .join("/");
 }
 
 function isExpectedFinalUrl(value: string, requestedUrl: string): boolean {
@@ -1056,6 +1041,14 @@ export async function prepareOfficialFirmwarePackage(input: {
   assertRegulatorySelection(input.target, validatedOptions);
   assertReleaseCompatibility(input.release, input.target);
   const family = platformFamily(input.target.config.platform);
+  // The pack governs exactly what it supplies. STM32 appends no hardware layout
+  // at all, so it is not gated; a Target that *does* take one may only be
+  // packaged for a release this pack was validated against, because that
+  // pairing is what makes the appended bytes reproducible. Checked here, before
+  // anything is downloaded, so a refusal costs nothing.
+  if (family !== "stm32" && input.target.config.layoutFile !== null) {
+    assertPackMatchesRelease(input.release.label);
+  }
   if (family === "stm32" && input.release.channel !== "release") {
     throw new FirmwarePackageError(
       "VERSION_UNSUPPORTED",
@@ -1135,35 +1128,33 @@ export async function prepareOfficialFirmwarePackage(input: {
     // picks it from the unmutated catalog entry, which still names an `_RX`
     // artifact (`UnifiedConfiguration.py:229`).
     const role = input.target.role === "tx" ? "TX" : "RX";
-    const layoutPath = encodeArtifactPath(
-      input.target.config.layoutFile,
-      "hardware layout",
-    );
-    layoutBytes = await fetchRequiredAsset({
-      url: `${EXPRESSLRS_WEB_FLASHER_ASSET_BASE}/hardware/${role}/${layoutPath}`,
-      maximumBytes: MAX_HARDWARE_ENTRY_BYTES,
+    // Read from the frozen, hash-verified pack rather than the mirror's
+    // mutable `hardware/` tree. The write path must not depend on what
+    // upstream published today: a recovery archive is only worth having if the
+    // image it restores is byte-identical to the image it saved.
+    // Still reported: the hardware step is real work — the pack is verified
+    // against its manifest here — it simply reads no network.
+    input.onProgress?.({
       stage: "HARDWARE_ARCHIVE",
-      missingCode: "TARGET_NOT_FOUND",
-      ...commonRequest,
+      receivedBytes: 0,
+      totalBytes: null,
     });
+    const layoutText = await targetPackLayout(
+      role,
+      input.target.config.layoutFile,
+    );
+    layoutBytes = new TextEncoder().encode(layoutText);
   }
   if (family !== "stm32" && input.target.config.logoFile !== null) {
-    const logoPath = encodeArtifactPath(input.target.config.logoFile, "logo");
-    logoBytes = await fetchAsset({
-      url: `${EXPRESSLRS_WEB_FLASHER_ASSET_BASE}/${revision}/hardware/logo/${logoPath}`,
-      maximumBytes: MAX_HARDWARE_ENTRY_BYTES,
+    // Logos are appended to the firmware image, so cosmetic or not they change
+    // the bytes written to a device. They come from the frozen pack for the
+    // same reason the layouts do.
+    input.onProgress?.({
       stage: "HARDWARE_ARCHIVE",
-      missingCode: "TARGET_NOT_FOUND",
-      optional: true,
-      ...commonRequest,
+      receivedBytes: 0,
+      totalBytes: null,
     });
-    logoBytes ??= await fetchRequiredAsset({
-      url: `${EXPRESSLRS_WEB_FLASHER_ASSET_BASE}/hardware/logo/${logoPath}`,
-      maximumBytes: MAX_HARDWARE_ENTRY_BYTES,
-      stage: "HARDWARE_ARCHIVE",
-      missingCode: "TARGET_NOT_FOUND",
-      ...commonRequest,
-    });
+    logoBytes = await targetPackLogo(input.target.config.logoFile);
   }
 
   input.onProgress?.({ stage: "EXTRACT", receivedBytes: 0, totalBytes: null });
