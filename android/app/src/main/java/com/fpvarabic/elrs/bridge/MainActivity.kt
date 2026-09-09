@@ -1,6 +1,7 @@
 package com.fpvarabic.elrs.bridge
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.http.SslError
@@ -13,6 +14,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.ServiceWorkerClientCompat
+import androidx.webkit.ServiceWorkerControllerCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewFeature
@@ -57,7 +60,7 @@ class MainActivity : AppCompatActivity() {
 
         val assetLoader = WebViewAssetLoader.Builder()
             .setDomain(APPLICATION_HOST)
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/", BundledWebPathHandler(this))
             .build()
 
         val identity = readSourceIdentity()
@@ -74,6 +77,11 @@ class MainActivity : AppCompatActivity() {
         // process that can reach adb. Debug builds only.
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
+        // A service worker could serve a document from cache that this APK
+        // never shipped, which is exactly what the asset loader exists to
+        // prevent. Nothing is served to one.
+        refuseServiceWorkerRequests()
+
         bridge = UsbSerialBridge.attach(
             context = this,
             webView = webView,
@@ -81,7 +89,7 @@ class MainActivity : AppCompatActivity() {
             backend = testBackend,
             identity = identity,
         )
-        webView.loadUrl("$APPLICATION_ORIGIN/assets/web/index.html")
+        webView.loadUrl("$APPLICATION_ORIGIN/index.html")
     }
 
     override fun onResume() {
@@ -123,6 +131,22 @@ class MainActivity : AppCompatActivity() {
         runCatching {
             JSONObject(assets.open(IDENTITY_ASSET).use { it.readBytes().decodeToString() })
         }.getOrElse { JSONObject().put("schemaVersion", 1) }
+
+    private fun refuseServiceWorkerRequests() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)) return
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)) {
+            return
+        }
+        runCatching {
+            ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(
+                object : ServiceWorkerClientCompat() {
+                    override fun shouldInterceptRequest(
+                        request: WebResourceRequest,
+                    ): WebResourceResponse = WebResourceResponse(null, null, null)
+                },
+            )
+        }
+    }
 
     companion object {
         const val APPLICATION_HOST = "appassets.androidplatform.net"
@@ -171,6 +195,34 @@ internal fun WebSettings.applyHardening() {
 
     if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
         WebSettingsCompat.setSafeBrowsingEnabled(this, true)
+    }
+}
+
+/**
+ * Serves the bundled web application from the origin root.
+ *
+ * The build references its own files absolutely — `/assets/index-<hash>.js` —
+ * because that is what it does on the web too, where the document sits at the
+ * root. Mounting it under `/assets/web/` inside the APK would leave every one
+ * of those references pointing at nothing, and the host would open on a blank
+ * page. So the handler is mounted at `/` and adds the `web/` prefix on the way
+ * to the APK, which keeps the bundled application in its own directory
+ * alongside the injected shim and the identity file without the URLs having to
+ * know about it.
+ *
+ * `PackagedApplicationInstrumentedTest` loads the real `index.html` through
+ * this and asserts the application renders, so a layout change that breaks the
+ * mapping fails a test rather than shipping a blank host.
+ */
+internal class BundledWebPathHandler(context: Context) : WebViewAssetLoader.PathHandler {
+    private val assets = WebViewAssetLoader.AssetsPathHandler(context)
+
+    override fun handle(path: String): WebResourceResponse? =
+        assets.handle("$BUNDLED_PREFIX$path")
+
+    internal companion object {
+        /** Where `bundleWebAssets` puts the web build inside the APK. */
+        const val BUNDLED_PREFIX = "web/"
     }
 }
 

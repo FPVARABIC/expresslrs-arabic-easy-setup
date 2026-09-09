@@ -203,7 +203,7 @@ class WebViewHostInstrumentedTest {
             "the packaged application may navigate within itself",
             client.shouldOverrideUrlLoading(
                 webView,
-                request("$ORIGIN/assets/web/index.html", isMainFrame = true),
+                request("$ORIGIN/index.html", isMainFrame = true),
             ),
         )
         assertNull(opened.get())
@@ -222,7 +222,7 @@ class WebViewHostInstrumentedTest {
             "a subframe may not navigate at all",
             client.shouldOverrideUrlLoading(
                 webView,
-                request("$ORIGIN/assets/web/index.html", isMainFrame = false),
+                request("$ORIGIN/index.html", isMainFrame = false),
             ),
         )
         assertNull("and it is not handed to the browser either", opened.get())
@@ -274,6 +274,26 @@ class WebViewHostInstrumentedTest {
     }
 
     @Test
+    fun servesTheBundledApplicationAndTheAbsolutePathsItReferences() {
+        val loader = assetLoader()
+
+        val document = loader.shouldInterceptRequest(Uri.parse("$ORIGIN/index.html"))
+        assertNotNull("the packaged index.html must be served from the root", document)
+        assertNotNull(document!!.data)
+
+        // The web build references its own bundle absolutely, exactly as it
+        // does on the web. Mounting it anywhere but the root would leave every
+        // one of these pointing at nothing.
+        val bundled = InstrumentationRegistry.getInstrumentation().targetContext.assets
+            .list("web/assets")
+            ?.firstOrNull { it.endsWith(".js") }
+        assertNotNull("the APK carries no bundled web assets", bundled)
+        val script = loader.shouldInterceptRequest(Uri.parse("$ORIGIN/assets/$bundled"))
+        assertNotNull("an absolute asset reference must resolve", script)
+        assertNotNull(script!!.data)
+    }
+
+    @Test
     fun appliesTheReviewedWebViewSettings() {
         onMainThread {
             val host = WebView(InstrumentationRegistry.getInstrumentation().targetContext)
@@ -321,11 +341,13 @@ class WebViewHostInstrumentedTest {
         )
     }
 
+    // The same mapping MainActivity uses, so a request that works here works
+    // there.
     private fun assetLoader() = androidx.webkit.WebViewAssetLoader.Builder()
         .setDomain(MainActivity.APPLICATION_HOST)
         .addPathHandler(
-            "/assets/",
-            androidx.webkit.WebViewAssetLoader.AssetsPathHandler(
+            "/",
+            BundledWebPathHandler(
                 InstrumentationRegistry.getInstrumentation().targetContext,
             ),
         )

@@ -164,21 +164,44 @@ function validate(source, label) {
 }
 
 /**
- * Reads the document policy out of the meta tag. A page served without headers
- * — GitHub Pages, or the Android asset loader — has only this.
+ * Reads the document policy out of the meta tag.
+ *
+ * A page served without headers — GitHub Pages, or the Android asset loader —
+ * has only this. Exactly one tag is required: two meta policies do not replace
+ * each other, they intersect, and the effective policy is then one nobody
+ * reviewed. A build that injects a second copy is the way that happens, and it
+ * is what this catches.
  */
 function documentPolicy(html, label) {
-  const tag = /<meta\s+http-equiv="Content-Security-Policy"[\s\S]*?>/iu.exec(
-    html,
-  );
-  if (tag === null) {
+  const tags = [
+    ...html.matchAll(
+      /<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/giu,
+    ),
+  ];
+  if (tags.length === 0) {
     fail(`${label} does not carry a Content-Security-Policy meta tag`);
   }
-  const content = /content="([^"]*)"/u.exec(tag[0]);
+  if (tags.length > 1) {
+    fail(
+      `${label} carries ${tags.length} Content-Security-Policy meta tags; ` +
+        "two policies intersect into one that was never reviewed",
+    );
+  }
+  // The delimiter is captured and back-referenced: a policy full of `'self'`
+  // inside a double-quoted attribute would otherwise be cut at its first
+  // apostrophe, and the truncated policy would compare as a directive
+  // mismatch rather than as the parsing bug it is.
+  const content = /content=(["'])([\s\S]*?)\1/u.exec(tags[0][0]);
   if (content === null) {
     fail(`${label} has a Content-Security-Policy meta tag with no content`);
   }
-  return content[1];
+  // A build tool may HTML-escape the attribute, which turns every `'self'`
+  // into `&#39;self&#39;`. That is the same policy and must parse as one.
+  return content[2]
+    .replaceAll("&#39;", "'")
+    .replaceAll("&apos;", "'")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&amp;", "&");
 }
 
 function validateDocument(html, headerPolicy, label) {
