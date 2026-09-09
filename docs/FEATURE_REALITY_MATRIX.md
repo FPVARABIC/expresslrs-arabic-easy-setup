@@ -70,7 +70,31 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | Download the recovery package | `downloadRecovery` | As above. | `EMULATOR_VERIFIED` |
 | Download the Lua script | `downloadLuaScript` | Fetches the official Lua script for the selected release and Target. | `EMULATOR_VERIFIED` |
 | Start the real flash | `flashPreparedFirmware` | The authorized firmware write, followed by reconnect and verification. Any failure leaves a recovery checkpoint. | `EMULATOR_VERIFIED` |
+| Flash this receiver with transmitter firmware | `updateOption("rxAsTxMode", …)` | Upstream's `--rx-as-tx`. Selects the transmitter build for a receiver and rewrites its hardware layout for the chosen mode. Every mode stays visible; one the Target cannot take is closed with that Target's own reason. | `BROWSER_VERIFIED` |
+| AirPort | `updateOption("airportEnabled", …)` | Upstream's `--airport-baud`. Writes `is-airport` so the device acts as a transparent serial bridge. Independent of the option above; neither derives from the other. | `BROWSER_VERIFIED` |
 | Cancel the operation | `cancelCurrentOperation` | As above. | `EMULATOR_VERIFIED` |
+
+### Every write, end to end
+
+The chain each device-changing operation actually travels, and what has to be
+true before it is allowed to report success. A control is dynamically disabled
+only when one of its listed prerequisites is unmet, and the unmet ones are
+rendered beside it.
+
+| Operation | Control | Handler | Controller gate | Driver | Success requires |
+| --- | --- | --- | --- | --- | --- |
+| Identify | Identify over CRSF | `connectHardware` | `readiness.connect` — idle, port cleanup proven | `serial.ts` → CRSF Device Info `0x29` | A well-formed Device Info with a valid CRC. No identity is shown without one. |
+| Settings write | Save with read-back | `writeSetting` | `readiness.settingsWrite` — idle, live identity, port clean, recovery journal read, no open checkpoint, a writable parameter chosen | CRSF parameter write | The device reads the value back and it matches exactly. A write that returns without a matching read-back is a failure. |
+| Settings restore | Restore the snapshot | `restoreSettings` | `readiness.settingsRestore` — as above, plus a backup exists | CRSF parameter write, per parameter | Every restored parameter reads back. A single mismatch fails the restore. |
+| Binding | Run the real binding | `startBinding` | `readiness.binding` — as settings, plus the operator's acknowledgement | CRSF command `0x32`, then Link Statistics `0x14` observation | Never `VERIFIED_SUCCESS` from the command alone. Graded `COMMAND_ACKNOWLEDGED_ONLY` unless the operator confirms a live link, which records `USER_CONFIRMED_LINK`. |
+| Firmware write | Start the real flash | `flashPreparedFirmware` | `readiness.firmwareWrite` — idle, Target chosen, port clean, journal read, no open checkpoint, package built, recovery archive downloaded, power acknowledged, antenna acknowledged for a TX, Target confirmed where the identity does not pin it, live identity for a UART write | esptool-js, STM32 DFU (WebUSB), XMODEM, or passthrough | Reboot, reconnect, read identity, confirm Target, confirm version. Any failure keeps the recovery checkpoint. |
+| Receiver as transmitter | The mode selector, then the flash | `flashPreparedFirmware` with `rxAsTxMode` | `readiness.rxAsTx` — a Target that upstream builds transmitter firmware for, in the chosen mode | The same flashers, against the `_TX` artifact | Everything a firmware write requires, **and** the rebooted device must report a transmitter role. A device that comes back as a receiver fails with `RX_AS_TX_ROLE_NOT_APPLIED` and keeps its checkpoint. |
+| Recovery | Restore from the recovery package | `recoverFromCheckpoint` | `readiness.recovery` — idle, Target chosen, port clean, journal read, a package or an open checkpoint, power acknowledged | The same flashers | Write, reboot, reconnect, read identity, confirm Target, confirm version, then clear the checkpoint. Anything short of that stays `RECOVERY_INCOMPLETE`. |
+| Diagnostics | Show / copy / download | `captureDiagnostics` | `readiness.diagnostics` — always ready; it reads and redacts, and writes nothing | None | Not a write. Secrets are redacted before the report leaves the page. |
+
+Every write additionally passes the single-use write capability described in
+`docs/architecture/`: bound to the session, the device fingerprint and the
+operation, with a 180-second TTL, and consumed on use.
 
 ### Diagnostics
 

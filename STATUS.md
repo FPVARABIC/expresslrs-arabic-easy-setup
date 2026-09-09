@@ -7,12 +7,12 @@
 | --- | --- |
 | Audit date | 2026-09-09 |
 | Phase | Software feature integration complete; no operation proven on hardware |
-| Branch | `claude/expresslrs-hardware-validation-i073sx` (fast-forward of `feat/m2-real-hardware-first-test`) |
-| Draft PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — Draft, unmerged |
+| Branch | `claude/expresslrs-advanced-i18n-and-locks` (branched from `main` at `835c5ab`) |
+| Corrective review | Six findings reproduced from `main` at `835c5ab`; all six fixed on this branch and awaiting review |
 | Candidate identity | Branch HEAD; injected at build time as the exact 40-character `VITE_BUILD_SHA` |
 | Software status | `SOFTWARE_FEATURE_INTEGRATION_COMPLETE — HARDWARE UNVERIFIED` |
 | Highest evidence level reached | `BROWSER_VERIFIED` — see the [status vocabulary](docs/FEATURE_REALITY_MATRIX.md#status-vocabulary) |
-| Known integration gaps | None open. Android remains `UNVERIFIED` with the evidence recorded in [ANDROID.md](docs/ANDROID.md); it is an unproven platform, not an unfinished feature |
+| Known integration gaps | None open. Receiver-as-transmitter was reimplemented after an earlier version modelled it as AirPort; see [the upstream baseline](docs/upstream/baseline.md#receiver-as-transmitter---rx-as-tx). Android remains `UNVERIFIED` with the evidence recorded in [ANDROID.md](docs/ANDROID.md); it is an unproven platform, not an unfinished feature |
 | Hardware validation | **NONE** — nothing in this build has been proven on a physical device |
 | Public device-changing operations | **ENABLED, evidence-gated** — no project-phase lock; each write requires live device evidence and operator confirmation |
 | Performance / RF claims | **NONE** |
