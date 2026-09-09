@@ -6,11 +6,12 @@
 | Field | Value |
 | --- | --- |
 | Audit date | 2026-09-08 |
-| Phase | Hardware-validation beta: all operations real; physical validation pending |
+| Phase | Feature integration in progress; no operation proven on hardware |
 | Branch | `claude/expresslrs-hardware-validation-i073sx` (fast-forward of `feat/m2-real-hardware-first-test`) |
 | Draft PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — Draft, unmerged |
 | Candidate identity | Branch HEAD; injected at build time as the exact 40-character `VITE_BUILD_SHA` |
-| Software status | `FULLY_FUNCTIONAL_HARDWARE_VALIDATION_BETA` — every operation is built, reachable, and wired to a real service |
+| Software status | `SOFTWARE_FEATURE_INTEGRATION_INCOMPLETE — HARDWARE UNVERIFIED` |
+| Known integration gaps | Easy-Mode firmware update hands off to Advanced; Binding Phrase has no interface; Diagnostics not shipped; Android layout-only |
 | Hardware validation | **NONE** — nothing in this build has been proven on a physical device |
 | Public device-changing operations | **ENABLED, evidence-gated** — no project-phase lock; each write requires live device evidence and operator confirmation |
 | Performance / RF claims | **NONE** |

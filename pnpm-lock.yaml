@@ -75,30 +75,9 @@ importers:
 
   apps/web:
     dependencies:
-      '@elrs-easy/compatibility':
-        specifier: workspace:*
-        version: link:../../packages/compatibility
-      '@elrs-easy/device':
-        specifier: workspace:*
-        version: link:../../packages/device
-      '@elrs-easy/diagnostics':
-        specifier: workspace:*
-        version: link:../../packages/diagnostics
-      '@elrs-easy/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
       '@elrs-easy/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@elrs-easy/platform-browser':
-        specifier: workspace:*
-        version: link:../../packages/platform-browser
-      '@elrs-easy/platform-mock':
-        specifier: workspace:*
-        version: link:../../packages/platform-mock
-      '@elrs-easy/workflows':
-        specifier: workspace:*
-        version: link:../../packages/workflows
       '@fontsource-variable/cairo':
         specifier: 5.3.0
         version: 5.3.0
