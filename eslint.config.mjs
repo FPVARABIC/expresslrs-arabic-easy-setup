@@ -22,6 +22,16 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  {
+    // The Android host's document-start script. It runs in the WebView, not in
+    // Node, and it is linted rather than excluded: it is the code that hands a
+    // page access to a USB device, so it is the last file that should be
+    // exempt from the rules the rest of the project follows.
+    files: ["android/app/src/main/assets/**/*.js"],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.es2023 },
+    },
+  },
   ...tseslint.configs.recommended,
   {
     files: ["**/*.{ts,tsx}"],

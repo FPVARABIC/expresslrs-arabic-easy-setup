@@ -8,6 +8,16 @@ const repositoryRoot = path.resolve(
 );
 const sourcePath = path.join(repositoryRoot, "apps/web/public/_headers");
 const builtPath = path.join(repositoryRoot, "apps/web/dist/_headers");
+const documentPath = path.join(repositoryRoot, "apps/web/index.html");
+const builtDocumentPath = path.join(repositoryRoot, "apps/web/dist/index.html");
+/**
+ * `frame-ancestors` is ignored in a meta policy, so the document carries every
+ * other directive and the header keeps that one. Anything else diverging
+ * between the two would mean the Android WebView — which gets no headers at
+ * all, and is the one context where this page can reach USB hardware — runs
+ * under a policy nobody reviewed.
+ */
+const documentOnlyOmissions = new Set(["frame-ancestors"]);
 // `http://elrs_rx.local` and `http://elrs_tx.local` were removed: an underscore
 // is not legal in a CSP host-source, so Chromium rejected both with "contains
 // an invalid source ... It will be ignored" on every page load. They granted
@@ -153,8 +163,59 @@ function validate(source, label) {
   return headers;
 }
 
+/**
+ * Reads the document policy out of the meta tag. A page served without headers
+ * — GitHub Pages, or the Android asset loader — has only this.
+ */
+function documentPolicy(html, label) {
+  const tag = /<meta\s+http-equiv="Content-Security-Policy"[\s\S]*?>/iu.exec(
+    html,
+  );
+  if (tag === null) {
+    fail(`${label} does not carry a Content-Security-Policy meta tag`);
+  }
+  const content = /content="([^"]*)"/u.exec(tag[0]);
+  if (content === null) {
+    fail(`${label} has a Content-Security-Policy meta tag with no content`);
+  }
+  return content[1];
+}
+
+function validateDocument(html, headerPolicy, label) {
+  const policy = documentPolicy(html, label);
+  if (/\*|'unsafe-inline'|'unsafe-eval'/u.test(policy)) {
+    fail(
+      `${label} document policy contains a wildcard or unsafe execution source`,
+    );
+  }
+  const directives = parseDirectives(policy);
+  const expected = parseDirectives(headerPolicy);
+  for (const omitted of documentOnlyOmissions) {
+    if (directives.has(omitted)) {
+      fail(
+        `${label} document policy declares ${omitted}, which a meta policy ignores`,
+      );
+    }
+    expected.delete(omitted);
+  }
+  if (directives.size !== expected.size) {
+    fail(
+      `${label} document policy does not declare the same directives as the header policy`,
+    );
+  }
+  for (const [name, tokens] of expected) {
+    requireExactDirective(directives, name, tokens);
+  }
+}
+
 const source = await readFile(sourcePath, "utf8");
-validate(source, "apps/web/public/_headers");
+const sourceHeaders = validate(source, "apps/web/public/_headers");
+const sourcePolicy = sourceHeaders.get("content-security-policy");
+validateDocument(
+  await readFile(documentPath, "utf8"),
+  sourcePolicy,
+  "apps/web/index.html",
+);
 
 if (process.argv.includes("--built")) {
   const built = await readFile(builtPath, "utf8");
@@ -164,10 +225,15 @@ if (process.argv.includes("--built")) {
       "the built header file does not exactly match the reviewed source policy",
     );
   }
+  validateDocument(
+    await readFile(builtDocumentPath, "utf8"),
+    sourcePolicy,
+    "apps/web/dist/index.html",
+  );
 }
 
 console.log(
   process.argv.includes("--built")
-    ? "Browser security headers verified in source and build output."
-    : "Browser security headers verified.",
+    ? "Browser security headers verified in source and build output, header and document."
+    : "Browser security headers verified in the header file and the document.",
 );

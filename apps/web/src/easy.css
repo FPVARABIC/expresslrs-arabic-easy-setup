@@ -449,3 +449,18 @@
   flex: 1 1 100%;
   color: var(--danger);
 }
+
+/* Shown only inside an installed native host, which reports what it was built
+   from. A 12-character digest has no break opportunity, so it is given one
+   rather than allowed to widen the banner past the viewport. */
+.build-banner-host {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.build-banner-host code {
+  direction: ltr;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

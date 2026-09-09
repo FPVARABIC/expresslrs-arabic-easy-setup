@@ -1,13 +1,15 @@
 name: Android host
 
-# Builds the Android host APK, runs Gradle lint and the JVM unit tests, and
-# publishes the APK with its SHA-256.
+# Builds the Android host APK, runs Gradle lint, the JVM unit tests and the
+# instrumentation suite on an emulator, and publishes the APK with a full
+# identity record.
 #
 # The Android SDK cannot be downloaded in the development sandbox this project
-# is worked on from, so this is where an APK is produced at all. What it proves
-# is bounded and stated in docs/ANDROID.md: the project compiles, lint is
-# clean, and the rules in UsbDeviceGate hold. It proves nothing about USB OTG,
-# because no emulator has a USB host.
+# is worked on from, so this is where an APK is produced at all, and where the
+# bridge and WebView behaviour is actually executed. What it proves is bounded
+# and stated in docs/ANDROID.md: the project compiles, lint is clean, and the
+# host's rules hold against a fake USB backend. It proves nothing about USB
+# OTG, because no emulator has a USB host.
 
 on:
   push:
@@ -16,6 +18,8 @@ on:
   pull_request:
     paths:
       - "android/**"
+      - "apps/web/**"
+      - "packages/**"
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
@@ -37,6 +41,27 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      # The APK bundles the web application rather than fetching it, so the web
+      # build has to exist before Gradle runs. `bundleWebAssets` fails loudly
+      # rather than shipping an empty host if this step is ever skipped.
+      - name: Build the web application
+        run: pnpm build
 
       - name: Set up JDK 17
         uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
@@ -67,15 +92,42 @@ jobs:
         working-directory: android
         run: gradle --no-daemon assembleDebug
 
+      # Everything an installed APK can be traced back to. Recomputed on every
+      # head: a workflow-only change still produces a different APK, so reusing
+      # a digest from a previous head would be a claim about bytes nobody hashed.
       - name: Record the APK identity
         working-directory: android
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$apk"
-          echo "APK:    $apk"
-          echo "bytes:  $(stat -c%s "$apk")"
-          echo "sha256: $(sha256sum "$apk" | cut -d' ' -f1)"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+
+          identity="app-debug.apk.identity.txt"
+          {
+            echo "commit:            ${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "workflow run:      ${{ github.run_id }} attempt ${{ github.run_attempt }}"
+            echo "apk filename:      app-debug.apk"
+            echo "apk bytes:         $(stat -c%s "$apk")"
+            echo "apk sha256:        $(sha256sum "$apk" | cut -d' ' -f1)"
+            echo "build tools:       $build_tools"
+            "$aapt2" dump badging "$apk" \
+              | sed -n "s/^package: name='\([^']*\)' versionCode='\([^']*\)' versionName='\([^']*\)'.*/package id:        \1\nversionCode:       \2\nversionName:       \3/p"
+            "$aapt2" dump badging "$apk" \
+              | sed -n "s/^sdkVersion:'\([^']*\)'/minSdk:            \1/p"
+            "$aapt2" dump badging "$apk" \
+              | sed -n "s/^targetSdkVersion:'\([^']*\)'/targetSdk:         \1/p"
+            echo "compileSdk:        $(sed -n 's/^ *compileSdk = \([0-9]*\)/\1/p' app/build.gradle.kts)"
+            echo "signing cert sha256: $(
+              "$apksigner" verify --print-certs "$apk" \
+                | sed -n 's/^Signer #1 certificate SHA-256 digest: //p'
+            )"
+            unzip -p "$apk" assets/source-identity.json
+            echo
+          } | tee "$identity"
+
           sha256sum "$apk" > app-debug.apk.sha256
 
       - name: Publish the debug APK
@@ -88,6 +140,7 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app-debug.apk.sha256
+            android/app-debug.apk.identity.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -98,5 +151,108 @@ jobs:
           name: android-reports-${{ github.run_attempt }}
           path: |
             android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  instrumentation:
+    name: Instrumentation tests on an emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      # The packaged-application suite loads the real bundled index.html, so
+      # these tests exercise the same bytes the APK ships.
+      - name: Build the web application
+        run: pnpm build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Driven with the SDK tools directly rather than through a third-party
+      # action. This repository pins every action it uses to a full SHA, and an
+      # unverified pin on the step that runs the security tests would be the
+      # wrong place to make an exception.
+      - name: Create the emulator
+        run: |
+          set -euo pipefail
+          # API 34 with Google APIs: the bridge needs a WebView that supports
+          # WebMessageListener and document-start scripts, and the AOSP images
+          # below API 30 ship one that does not.
+          image="system-images;android-34;google_apis;x86_64"
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "$image" "platform-tools" "emulator" > /dev/null
+          echo "no" | avdmanager create avd --force --name ci --package "$image" --device "pixel_6"
+
+      - name: Boot the emulator
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/emulator/emulator" -avd ci \
+            -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            -accel on -camera-back none -camera-front none &
+          adb wait-for-device
+          # `wait-for-device` returns as soon as adb can talk to it, which is
+          # long before the framework is up. Installing then would fail.
+          timeout 600 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell input keyevent 82
+          adb devices
+
+      - name: Run the instrumentation suite
+        working-directory: android
+        run: gradle --no-daemon connectedDebugAndroidTest
+
+      - name: Capture the device log
+        if: always()
+        run: adb logcat -d > android-logcat.txt || true
+
+      - name: Preserve the instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-instrumentation-reports-${{ github.run_attempt }}
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            android-logcat.txt
           if-no-files-found: ignore
           retention-days: 14

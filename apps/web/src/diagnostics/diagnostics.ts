@@ -23,6 +23,14 @@ export interface DiagnosticsSnapshot {
     readonly webUsbSupported: boolean;
     /** A native host supplied the serial transport instead of the browser. */
     readonly nativeBridge: boolean;
+    /**
+     * What that native host was built from. A packaged host serves the web
+     * application from inside itself, so this is the only way a report from an
+     * installed build names the sources behind it. Null in a browser.
+     */
+    readonly nativeHostWebBuild: string | null;
+    readonly nativeHostNativeSource: string | null;
+    readonly nativeHostBridge: string | null;
     readonly language: string;
     readonly platform: string;
     readonly standaloneDisplay: boolean;
@@ -157,6 +165,15 @@ export function serializeDiagnosticsMarkdown(
       snapshot.environment.grantedUsbDevices,
     ),
     redactedLine("Native bridge", snapshot.environment.nativeBridge),
+    redactedLine(
+      "Native host web build",
+      snapshot.environment.nativeHostWebBuild,
+    ),
+    redactedLine(
+      "Native host native source",
+      snapshot.environment.nativeHostNativeSource,
+    ),
+    redactedLine("Native host bridge", snapshot.environment.nativeHostBridge),
     redactedLine("Service worker", snapshot.environment.serviceWorkerSupported),
     redactedLine("Standalone display", snapshot.environment.standaloneDisplay),
     redactedLine("Platform", snapshot.environment.platform),

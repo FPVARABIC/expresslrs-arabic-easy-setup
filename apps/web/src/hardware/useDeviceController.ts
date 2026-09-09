@@ -2368,6 +2368,11 @@ export function useDeviceController({
         webSerialSupported: "serial" in navigator,
         webUsbSupported: navigatorObject.usb !== undefined,
         nativeBridge: platformCapabilities.nativeBridge,
+        nativeHostWebBuild:
+          platformCapabilities.nativeHost?.webBuildSha256 ?? null,
+        nativeHostNativeSource:
+          platformCapabilities.nativeHost?.nativeSourceSha256 ?? null,
+        nativeHostBridge: platformCapabilities.nativeHost?.bridge ?? null,
         language: navigator.language,
         // userAgentData is absent outside Chromium, and the full user-agent
         // string is a fingerprint, so only the coarse platform hint is taken.

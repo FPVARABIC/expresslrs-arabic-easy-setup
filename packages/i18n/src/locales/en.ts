@@ -78,6 +78,11 @@ export const en = {
     "Copy failed. The full commit is in the code element's title.",
   "build.unpinned":
     "This build carries no commit identity, so a result recorded from it cannot be tied to one tree.",
+  "build.host": "Installed host",
+  "build.hostWeb": "web build",
+  "build.hostNative": "host sources",
+  "build.hostBridgeUnavailable":
+    "This host could not install its USB bridge ({reason}), so no device can be opened from inside the app.",
   "diagnostics.heading": "Diagnostics",
   "diagnostics.intro":
     "A report of what this session actually observed: the browser's capabilities, what the device reported, the package that was prepared, and the recovery state.",

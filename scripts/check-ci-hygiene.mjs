@@ -32,6 +32,13 @@ function fail(message) {
   process.exitCode = 1;
 }
 
+/** Strips block and line comments so a rule tests code, not prose about it. */
+function withoutComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//gu, " ")
+    .replace(/(^|[^:])\/\/.*$/gmu, "$1");
+}
+
 if (!existsSync(workflowDirectory)) {
   fail(`${workflowDirectory} is missing`);
 } else {
@@ -197,6 +204,92 @@ if (!existsSync(serialPath)) {
   }
   if (/EXPRESSLRS_CRSF_BAUD_RATE\s*=\s*115_?200/u.test(serial)) {
     fail("the direct CRSF transport regressed to 115200 baud");
+  }
+}
+
+// The Android host is a WebView that can rewrite a transmitter's firmware. The
+// properties below are what stop it being a general-purpose browser with USB
+// access, and every one of them is a single edit away from being lost.
+const androidWorkflowPath = ".github/workflows/android.yml";
+if (!existsSync(androidWorkflowPath)) {
+  fail(`${androidWorkflowPath} is missing`);
+} else {
+  const androidWorkflow = readFileSync(androidWorkflowPath, "utf8");
+  if (!/connectedDebugAndroidTest/u.test(androidWorkflow)) {
+    fail(
+      "android.yml does not run the instrumentation suite; the bridge and WebView rules would go unexecuted",
+    );
+  }
+  // The APK bundles the web build. Without this step Gradle fails loudly, but
+  // the failure would be a mystery rather than a missing step.
+  if (!/^\s*run: pnpm build\s*$/mu.test(androidWorkflow)) {
+    fail("android.yml does not build the web application before Gradle");
+  }
+  if (!/verify --print-certs/u.test(androidWorkflow)) {
+    fail("android.yml does not record the APK signing certificate");
+  }
+  if (!/source-identity\.json/u.test(androidWorkflow)) {
+    fail("android.yml does not record the embedded web and native source SHAs");
+  }
+}
+
+const androidSourceRoot = "android/app/src/main/java/com/fpvarabic/elrs/bridge";
+const hostActivityPath = `${androidSourceRoot}/MainActivity.kt`;
+if (!existsSync(hostActivityPath)) {
+  fail(`${hostActivityPath} is missing`);
+} else {
+  const hostActivity = readFileSync(hostActivityPath, "utf8");
+  const hardening = [
+    ["allowFileAccess = false", "file access is not disabled"],
+    ["allowContentAccess = false", "content provider access is not disabled"],
+    ["allowFileAccessFromFileURLs = false", "file URL access is not disabled"],
+    [
+      "allowUniversalAccessFromFileURLs = false",
+      "universal file URL access is not disabled",
+    ],
+    ["WebSettings.MIXED_CONTENT_NEVER_ALLOW", "mixed content is not refused"],
+    [
+      "WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)",
+      "WebView debugging is not confined to debug builds",
+    ],
+    ["handler.cancel()", "an SSL error is not cancelled"],
+    [
+      "WebViewAssetLoader",
+      "the packaged assets are not served by the asset loader",
+    ],
+  ];
+  for (const [needle, message] of hardening) {
+    if (!hostActivity.includes(needle)) {
+      fail(`the Android host is not hardened: ${message}`);
+    }
+  }
+  if (/handler\.proceed\(\)/u.test(hostActivity)) {
+    fail("the Android host proceeds through an SSL error");
+  }
+  // The deployed site must never be the document inside the bridged WebView.
+  if (/loadUrl\(\s*"https?:\/\/(?!\$)/u.test(hostActivity)) {
+    fail(
+      "the Android host loads a hard-coded remote URL into the bridged WebView",
+    );
+  }
+}
+
+if (existsSync(androidSourceRoot)) {
+  for (const entry of readdirSync(androidSourceRoot, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".kt")) continue;
+    // Comments are stripped first: UsbSerialBridge documents at length why it
+    // does not use this API, and a rule that cannot tell an explanation from a
+    // call would push that explanation out of the code.
+    const source = withoutComments(
+      readFileSync(`${androidSourceRoot}/${entry.name}`, "utf8"),
+    );
+    // An interface injected this way reaches every frame and cannot tell which
+    // one called it. The bridge uses an origin-restricted WebMessageListener.
+    if (/addJavascriptInterface/u.test(source)) {
+      fail(
+        `${entry.name} uses addJavascriptInterface, which cannot be origin-restricted`,
+      );
+    }
   }
 }
 
