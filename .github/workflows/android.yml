@@ -115,14 +115,22 @@ jobs:
             echo "build tools:       $build_tools"
             "$aapt2" dump badging "$apk" \
               | sed -n "s/^package: name='\([^']*\)' versionCode='\([^']*\)' versionName='\([^']*\)'.*/package id:        \1\nversionCode:       \2\nversionName:       \3/p"
-            "$aapt2" dump badging "$apk" \
-              | sed -n "s/^sdkVersion:'\([^']*\)'/minSdk:            \1/p"
+            # Labelled `sdkVersion` by older build-tools and `minSdkVersion`
+            # by newer ones. Both are read, so the field is never silently
+            # absent from the identity record.
+            echo "minSdk:            $(
+              "$aapt2" dump badging "$apk" \
+                | sed -n "s/^\(min\)\?[sS]dkVersion:'\([^']*\)'.*/\2/p" \
+                | head -1
+            )"
             "$aapt2" dump badging "$apk" \
               | sed -n "s/^targetSdkVersion:'\([^']*\)'/targetSdk:         \1/p"
             echo "compileSdk:        $(sed -n 's/^ *compileSdk = \([0-9]*\)/\1/p' app/build.gradle.kts)"
             echo "signing cert sha256: $(
-              "$apksigner" verify --print-certs "$apk" \
-                | sed -n 's/^Signer #1 certificate SHA-256 digest: //p'
+              "$apksigner" verify --print-certs "$apk" 2>&1 \
+                | grep -io 'SHA-256 digest: *[0-9a-f]\{64\}' \
+                | grep -io '[0-9a-f]\{64\}' \
+                | head -1
             )"
             unzip -p "$apk" assets/source-identity.json
             echo
@@ -217,9 +225,18 @@ jobs:
           # WebMessageListener and document-start scripts, and the AOSP images
           # below API 30 ship one that does not.
           image="system-images;android-34;google_apis;x86_64"
-          yes | sdkmanager --licenses > /dev/null
+          # A bounded feed rather than `yes`: `yes` is killed by SIGPIPE as soon
+          # as sdkmanager stops reading, and `pipefail` turns that into a failed
+          # step. setup-android has already accepted the licences, so this only
+          # covers the case where it has not.
+          printf 'y\n%.0s' $(seq 50) | sdkmanager --licenses > /dev/null || true
           sdkmanager --install "$image" "platform-tools" "emulator" > /dev/null
-          echo "no" | avdmanager create avd --force --name ci --package "$image" --device "pixel_6"
+          # `--device` is a convenience; a runner whose SDK does not know the
+          # profile still gets a working AVD from the image alone.
+          printf 'no\n' | avdmanager create avd --force --name ci \
+            --package "$image" --device "pixel_6" \
+            || printf 'no\n' | avdmanager create avd --force --name ci --package "$image"
+          avdmanager list avd
 
       - name: Boot the emulator
         run: |
@@ -241,9 +258,11 @@ jobs:
         working-directory: android
         run: gradle --no-daemon connectedDebugAndroidTest
 
+      # Bounded: with no device attached, `adb logcat -d` waits rather than
+      # failing, which held a whole job open for an hour.
       - name: Capture the device log
         if: always()
-        run: adb logcat -d > android-logcat.txt || true
+        run: timeout 120 adb logcat -d > android-logcat.txt || true
 
       - name: Preserve the instrumentation reports
         if: always()

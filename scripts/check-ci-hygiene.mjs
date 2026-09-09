@@ -129,6 +129,12 @@ if (!existsSync(canonicalCiPath)) {
     fail("ci.yml does not enforce production reachability");
   }
 
+  // Reachability is static; this is the runtime half. Without it, an operation
+  // whose readiness expression evaluates false forever would pass every gate.
+  if (!/^\s*run:\s*pnpm check:availability\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce runtime availability");
+  }
+
   // The Pages deploy runs the tests with VITE_BUILD_SHA set for the whole job.
   // CI must exercise that same shape, or a pinned-build failure first appears
   // during a deploy rather than on the pull request.

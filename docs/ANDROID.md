@@ -177,15 +177,96 @@ be strictly *worse* than the browser, because every device operation would
 fail. So the host is a WebView that supplies `elrsNativeBridge` from Android's
 USB Host API — the seam `apps/web/src/hardware/native-bridge.ts` exists for.
 
+### How the WebView is confined
+
+The WebView that can reach a device must never be pointed at a document this
+APK did not ship. `MainActivity` enforces that, and
+`scripts/check-ci-hygiene.mjs` fails the build if any of it is undone.
+
+| Property | How | Where |
+| --- | --- | --- |
+| Only APK-bundled assets are the document | `WebViewAssetLoader` serving `https://appassets.androidplatform.net/assets/web/` | `MainActivity.onCreate` |
+| The web build is inside the APK, not fetched | `bundleWebAssets` copies `apps/web/dist`, and fails the build if it is empty | `android/app/build.gradle.kts` |
+| No filesystem, no content providers | `allowFileAccess`, `allowContentAccess`, `allowFileAccessFromFileURLs`, `allowUniversalAccessFromFileURLs` all false | `applyHardening` |
+| No plaintext | `MIXED_CONTENT_NEVER_ALLOW` | `applyHardening` |
+| No navigation off the packaged origin | `shouldOverrideUrlLoading`: an `http(s)` link goes to the system browser, which cannot reach the bridge | `HostWebViewClient` |
+| No subframe navigation at all | `shouldOverrideUrlLoading` returns true for every non-main-frame request | `HostWebViewClient` |
+| No foreign subresources | `shouldInterceptRequest` serves the APK, permits **only** `https://expresslrs.github.io` (where the firmware is, and what `connect-src` already names), and returns an empty response for everything else | `HostWebViewClient` |
+| Every certificate error refused | `onReceivedSslError` calls `handler.cancel()`; `proceed()` appears nowhere in the project | `HostWebViewClient` |
+| Debugging only in debug builds | `WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)` | `MainActivity.onCreate` |
+| Safe Browsing on where available | `WebSettingsCompat.setSafeBrowsingEnabled` | `applyHardening` |
+| A strict CSP with no `unsafe-eval` | the same policy `_headers` sends, carried in the document because the asset loader sets no headers | `apps/web/index.html` |
+
+### How the bridge is confined
+
+`addJavascriptInterface` is not called anywhere in this project. It cannot be
+restricted to an origin: it reaches every frame the WebView loads and the callee
+cannot tell which frame called it. The bridge is
+`WebViewCompat.addWebMessageListener`, which supplies the origin and the
+main-frame flag from the WebView rather than from the message.
+
+On a WebView without `WEB_MESSAGE_LISTENER` or `DOCUMENT_START_SCRIPT`
+(Chromium below 88) the bridge is **not installed** — it does not fall back to a
+weaker one — and the page is told the exact reason, which the build banner shows.
+
+| Property | Where |
+| --- | --- |
+| Only the allowed origin may speak | `BridgeCore.handle`, checked before the message is parsed |
+| Only the top-level frame may speak | `BridgeCore.handle`, from the WebView's own `isMainFrame` |
+| Every field validated natively — operation, device id, session id, byte values, transfer size, offset, timeout | `BridgeRequest.parse` |
+| One owner per port | `BridgeCore.open` refuses a second open; `write`/`read`/`close`/`cancel` must present the session that opened it |
+| Chunk ordering | a single worker thread, plus an offset that must equal what the session has written |
+| Cancellation overtakes queued work | `BridgeCore.cancel` runs on the caller's thread, not the queue |
+| A thrown transfer releases the port | `BridgeCore.transfer` |
+| Backgrounding revokes write authority | `MainActivity.onPause` → `onHostBackgrounded`: the port closes and every pending promise is rejected |
+| Detach releases the port | a `RECEIVER_NOT_EXPORTED` receiver for `ACTION_USB_DEVICE_DETACHED` |
+| A destroyed Activity keeps nothing open | `MainActivity.onDestroy` → `close` |
+
 ### What the APK proves, and what it does not
 
 | Item | State | Evidence |
 | --- | --- | --- |
 | Project compiles, lint clean | `IMPLEMENTED` | `gradle lintDebug` in CI |
 | USB permission and interface rules | `EMULATOR_VERIFIED` | `UsbDeviceGateTest`, JVM unit tests in CI |
-| Debug APK produced with a recorded SHA-256 | `IMPLEMENTED` | `android.yml` artifact |
-| USB CDC-ACM byte transport | `IMPLEMENTED` | **not executed anywhere** |
+| Bridge origin, frame, validation, session, lifecycle rules | `EMULATOR_VERIFIED` | `BridgeCoreInstrumentedTest` against `FakeUsbBackend`, on an emulator in CI |
+| WebView confinement and bridge injection | `EMULATOR_VERIFIED` | `WebViewHostInstrumentedTest`, on a real WebView |
+| The bundled application renders in both locales, in the real Activity | `EMULATOR_VERIFIED` | `PackagedApplicationInstrumentedTest` |
+| Debug APK produced with a recorded identity | `IMPLEMENTED` | `android.yml` artifact |
+| USB CDC-ACM byte transport | `IMPLEMENTED` | **not executed anywhere** — `AndroidUsbBackend` is the one part a fake stands in for |
 | Anything over real USB OTG | **`UNVERIFIED`** | none |
+
+### APK identity
+
+Recomputed on every head. A workflow-only change still produces different APK
+bytes, so a digest is never carried over from a previous commit.
+
+| Field | Value |
+| --- | --- |
+| Commit | `b4ed6c75078ba83308c48adb44ed458aadea42dc` |
+| Workflow run | [34414473713](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34414473713), attempt 1 |
+| Artifact | `elrs-android-host-debug-b4ed6c75078ba83308c48adb44ed458aadea42dc`, ID `10128607884` |
+| Artifact ZIP SHA-256 | `7d29c1d354effffb0752550cc85084d39037a7464e9618c06e604c3112037374` |
+| Artifact ZIP bytes | 3,451,739 |
+| APK filename | `app-debug.apk` |
+| APK bytes | 3,758,670 |
+| APK SHA-256 | `bb73e2784a498f98aa3d26814a6041271cbc415cc4b20f32053ed2200be699d9` |
+| Package id | `com.fpvarabic.elrs.bridge` |
+| `versionCode` | 1 |
+| `versionName` | `0.1.0-unverified-debug` |
+| `minSdk` | 24 (declared in `app/build.gradle.kts`; the badging label changed in build-tools 37 and the workflow now reads both spellings) |
+| `targetSdk` | 35 |
+| `compileSdk` | 35 |
+| Build tools | 37.0.0 |
+| Signing certificate SHA-256 | not yet captured — `apksigner verify --print-certs` produced no match against the pattern used on this run; the workflow now reads the digest by shape rather than by the signer heading |
+| Embedded web build SHA-256 | `47c9c58577c83ca4cce4529ebedb9d123d30644b710843a98406b2781f7f18cc` |
+| Embedded native source SHA-256 | `15c8f608fa04b55caad3f4c7f8383bee54af37d7a2e4f43131fc08998ed48692` |
+
+The last two are written into the APK as `assets/source-identity.json`, shown in
+the build banner inside an installed host, and exported in diagnostics — so a
+result reported from a phone names the exact sources behind it.
+
+This is a **debug** build signed with the Android debug key. It is not a release
+artifact and must not be treated as one.
 
 An emulator cannot close this gap: it has no USB host, so no emulator run can
 exercise an OTG path. Only a physical phone or tablet with an OTG cable can.
@@ -209,6 +290,9 @@ Not one of these has been run. None may be marked passed from CI.
 | A11 | Recovery after an interrupted write, on Android | UNVERIFIED |
 | A12 | Arabic and English, RTL and LTR, at phone width | UNVERIFIED |
 | A13 | No feature is hidden merely because the platform is Android | UNVERIFIED |
+
+See [PHYSICAL_VALIDATION_HANDOFF.md](hardware/PHYSICAL_VALIDATION_HANDOFF.md)
+for how to install this APK, verify it, and run these rows.
 
 ### Hardware required to close them
 

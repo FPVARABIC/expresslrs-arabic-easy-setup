@@ -86,6 +86,14 @@ jobs:
           VITE_BUILD_SHA: ${{ github.sha }}
         run: pnpm test
 
+      # The suite above writes docs/runtime-availability.json while driving
+      # every operation through the shipped shell. This refuses a build where
+      # any of them never became enabled — which a static search for
+      # `disabled={true}` cannot establish, because an expression can be
+      # dynamic and still evaluate false forever.
+      - name: Verify runtime availability from the production entry point
+        run: pnpm check:availability
+
       - name: Build and verify the GitHub Pages artifact
         env:
           GITHUB_PAGES: "true"
