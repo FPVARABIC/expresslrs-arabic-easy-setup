@@ -81,7 +81,10 @@ jobs:
       - name: Publish the debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: elrs-android-host-debug-${{ github.sha }}
+          # `github.sha` on a pull_request event is the ephemeral merge commit,
+          # which exists in no branch. Name the artifact after the commit that
+          # actually produced it, so an APK can be traced back to its source.
+          name: elrs-android-host-debug-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app-debug.apk.sha256
