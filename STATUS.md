@@ -7,10 +7,13 @@
 | --- | --- |
 | Audit date | 2026-09-09 |
 | Phase | Software feature integration complete; no operation proven on hardware |
-| Branch | `claude/expresslrs-hardware-validation-i073sx` (fast-forward of `feat/m2-real-hardware-first-test`) |
-| Draft PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — Draft, unmerged |
-| Candidate identity | Branch HEAD; injected at build time as the exact 40-character `VITE_BUILD_SHA` |
+| Published commit | `835c5ab8a1b8b71314fabeb407060482bd82c092` on `main` |
+| Published URL | <https://fpvarabic.github.io/expresslrs-arabic-easy-setup/> |
+| Integration PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — **merged** at `f47e2e5` |
+| Candidate identity | Injected at build time as the exact 40-character `VITE_BUILD_SHA`, shown in the interface |
+| Release record | [HARDWARE_VALIDATION_BETA_RELEASE.md](docs/hardware/HARDWARE_VALIDATION_BETA_RELEASE.md) |
 | Software status | `SOFTWARE_FEATURE_INTEGRATION_COMPLETE — HARDWARE UNVERIFIED` |
+| Release stage | Hardware validation beta, published. **Not** a stable release |
 | Highest evidence level reached | `BROWSER_VERIFIED` — see the [status vocabulary](docs/FEATURE_REALITY_MATRIX.md#status-vocabulary) |
 | Known integration gaps | None open. Android remains `UNVERIFIED` with the evidence recorded in [ANDROID.md](docs/ANDROID.md); it is an unproven platform, not an unfinished feature |
 | Hardware validation | **NONE** — nothing in this build has been proven on a physical device |
