@@ -1,4 +1,4 @@
-import type { CrsfParameter, CrsfRole } from "./crsf";
+import type { CrsfFrame, CrsfParameter, CrsfRole } from "./crsf";
 import {
   ExpressLrsHardwareError,
   ExpressLrsHardwareSession,
@@ -67,6 +67,8 @@ export interface HardwareSessionDriver {
     signal?: AbortSignal,
   ): Promise<CommandExecutionResult>;
   verifyCurrentIdentity?(signal?: AbortSignal): Promise<ExpressLrsIdentity>;
+  /** Optional: observe unsolicited frames such as link statistics. */
+  subscribeFrames?(listener: (frame: CrsfFrame) => void): () => void;
   enterReceiverBootloader?(input?: {
     readonly targetKey?: string;
     readonly signal?: AbortSignal;
@@ -840,6 +842,26 @@ export class UserHardwareSession {
         result.information ||
         `${command.name} completed on the connected device`,
     });
+  }
+
+  /**
+   * Subscribes to unsolicited device frames when the driver supports it, so a
+   * bind can be graded on observed link telemetry. Returns a no-op unsubscribe
+   * when the transport cannot report frames, which keeps callers from having to
+   * branch on capability.
+   */
+  /**
+   * Whether this transport can report unsolicited frames at all. Callers use
+   * it to avoid waiting for telemetry that can never arrive.
+   */
+  public get canObserveFrames(): boolean {
+    return typeof this.#driver.subscribeFrames === "function";
+  }
+
+  public subscribeFrames(listener: (frame: CrsfFrame) => void): () => void {
+    const subscribe = this.#driver.subscribeFrames;
+    if (subscribe === undefined) return () => undefined;
+    return Reflect.apply(subscribe, this.#driver, [listener]) as () => void;
   }
 
   public async verifyCurrentIdentity(

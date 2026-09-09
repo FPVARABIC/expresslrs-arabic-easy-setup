@@ -115,10 +115,6 @@ export const en = {
   "easy.binding.confirmQuestion": "Did the other side link",
   "easy.binding.linked": "The link came up",
   "easy.binding.notLinked": "No link yet",
-  "easy.binding.verified":
-    "You observed the link. Binding is recorded as confirmed by that observation, not by the command alone.",
-  "easy.binding.unverified":
-    "The command was accepted but no link was observed, so binding is not reported as successful. Check the other side and try again.",
   "easy.settings.current": "Current value on the device",
   "easy.settings.choose": "Setting",
   "easy.settings.newValue": "New value",
@@ -155,6 +151,14 @@ export const en = {
     "Confirm stable power, and a fitted transmitter antenna, before writing.",
   "easy.deny.USER_CONFIRMATION_MISSING":
     "Confirm the operation before it runs.",
+  "easy.binding.observing":
+    "Bind command accepted. Watching the device's link telemetry — bring the other side into range now.",
+  "easy.binding.telemetry":
+    "The device reported a live RF link ({quality}% link quality). This is machine evidence, not a report.",
+  "easy.binding.userConfirmed":
+    "Recorded as confirmed by you. The device did not report link telemetry, so this is your observation and not machine evidence.",
+  "easy.binding.commandOnly":
+    "The command was accepted, but no link was observed and none was reported. Binding is not recorded as successful.",
 } as const;
 
 export type MessageKey = keyof typeof en;

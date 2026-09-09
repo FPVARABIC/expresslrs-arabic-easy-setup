@@ -15,6 +15,7 @@ export const CrsfAddress = Object.freeze({
 } as const);
 
 export const CrsfFrameType = Object.freeze({
+  linkStatistics: 0x14,
   devicePing: 0x28,
   deviceInfo: 0x29,
   parameterEntry: 0x2b,
@@ -788,4 +789,64 @@ export function encodeCommandStep(step: number): Uint8Array {
     throw new RangeError("Invalid CRSF command step");
   }
   return new Uint8Array([step]);
+}
+
+/**
+ * CRSF link statistics, the telemetry a transmitter emits about its RF link.
+ * This is the only evidence in the protocol that a link actually exists, as
+ * opposed to a bind command having been acknowledged.
+ *
+ * Payload layout is the standard ten-byte CRSF frame:
+ * uplink RSSI 1, uplink RSSI 2, uplink link quality, uplink SNR, active
+ * antenna, RF mode, uplink transmit power index, downlink RSSI, downlink link
+ * quality, downlink SNR.
+ */
+export interface CrsfLinkStatistics {
+  readonly uplinkRssiAntenna1Dbm: number;
+  readonly uplinkRssiAntenna2Dbm: number;
+  readonly uplinkLinkQuality: number;
+  readonly uplinkSnrDb: number;
+  readonly activeAntenna: number;
+  readonly rfMode: number;
+  readonly uplinkTransmitPowerIndex: number;
+  readonly downlinkRssiDbm: number;
+  readonly downlinkLinkQuality: number;
+  readonly downlinkSnrDb: number;
+}
+
+const CRSF_LINK_STATISTICS_PAYLOAD_BYTES = 10 as const;
+
+function signedByte(value: number): number {
+  return value > 0x7f ? value - 0x100 : value;
+}
+
+/**
+ * Parses a link-statistics frame. Returns null for any other frame type or a
+ * payload of the wrong length, so a malformed or truncated frame can never be
+ * read as a healthy link.
+ */
+export function parseCrsfLinkStatistics(
+  frame: CrsfFrame,
+): CrsfLinkStatistics | null {
+  if (frame.type !== CrsfFrameType.linkStatistics) return null;
+  const payload = frame.payload;
+  if (payload.byteLength !== CRSF_LINK_STATISTICS_PAYLOAD_BYTES) return null;
+  const at = (index: number): number => payload[index] ?? 0;
+  const uplinkLinkQuality = at(2);
+  const downlinkLinkQuality = at(8);
+  // Link quality is a percentage. Anything above 100 means the frame is not a
+  // link-statistics frame this parser understands.
+  if (uplinkLinkQuality > 100 || downlinkLinkQuality > 100) return null;
+  return Object.freeze({
+    uplinkRssiAntenna1Dbm: -at(0),
+    uplinkRssiAntenna2Dbm: -at(1),
+    uplinkLinkQuality,
+    uplinkSnrDb: signedByte(at(3)),
+    activeAntenna: at(4),
+    rfMode: at(5),
+    uplinkTransmitPowerIndex: at(6),
+    downlinkRssiDbm: -at(7),
+    downlinkLinkQuality,
+    downlinkSnrDb: signedByte(at(9)),
+  });
 }

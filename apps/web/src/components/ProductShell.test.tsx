@@ -252,12 +252,17 @@ describe("public product shell", () => {
     expect(
       await screen.findByText(/قبل الجهاز أمر الربط/u),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/يُسجَّل الربط ناجحًا/u)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-outcome="verified"]')).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "قام الرابط" }));
+
+    // The operator's answer is recorded as their claim. It is graded
+    // USER_CONFIRMED_LINK and must never be shown as a verified success.
     expect(
-      await screen.findByText(/يُسجَّل الربط ناجحًا/u),
+      await screen.findByText(/هذه مشاهدتك وليست دليلًا آليًا/u),
     ).toBeInTheDocument();
+    expect(screen.getByText("USER_CONFIRMED_LINK")).toBeInTheDocument();
+    expect(document.querySelector('[data-outcome="verified"]')).toBeNull();
   });
 
   it("reports an unobserved link as not successful", async () => {
@@ -277,8 +282,9 @@ describe("public product shell", () => {
     await user.click(screen.getByRole("button", { name: "لم يقم الرابط بعد" }));
 
     expect(
-      await screen.findByText(/لا يُعلن الربط ناجحًا/u),
+      await screen.findByText(/لا يُسجَّل الربط ناجحًا/u),
     ).toBeInTheDocument();
+    expect(screen.getByText("COMMAND_ACKNOWLEDGED_ONLY")).toBeInTheDocument();
   });
 
   it("explains the specific technical reason when a device cannot bind over USB", async () => {

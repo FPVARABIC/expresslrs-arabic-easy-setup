@@ -28,10 +28,34 @@ import {
   type UserHardwareSession,
 } from "../hardware/userSession";
 import {
+  BindingLinkObserver,
+  gradeBindingEvidence,
+  isMachineVerifiedBinding,
+} from "../hardware/binding-evidence";
+import {
   DeviceWriteAuthority,
   deviceFingerprint,
   type DeviceOperationKind,
 } from "../hardware/write-authority";
+
+/** How long to watch link telemetry after a bind command before grading it. */
+const BIND_OBSERVATION_MS = 8_000;
+const LINK_POLL_INTERVAL_MS = 250;
+
+/**
+ * Waits for the observer to reach the link threshold, or for the budget to run
+ * out. Lives outside the component so the clock is never read during render.
+ */
+async function waitForObservedLink(
+  observer: BindingLinkObserver,
+  budgetMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  while (!observer.linked && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, LINK_POLL_INTERVAL_MS));
+  }
+  return observer.linked;
+}
 
 export interface EasySetupProps {
   readonly locale: Locale;
@@ -85,6 +109,10 @@ export function EasySetup({
   const [settingId, setSettingId] = useState("");
   const [settingDraft, setSettingDraft] = useState("");
   const [bindAwaitingObservation, setBindAwaitingObservation] = useState(false);
+  const [bindObserver, setBindObserver] = useState<BindingLinkObserver | null>(
+    null,
+  );
+  const [bindEvidence, setBindEvidence] = useState<string | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
 
   const sessionRef = useRef<UserHardwareSession | null>(null);
@@ -221,16 +249,44 @@ export function EasySetup({
     if (session === null || !authorize("BINDING")) return;
     setBusy(true);
     setStep("execute");
+    const observer = new BindingLinkObserver();
+    let unsubscribe: (() => void) | null = null;
     try {
-      const result = await session.startBinding({ confirmedByUser: true });
-      // A command acknowledgement is not a link. The operator must observe the
-      // other side before this is recorded as a successful bind.
-      setBindAwaitingObservation(true);
-      setStep("verify");
-      setOutcome({
-        kind: "info",
-        text: `${t("easy.binding.sent")} (${result.information})`,
+      // Watch link telemetry across the command, so a link that comes up is
+      // graded on the device's own report rather than on the acknowledgement.
+      unsubscribe = session.subscribeFrames((frame) => {
+        observer.observe(frame);
       });
+      await session.startBinding({ confirmedByUser: true });
+      setStep("verify");
+      setOutcome({ kind: "info", text: t("easy.binding.observing") });
+
+      // Only wait for telemetry a transport can actually deliver. Making the
+      // operator watch a timer that can never resolve is worse than asking.
+      if (session.canObserveFrames) {
+        await waitForObservedLink(observer, BIND_OBSERVATION_MS);
+      }
+
+      if (observer.linked) {
+        const evidence = gradeBindingEvidence({
+          observer,
+          userReportedLink: null,
+        });
+        setOutcome({
+          kind: "verified",
+          text: t("easy.binding.telemetry", {
+            quality: evidence.statistics?.uplinkLinkQuality ?? 0,
+          }),
+        });
+        setBindEvidence(evidence.level);
+        setFailed(false);
+      } else {
+        // No telemetry. Ask the operator, but never promote their answer to
+        // machine evidence.
+        setBindObserver(observer);
+        setBindAwaitingObservation(true);
+        setOutcome({ kind: "info", text: t("easy.binding.sent") });
+      }
     } catch (error: unknown) {
       setFailed(true);
       setOutcome({
@@ -238,17 +294,26 @@ export function EasySetup({
         text: error instanceof Error ? error.message : "binding failed",
       });
     } finally {
+      unsubscribe?.();
       setBusy(false);
     }
   }
 
   function confirmBindObservation(linked: boolean): void {
     setBindAwaitingObservation(false);
-    setOutcome(
-      linked
-        ? { kind: "verified", text: t("easy.binding.verified") }
-        : { kind: "failed", text: t("easy.binding.unverified") },
-    );
+    const evidence = gradeBindingEvidence({
+      observer: bindObserver ?? new BindingLinkObserver(),
+      userReportedLink: linked,
+    });
+    setBindEvidence(evidence.level);
+    // An operator's confirmation is recorded as their claim. It is never
+    // machine-verified, so it is not presented as a verified success.
+    setOutcome({
+      kind: isMachineVerifiedBinding(evidence) ? "verified" : "info",
+      text: linked
+        ? t("easy.binding.userConfirmed")
+        : t("easy.binding.commandOnly"),
+    });
     setFailed(!linked);
   }
 
@@ -530,8 +595,15 @@ export function EasySetup({
               </div>
             ) : null}
 
+            {bindEvidence !== null ? (
+              <p className="easy-note" data-evidence={bindEvidence}>
+                {bindEvidence}
+              </p>
+            ) : null}
+
             {outcome.kind !== "none" ? (
               <p
+                data-outcome={outcome.kind}
                 className={
                   outcome.kind === "failed" ? "easy-error" : "easy-note"
                 }

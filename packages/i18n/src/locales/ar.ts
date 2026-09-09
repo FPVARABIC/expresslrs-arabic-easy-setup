@@ -108,10 +108,6 @@ export const ar = {
   "easy.binding.confirmQuestion": "حالة الرابط في الطرف الآخر",
   "easy.binding.linked": "قام الرابط",
   "easy.binding.notLinked": "لم يقم الرابط بعد",
-  "easy.binding.verified":
-    "رصدت قيام الرابط. يُسجَّل الربط ناجحًا بناءً على هذه المشاهدة، لا على الأمر وحده.",
-  "easy.binding.unverified":
-    "قُبل الأمر لكن لم يُرصد رابط، فلا يُعلن الربط ناجحًا. افحص الطرف الآخر ثم أعد المحاولة.",
   "easy.settings.current": "القيمة الحالية على الجهاز",
   "easy.settings.choose": "الإعداد",
   "easy.settings.newValue": "القيمة الجديدة",
@@ -143,4 +139,12 @@ export const ar = {
   "easy.deny.BENCH_NOT_ACKNOWLEDGED":
     "أكّد ثبات الطاقة، وتركيب هوائي المرسل، قبل الكتابة.",
   "easy.deny.USER_CONFIRMATION_MISSING": "أكّد العملية قبل تنفيذها.",
+  "easy.binding.observing":
+    "قُبل أمر الربط. نراقب تلمترية الرابط من الجهاز — قرّب الطرف الآخر الآن.",
+  "easy.binding.telemetry":
+    "أبلغ الجهاز عن رابط RF حي (جودة الرابط {quality}%). هذا دليل آلي، لا مجرد إفادة.",
+  "easy.binding.userConfirmed":
+    "سُجِّل بتأكيدك أنت. لم يُبلغ الجهاز عن تلمترية رابط، فهذه مشاهدتك وليست دليلًا آليًا.",
+  "easy.binding.commandOnly":
+    "قُبل الأمر، لكن لم يُرصد رابط ولم يُبلَّغ عنه. لا يُسجَّل الربط ناجحًا.",
 } satisfies Partial<Record<MessageKey, string>>;
