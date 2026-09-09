@@ -1,0 +1,587 @@
+/*
+ * Visual alignment layer for the FPV-ARBCON family.
+ *
+ * This file intentionally changes presentation only. It does not hide,
+ * enable, disable, or reorder product capabilities. Easy Mode remains the
+ * same three-action surface; Advanced Mode keeps its existing safety gates.
+ */
+
+:root {
+  color-scheme: dark;
+  font-family: "Cairo Variable", Cairo, system-ui, sans-serif;
+
+  /* FPV-ARBCON dark technical palette. */
+  --page: #0e1116;
+  --surface: #161b22;
+  --surface-strong: #1c2128;
+  --surface-soft: #1c2128;
+  --line: #2a313c;
+  --line-strong: #3a4452;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+
+  /* One product accent; semantic colors remain status-only. */
+  --cyan: #4c8dff;
+  --cyan-soft: rgb(76 141 255 / 12%);
+  --violet: #4c8dff;
+  --violet-soft: rgb(76 141 255 / 12%);
+  --mint: #3fb950;
+  --mint-soft: rgb(63 185 80 / 11%);
+  --amber: #d29922;
+  --amber-soft: rgb(210 153 34 / 11%);
+  --danger: #f85149;
+  --danger-soft: rgb(248 81 73 / 11%);
+  --shadow: none;
+}
+
+html,
+body,
+button,
+select,
+input,
+textarea {
+  font-family: "Cairo Variable", Cairo, system-ui, sans-serif;
+}
+
+html,
+body {
+  background: var(--page);
+}
+
+body {
+  background-image: none;
+  color: var(--text);
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+[tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  background: var(--page);
+}
+
+.ambient {
+  display: none;
+}
+
+.topbar,
+.foundation-banner,
+.page,
+.footer {
+  width: min(100% - 2rem, 1120px);
+}
+
+.topbar {
+  min-height: 64px;
+  border-block-end: 1px solid var(--border, var(--line));
+}
+
+.brand {
+  gap: 0.65rem;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--cyan);
+  box-shadow: none;
+}
+
+.brand-mark svg {
+  width: 21px;
+  height: 21px;
+}
+
+.brand-copy strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.brand-copy small {
+  font-size: 0.68rem;
+}
+
+.topbar-actions {
+  gap: 0.55rem;
+}
+
+.status-pill,
+.connection-badge {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.status-dot,
+.connection-badge > span,
+.connection-reconnecting > span {
+  box-shadow: none;
+}
+
+.language-switcher {
+  padding: 3px;
+  border-color: var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.language-switcher button {
+  min-width: 58px;
+  padding: 0.38rem 0.62rem;
+  border-radius: 4px;
+}
+
+.language-switcher button.is-active {
+  background: var(--surface-strong);
+  box-shadow: none;
+}
+
+.foundation-banner {
+  margin-block-start: 0.65rem;
+  padding: 0.5rem 0.7rem;
+  border-color: rgb(210 153 34 / 28%);
+  border-radius: 6px;
+  background: var(--surface);
+  color: #d7b969;
+}
+
+.preview-validation,
+.mock-badge,
+.strength-badge {
+  border-radius: 4px;
+}
+
+.page {
+  padding-block: 1.75rem 3rem;
+}
+
+.hero,
+.simple-hero {
+  gap: 1.5rem;
+  padding-block: 0.75rem 1.75rem;
+}
+
+.hero-copy,
+.simple-hero .hero-copy {
+  max-width: 760px;
+}
+
+.eyebrow,
+.section-kicker {
+  color: var(--cyan);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.hero h1,
+.simple-hero h1 {
+  max-width: 760px;
+  font-size: clamp(1.75rem, 4vw, 2.55rem);
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.hero-copy > p,
+.simple-hero .hero-copy > p {
+  max-width: 700px;
+  margin-block-start: 0.7rem;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  line-height: 1.85;
+}
+
+.safety-summary,
+.safety-callout,
+.safety-callout.is-blocked,
+.simple-assurance,
+.real-identity-warning,
+.real-connection-help,
+.real-reconnect-note,
+.real-reconnect-note.is-warning,
+.wifi-impact,
+.selection-notice {
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.safety-summary,
+.safety-callout,
+.simple-assurance {
+  border-color: var(--line);
+}
+
+.safety-icon,
+.safety-callout-icon,
+.task-icon,
+.confidence-icon,
+.evidence-source,
+.real-state-icon,
+.wifi-impact > span,
+.simple-device-identity > span {
+  border-radius: 6px;
+  background: var(--cyan-soft);
+  color: var(--cyan);
+}
+
+.preview-strip,
+.task-panel,
+.device-panel,
+.info-panel,
+.advanced-section,
+.simple-device-summary,
+.real-device-panel,
+.real-device-controls,
+.real-device-result,
+.technical-panel {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.preview-strip,
+.task-panel,
+.device-panel,
+.info-panel,
+.advanced-section,
+.simple-device-summary,
+.real-device-panel {
+  padding: 1rem;
+}
+
+.preview-heading h2,
+.section-heading h2,
+.advanced-toggle-row h2,
+.simple-device-heading h2 {
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.preview-heading p,
+.section-heading p,
+.advanced-toggle-row p {
+  line-height: 1.65;
+}
+
+.scenario-list,
+.task-grid,
+.details-grid,
+.dashboard-grid,
+.simple-workspace,
+.advanced-device-grid,
+.real-device-grid {
+  gap: 0.75rem;
+}
+
+.scenario-chip {
+  border-radius: 6px;
+  background: var(--surface-strong);
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.scenario-chip:hover,
+.scenario-chip.is-active {
+  border-color: var(--cyan);
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.task-panel,
+.device-panel {
+  padding: 1rem;
+}
+
+.task-card,
+.task-violet,
+.task-amber,
+.task-mint {
+  --task-color: var(--cyan);
+  --task-soft: var(--cyan-soft);
+}
+
+.task-card {
+  min-height: 148px;
+  padding: 0.9rem;
+  border-color: var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.task-card:not(:disabled):hover,
+.task-card.is-selected {
+  transform: none;
+  border-color: var(--cyan);
+  background: var(--surface-strong);
+}
+
+.task-card:disabled {
+  opacity: 0.5;
+}
+
+.task-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.task-content strong {
+  font-size: 0.9rem;
+}
+
+.task-action {
+  color: var(--cyan);
+}
+
+.selection-notice {
+  border-color: rgb(76 141 255 / 28%);
+}
+
+.selection-check {
+  border-radius: 4px;
+  background: var(--cyan-soft);
+  color: var(--cyan);
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 42px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.primary-button {
+  border-color: var(--cyan);
+  background: var(--cyan);
+  color: var(--page);
+}
+
+.primary-button:hover {
+  background: #397cf0;
+}
+
+.secondary-button {
+  border-color: var(--line-strong);
+  background: var(--surface-strong);
+}
+
+.secondary-button:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.device-glyph {
+  width: 48px;
+  height: 48px;
+  border-color: var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--cyan);
+}
+
+.device-glyph svg {
+  width: 25px;
+  height: 25px;
+}
+
+.confidence-card,
+.evidence-row,
+.setup-steps li,
+.technical-grid > div,
+.log-row,
+.real-facts > div,
+.real-result-state,
+.real-progress,
+.real-support,
+.origin-field select,
+.real-result-summary {
+  border-radius: 6px;
+  background: var(--surface-strong);
+  box-shadow: none;
+}
+
+.confidence-card,
+.evidence-row,
+.setup-steps li,
+.technical-grid > div,
+.real-facts > div,
+.real-progress,
+.real-support {
+  border-color: var(--line);
+}
+
+.empty-device > span {
+  border-radius: 6px;
+}
+
+.step-marker,
+.setup-steps span,
+.real-progress-item > span {
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.step-active .step-marker {
+  box-shadow: none;
+}
+
+.setup-steps li {
+  min-height: 48px;
+}
+
+.simple-device-summary {
+  min-width: 0;
+}
+
+.simple-update-state,
+.simple-update-state.is-current,
+.read-only-badge,
+.validation-badge,
+.reported-badge {
+  border-radius: 999px;
+}
+
+.simple-assurance {
+  padding: 0.7rem 0.8rem;
+}
+
+.switch {
+  border-radius: 6px;
+  background: var(--surface-strong);
+}
+
+.switch > span:first-child {
+  border-radius: 3px;
+}
+
+.switch[aria-checked="true"] {
+  border-color: var(--cyan);
+  background: var(--surface-strong);
+}
+
+.real-device-panel {
+  border-color: var(--line);
+}
+
+.real-device-heading h2 {
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+}
+
+.real-device-heading p,
+.real-result-state p,
+.real-success-heading p,
+.real-identity-warning p,
+.real-snapshot-note,
+.real-privacy-note,
+.real-idle-help,
+.real-connection-help p,
+.wifi-impact p {
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.real-device-controls,
+.real-device-result {
+  background: var(--surface-strong);
+}
+
+.real-result-state.is-loading {
+  border-color: rgb(76 141 255 / 36%);
+}
+
+.real-result-summary:focus-visible {
+  outline-color: var(--cyan);
+}
+
+.footer {
+  padding-block: 1rem 1.5rem;
+}
+
+.footer strong {
+  color: var(--mint);
+}
+
+.footer a {
+  color: var(--cyan);
+}
+
+/* PWA/status surfaces follow the same restrained system. */
+.limited-offline-notice,
+.application-update-notice {
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+.limited-offline-notice {
+  color: #d7b969;
+}
+
+.application-update-notice {
+  color: #7ccf8a;
+}
+
+.app-error-fallback {
+  background: var(--page);
+  color: var(--text);
+}
+
+@media (max-width: 760px) {
+  .topbar,
+  .foundation-banner,
+  .page,
+  .footer {
+    width: min(100% - 1rem, 1120px);
+  }
+
+  .topbar {
+    min-height: 60px;
+  }
+
+  .page {
+    padding-block-start: 1.25rem;
+  }
+
+  .hero h1,
+  .simple-hero h1 {
+    font-size: clamp(1.6rem, 8vw, 2.2rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .task-panel,
+  .device-panel,
+  .info-panel,
+  .advanced-section,
+  .real-device-panel,
+  .preview-strip,
+  .simple-device-summary {
+    padding: 0.85rem;
+    border-radius: 6px;
+  }
+
+  .task-card {
+    min-height: 132px;
+  }
+}

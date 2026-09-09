@@ -1,0 +1,19 @@
+{
+  "name": "@elrs-easy/platform-mock",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "dependencies": {
+    "@elrs-easy/compatibility": "workspace:*",
+    "@elrs-easy/device": "workspace:*",
+    "@elrs-easy/domain": "workspace:*",
+    "@elrs-easy/workflows": "workspace:*"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}

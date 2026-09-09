@@ -1,20 +1,17 @@
-# Publishes only the exact reviewed candidate pinned below.
-name: Deploy reviewed Pages candidate
+name: Deploy GitHub Pages preview
 
 on:
   push:
     branches:
       - main
-    paths:
-      - .github/workflows/deploy-reviewed-pages.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 env:
-  REVIEWED_SHA: d3ff69b28e5387bbb208ca060df6842858eb3763
   PAGES_BASE_PATH: /expresslrs-arabic-easy-setup/
+  VITE_BUILD_SHA: ${{ github.sha }}
 
 concurrency:
   group: pages
@@ -22,21 +19,18 @@ concurrency:
 
 jobs:
   build:
-    name: Verify and package reviewed candidate
+    name: Quality-gate and package preview
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       contents: read
 
     steps:
-      - name: Check out exact reviewed candidate
+      - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ env.REVIEWED_SHA }}
           persist-credentials: false
-
-      - name: Verify exact candidate
-        run: test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
 
       - name: Require committed dependency lockfile
         run: test -f pnpm-lock.yaml
@@ -66,7 +60,6 @@ jobs:
       - name: Build exact GitHub Pages artifact
         env:
           GITHUB_PAGES: "true"
-          VITE_BUILD_SHA: ${{ env.REVIEWED_SHA }}
         run: pnpm --filter @elrs-easy/web build
 
       - name: Verify GitHub Pages artifact

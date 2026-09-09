@@ -1,0 +1,17 @@
+{
+  "name": "@elrs-easy/platform-browser",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "dependencies": {
+    "@elrs-easy/device": "workspace:*",
+    "@elrs-easy/domain": "workspace:*"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}
