@@ -299,6 +299,54 @@ if (existsSync(androidSourceRoot)) {
   }
 }
 
+// A workflow that fails GitHub's own validation produces a run with **zero
+// jobs** and a conclusion of "failure", named by its file path rather than its
+// `name:`. That is easy to misread as a test failure, so the two mistakes that
+// cause it are checked here instead of being discovered a cycle later.
+//
+// 1. Job-level `env:` may use github, needs, strategy, matrix, vars, secrets
+//    and inputs — but not `runner`, which does not exist until a runner is
+//    assigned. Referring to it there fails the whole file.
+// 2. `env:` values are literals, not shell. `$HOME/x` stays the four
+//    characters `$HOME`, which silently produces a nonsense path.
+const jobEnvContexts = new Set([
+  "github",
+  "needs",
+  "strategy",
+  "matrix",
+  "vars",
+  "secrets",
+  "inputs",
+]);
+
+if (existsSync(workflowDirectory)) {
+  for (const entry of readdirSync(workflowDirectory, { withFileTypes: true })) {
+    if (!entry.isFile() || !/\.ya?ml$/u.test(entry.name)) continue;
+    const source = readFileSync(`${workflowDirectory}/${entry.name}`, "utf8");
+    // Job-level `env:` blocks: two-space indent, before `steps:`.
+    for (const block of source.matchAll(/\n {4}env:\n((?: {6}.*\n|\n)*)/gu)) {
+      for (const [, context] of block[1].matchAll(/\$\{\{\s*([a-z_]+)\./gu)) {
+        if (!jobEnvContexts.has(context)) {
+          fail(
+            `${entry.name}: a job-level env block uses the ${context} context, ` +
+              "which is not available there; the whole workflow fails to validate",
+          );
+        }
+      }
+      for (const [, key, value] of block[1].matchAll(
+        /^ {6}([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/gmu,
+      )) {
+        if (/\$[A-Za-z{]/u.test(value) && !value.includes("${{")) {
+          fail(
+            `${entry.name}: job-level env ${key} contains a shell variable; ` +
+              "env values are literals and will not expand",
+          );
+        }
+      }
+    }
+  }
+}
+
 if (process.exitCode === 1) process.exit(1);
 console.log(
   `✓ CI hygiene passed (${[...allowedWorkflows].join(", ")}; one canonical hardware workbench)`,
