@@ -1,5 +1,6 @@
 package com.fpvarabic.elrs.bridge
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
@@ -36,6 +37,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
 
+    // The application this host exists to run *is* JavaScript. Lint is right
+    // that enabling it widens the attack surface, so the mitigations are
+    // explicit below: one known URL, no file access, no content access, and no
+    // `addJavascriptInterface` — the bridge is injected by the host, not
+    // exposed to arbitrary pages.
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         webView = WebView(this).apply {

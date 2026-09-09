@@ -49,6 +49,11 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+        with:
+          # Pinned rather than "whatever is newest": a reproducible APK cannot
+          # depend on which Gradle happened to ship the day CI ran, and AGP
+          # 8.7.3 is supported on this line.
+          gradle-version: "8.14.3"
 
       - name: Gradle lint
         working-directory: android
