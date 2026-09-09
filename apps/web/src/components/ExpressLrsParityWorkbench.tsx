@@ -56,6 +56,38 @@ import {
   type WritableCrsfParameter,
 } from "../hardware/userSession";
 import { flashXmodemFirmware } from "../hardware/xmodem";
+import {
+  DeviceWriteAuthority,
+  deviceFingerprint,
+  type DeviceOperationKind,
+  type WriteDenialReason,
+} from "../hardware/write-authority";
+
+const WRITE_DENIAL_MESSAGES: Readonly<Record<WriteDenialReason, string>> =
+  Object.freeze({
+    NO_DEVICE_SESSION: "وصّل الجهاز وعرّفه أولًا؛ لا يمكن تغيير جهاز غير متصل.",
+    IDENTITY_UNCONFIRMED:
+      "هوية الجهاز غير مؤكدة؛ أعد التعريف عبر CRSF قبل أي تغيير.",
+    PORT_CLEANUP_UNCONFIRMED:
+      "إغلاق منفذ سابق غير مثبت؛ أعد تحميل الصفحة بعد فصل الجهاز بأمان.",
+    OPERATION_IN_PROGRESS: "هناك عملية جارية؛ انتظر انتهاءها أو ألغِها.",
+    RECOVERY_JOURNAL_UNREADABLE:
+      "تعذر قراءة سجل الاستعادة؛ لا تُسمح الكتابة بلا مسار استعادة معروف.",
+    PENDING_RECOVERY_CHECKPOINT:
+      "توجد استعادة معلقة من عملية سابقة؛ أكملها أولًا.",
+    NO_PENDING_RECOVERY: "لا توجد عملية متوقفة تحتاج استعادة.",
+    TARGET_NOT_MATCHED: "اختر Target مطابقًا للجهاز المتصل قبل الكتابة.",
+    BAND_NOT_MATCHED: "النطاق لا يطابق الجهاز المتصل؛ صحّح الاختيار.",
+    ARTIFACT_NOT_VERIFIED: "جهّز حزمة Firmware وتحقق منها قبل الكتابة.",
+    RECOVERY_NOT_AVAILABLE: "نزّل حزمة الاستعادة أولًا حتى يمكن التراجع.",
+    BENCH_NOT_ACKNOWLEDGED:
+      "أكّد ثبات الطاقة، وتركيب هوائي TX، قبل بدء الكتابة.",
+    USER_CONFIRMATION_MISSING: "أكّد العملية قبل تنفيذها.",
+  });
+
+function writeDenialMessage(reason: WriteDenialReason): string {
+  return WRITE_DENIAL_MESSAGES[reason];
+}
 
 const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
   region: "",
@@ -217,12 +249,10 @@ function releaseSelectionKey(release: OfficialRelease): string {
 }
 
 export interface ExpressLrsParityWorkbenchProps {
-  readonly allowDestructiveWrites?: boolean;
   readonly hardwareConnector?: HardwareDriverConnector;
 }
 
 export function ExpressLrsParityWorkbench({
-  allowDestructiveWrites = false,
   hardwareConnector,
 }: ExpressLrsParityWorkbenchProps = {}) {
   const [catalog, setCatalog] = useState<OfficialCatalog | null>(null);
@@ -241,6 +271,9 @@ export function ExpressLrsParityWorkbench({
     "يمكنك تعريف الجهاز مباشرة؛ حمّل الكتالوج فقط عند تجهيز Firmware رسمي.",
   );
   const [busy, setBusy] = useState(false);
+  const writeAuthorityRef = useRef(new DeviceWriteAuthority());
+  const sessionIdRef = useRef<string | null>(null);
+  const sessionCounterRef = useRef(0);
   const [cancellable, setCancellable] = useState(false);
   const [identity, setIdentity] = useState<ExpressLrsIdentity | null>(null);
   const [parameters, setParameters] = useState<readonly CrsfParameter[]>([]);
@@ -304,6 +337,9 @@ export function ExpressLrsParityWorkbench({
       disconnectUnsubscribeRef.current = null;
       const session = sessionRef.current;
       sessionRef.current = null;
+      sessionIdRef.current = null;
+      // No revoke here: the authority instance is discarded with the component,
+      // so outstanding capabilities cannot outlive this unmount.
       if (session !== null) void session.close();
     };
   }, []);
@@ -359,13 +395,22 @@ export function ExpressLrsParityWorkbench({
   const firmwareWriteMethod = !["wifi", "download"].includes(method);
   const hardwareCleanupReady =
     !hardwareCloseUncertain && !hardwareCloseInProgress;
-  const deviceWritesReady =
-    allowDestructiveWrites &&
+  // Device-changing operations are authorized from live evidence, never from a
+  // project-phase flag. This mirrors evaluateDeviceWriteEvidence for the
+  // enable/disable state; the authoritative check happens in each handler,
+  // which requests and consumes a single-use capability.
+  const recoveryPathKnown =
     hardwareCleanupReady &&
     recoveryJournalState === "ready" &&
     checkpoint === null;
+  // A live confirmed identity is required to change a device over the wire.
+  const deviceWritesReady = identity !== null && recoveryPathKnown;
+  // The Wi-Fi and download methods do not write to the device from this
+  // application: they produce a verified artifact and hand off to the device's
+  // own updater. They still require a known recovery path, but demanding a live
+  // USB identity for them would block a legitimate flow rather than protect it.
   const writeReady =
-    deviceWritesReady &&
+    (firmwareWriteMethod ? deviceWritesReady : recoveryPathKnown) &&
     prepared !== null &&
     selectedTarget !== null &&
     recoveryDownloaded &&
@@ -420,6 +465,8 @@ export function ExpressLrsParityWorkbench({
     disconnectUnsubscribeRef.current = null;
     const session = sessionRef.current;
     sessionRef.current = null;
+    sessionIdRef.current = null;
+    writeAuthorityRef.current.revokeAll();
     if (session !== null) {
       void session.close().catch(() => undefined);
     }
@@ -484,6 +531,8 @@ export function ExpressLrsParityWorkbench({
     disconnectUnsubscribeRef.current = session.onDisconnected(() => {
       if (sessionRef.current !== session) return;
       sessionRef.current = null;
+      sessionIdRef.current = null;
+      writeAuthorityRef.current.revokeAll();
       disconnectUnsubscribeRef.current = null;
       clearHardwarePresentation();
       setStatus("انقطع اتصال الجهاز. أعد اختياره يدويًا للمتابعة.");
@@ -505,6 +554,8 @@ export function ExpressLrsParityWorkbench({
     disconnectUnsubscribeRef.current = null;
     const session = sessionRef.current;
     sessionRef.current = null;
+    sessionIdRef.current = null;
+    writeAuthorityRef.current.revokeAll();
     clearHardwarePresentation();
     if (session === null) return true;
 
@@ -549,9 +600,71 @@ export function ExpressLrsParityWorkbench({
     return closed;
   }
 
+  /**
+   * Requests a single-use capability for one device-changing attempt. The
+   * evidence is read live, so a repeated click, a swapped device, or missing
+   * recovery readiness cannot inherit an earlier authorization. A refusal names
+   * the missing condition instead of reporting a locked feature.
+   */
+  function authorizeDeviceOperation(operation: DeviceOperationKind): boolean {
+    const fingerprint = identity === null ? null : deviceFingerprint(identity);
+    const decision = writeAuthorityRef.current.request({
+      operation,
+      sessionId: sessionIdRef.current,
+      deviceFingerprint: fingerprint,
+      identityConfirmed: identity !== null && sessionRef.current !== null,
+      portCleanupConfirmed: hardwareCleanupGateOpen(),
+      operationInProgress: busy,
+      recoveryJournalReadable: recoveryJournalState === "ready",
+      pendingRecoveryCheckpoint: checkpoint !== null,
+      userConfirmed: true,
+      // Recovery re-opens a new port on a device that may no longer answer
+      // CRSF, so its Target evidence is the operator's confirmed Target key
+      // rather than a live identity match, and the package it restores is
+      // verified against the pending checkpoint inside the handler.
+      ...(operation === "FIRMWARE_WRITE"
+        ? {
+            targetMatchesDevice: selectedTarget !== null,
+            bandMatchesDevice: selectedTarget !== null,
+            artifactVerified: prepared !== null,
+            recoveryAvailable: recoveryDownloaded,
+            benchAcknowledged:
+              powerAcknowledged &&
+              (selectedTarget?.role !== "tx" || antennaAcknowledged),
+          }
+        : {}),
+      ...(operation === "RECOVERY"
+        ? {
+            targetMatchesDevice:
+              selectedTarget !== null && manualTargetConfirmed,
+            bandMatchesDevice: selectedTarget !== null,
+            benchAcknowledged:
+              powerAcknowledged &&
+              (selectedTarget?.role !== "tx" || antennaAcknowledged),
+          }
+        : {}),
+    });
+    if (!decision.granted) {
+      setStatus(writeDenialMessage(decision.reason));
+      return false;
+    }
+    const consumed = writeAuthorityRef.current.consume(decision.capability, {
+      sessionId: sessionIdRef.current,
+      deviceFingerprint: fingerprint,
+      operation,
+    });
+    if (consumed === null) {
+      setStatus(
+        "تغيّرت جلسة الجهاز أو هويته بعد التصريح؛ أعد التعريف ثم حاول مجددًا.",
+      );
+      return false;
+    }
+    return true;
+  }
+
   function deviceWriteLockMessage(): string {
-    if (!allowDestructiveWrites) {
-      return "أوامر تغيير الجهاز مقفلة في هذه النسخة؛ التعريف والقراءة فقط متاحان.";
+    if (identity === null) {
+      return "وصّل الجهاز وعرّفه أولًا؛ أوامر تغيير الجهاز تحتاج هوية مؤكدة.";
     }
     if (recoveryJournalState === "loading") {
       return "انتظر اكتمال فحص سجل الاستعادة قبل تغيير الجهاز.";
@@ -681,6 +794,9 @@ export function ExpressLrsParityWorkbench({
         return;
       }
       sessionRef.current = outcome.session;
+      sessionCounterRef.current += 1;
+      sessionIdRef.current = `session-${sessionCounterRef.current}`;
+      writeAuthorityRef.current.revokeAll();
       observeSessionDisconnect(outcome.session);
       const match =
         catalog === null
@@ -1055,6 +1171,8 @@ export function ExpressLrsParityWorkbench({
       );
       if (!oldClosed) {
         sessionRef.current = null;
+        sessionIdRef.current = null;
+        writeAuthorityRef.current.revokeAll();
         await closeSessionOrLatch(
           outcome.session,
           "تعذر تأكيد إغلاق جلسة إعادة الاتصال الاحتياطية",
@@ -1071,6 +1189,8 @@ export function ExpressLrsParityWorkbench({
     ) {
       if (sessionRef.current === oldSession) {
         sessionRef.current = null;
+        sessionIdRef.current = null;
+        writeAuthorityRef.current.revokeAll();
         clearHardwarePresentation();
       }
       await closeSessionOrLatch(
@@ -1082,6 +1202,9 @@ export function ExpressLrsParityWorkbench({
       );
     }
     sessionRef.current = outcome.session;
+    sessionCounterRef.current += 1;
+    sessionIdRef.current = `session-${sessionCounterRef.current}`;
+    writeAuthorityRef.current.revokeAll();
     observeSessionDisconnect(outcome.session);
     setIdentity(outcome.identity);
     setParameters(outcome.session.parameters);
@@ -1107,6 +1230,8 @@ export function ExpressLrsParityWorkbench({
         unsubscribeReconnect?.();
         disconnectUnsubscribeRef.current = null;
         sessionRef.current = null;
+        sessionIdRef.current = null;
+        writeAuthorityRef.current.revokeAll();
         clearHardwarePresentation();
       }
       await closeSessionOrLatch(
@@ -1223,6 +1348,8 @@ export function ExpressLrsParityWorkbench({
         throw error;
       } finally {
         sessionRef.current = null;
+        sessionIdRef.current = null;
+        writeAuthorityRef.current.revokeAll();
         clearHardwarePresentation();
       }
       return Object.freeze({ port, resetMode: "default_reset" });
@@ -1248,10 +1375,9 @@ export function ExpressLrsParityWorkbench({
   }
 
   async function flashPreparedFirmware(): Promise<void> {
-    if (!allowDestructiveWrites) {
-      setStatus(
-        "الكتابة المباشرة وفتح مسار Wi-Fi مقفلان في نقطة الدخول العامة الحالية.",
-      );
+    // Only an over-the-wire write needs device-write authority. Wi-Fi and
+    // download hand the verified artifact to the device's own updater.
+    if (firmwareWriteMethod && !authorizeDeviceOperation("FIRMWARE_WRITE")) {
       return;
     }
     if (!hardwareCleanupGateOpen()) {
@@ -1411,10 +1537,8 @@ export function ExpressLrsParityWorkbench({
   }
 
   async function recoverFromFile(file: File): Promise<void> {
-    if (!allowDestructiveWrites) {
-      setStatus("الاستعادة المباشرة مقفلة في نقطة الدخول العامة الحالية.");
-      return;
-    }
+    const authorized = authorizeDeviceOperation("RECOVERY");
+    if (!authorized) return;
     if (!hardwareCleanupGateOpen()) {
       setStatus(deviceWriteLockMessage());
       return;
@@ -1683,9 +1807,7 @@ export function ExpressLrsParityWorkbench({
                   type="text"
                   value={manualTargetConfirmation}
                   placeholder={selectedTarget.targetKey}
-                  disabled={
-                    busy || !allowDestructiveWrites || !hardwareCleanupReady
-                  }
+                  disabled={busy || !hardwareCleanupReady}
                   onChange={(event) =>
                     setManualTargetConfirmation(event.currentTarget.value)
                   }
@@ -1697,9 +1819,7 @@ export function ExpressLrsParityWorkbench({
                   <input
                     type="checkbox"
                     checked={powerAcknowledged}
-                    disabled={
-                      busy || !allowDestructiveWrites || !hardwareCleanupReady
-                    }
+                    disabled={busy || !hardwareCleanupReady}
                     onChange={(event) =>
                       setPowerAcknowledged(event.currentTarget.checked)
                     }
@@ -1711,9 +1831,7 @@ export function ExpressLrsParityWorkbench({
                     <input
                       type="checkbox"
                       checked={antennaAcknowledged}
-                      disabled={
-                        busy || !allowDestructiveWrites || !hardwareCleanupReady
-                      }
+                      disabled={busy || !hardwareCleanupReady}
                       onChange={(event) =>
                         setAntennaAcknowledged(event.currentTarget.checked)
                       }
@@ -1732,7 +1850,6 @@ export function ExpressLrsParityWorkbench({
               disabled={
                 busy ||
                 selectedTarget === null ||
-                !allowDestructiveWrites ||
                 !hardwareCleanupReady ||
                 !manualTargetConfirmed ||
                 !powerAcknowledged ||
@@ -2058,10 +2175,10 @@ export function ExpressLrsParityWorkbench({
               </p>
             )}
 
-            {!allowDestructiveWrites ? (
+            {identity === null ? (
               <p className="danger-note">
-                هذه النسخة تسمح بتعريف الجهاز وقراءة المعاملات فقط؛ أوامر
-                التغيير والربط والكتابة مقفلة في نقطة الدخول العامة الحالية.
+                وصّل الجهاز وعرّفه لقراءة إعداداته الحقيقية؛ كل كتابة تُقرأ
+                رجعيًا بعدها للتحقق من أنها ثبتت فعلًا.
               </p>
             ) : null}
 
@@ -2404,11 +2521,10 @@ export function ExpressLrsParityWorkbench({
           </button>
         </div>
 
-        {!allowDestructiveWrites ? (
+        {!deviceWritesReady ? (
           <p className="danger-note">
-            بناء الحزمة وتنزيلها متاحان، لكن التفليش والاستعادة وفتح صفحة Wi-Fi
-            مقفلة في نقطة الدخول العامة الحالية؛ وتفعيلها يتطلب نقطة دخول منفصلة
-            ومراجعة.
+            التفليش يحتاج جهازًا معرّفًا وTarget مطابقًا وحزمة محققة وحزمة
+            استعادة جاهزة وتأكيدك؛ يشرح الشريط أعلاه أي شرط ما زال ناقصًا.
           </p>
         ) : null}
 
@@ -2497,9 +2613,7 @@ export function ExpressLrsParityWorkbench({
                   type="text"
                   value={manualTargetConfirmation}
                   placeholder={selectedTarget?.targetKey ?? ""}
-                  disabled={
-                    busy || !allowDestructiveWrites || !hardwareCleanupReady
-                  }
+                  disabled={busy || !hardwareCleanupReady}
                   onChange={(event) =>
                     setManualTargetConfirmation(event.currentTarget.value)
                   }
@@ -2513,9 +2627,7 @@ export function ExpressLrsParityWorkbench({
                 <input
                   type="checkbox"
                   checked={powerAcknowledged}
-                  disabled={
-                    busy || !allowDestructiveWrites || !hardwareCleanupReady
-                  }
+                  disabled={busy || !hardwareCleanupReady}
                   onChange={(event) =>
                     setPowerAcknowledged(event.currentTarget.checked)
                   }
@@ -2527,9 +2639,7 @@ export function ExpressLrsParityWorkbench({
                   <input
                     type="checkbox"
                     checked={antennaAcknowledged}
-                    disabled={
-                      busy || !allowDestructiveWrites || !hardwareCleanupReady
-                    }
+                    disabled={busy || !hardwareCleanupReady}
                     onChange={(event) =>
                       setAntennaAcknowledged(event.currentTarget.checked)
                     }
@@ -2570,7 +2680,7 @@ export function ExpressLrsParityWorkbench({
 
       <PhysicalAcceptancePanel
         context={physicalAcceptanceContext}
-        deviceChangesEnabled={allowDestructiveWrites}
+        deviceChangesEnabled={deviceWritesReady}
       />
 
       <footer className="parity-footer">

@@ -49,8 +49,8 @@ jobs:
       - name: Enforce physical acceptance package
         run: pnpm check:physical-acceptance
 
-      - name: Enforce public read-only build boundary
-        run: pnpm check:read-only-build
+      - name: Enforce device write-path integrity
+        run: pnpm check:write-path-integrity
 
       - name: Check formatting
         run: pnpm format:check
