@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.browser-qa.json",
     "check:boundaries": "node scripts/check-dependency-boundaries.mjs",
     "check:security-headers": "node scripts/check-security-headers.mjs",
     "check:pwa-safety": "node scripts/check-pwa-safety.mjs",
@@ -29,7 +29,9 @@
     "check": "pnpm check:ci-hygiene && pnpm check:physical-acceptance && pnpm check:write-path-integrity && pnpm format:check && pnpm lint && pnpm typecheck && pnpm check:boundaries && pnpm check:security-headers && pnpm check:pwa-safety && pnpm check:visual-theme && pnpm check:links && pnpm check:master-plan && pnpm test && pnpm build",
     "check:ci-hygiene": "node scripts/check-ci-hygiene.mjs",
     "check:physical-acceptance": "node scripts/check-physical-acceptance-package.mjs",
-    "check:write-path-integrity": "node scripts/check-write-path-integrity.mjs"
+    "check:write-path-integrity": "node scripts/check-write-path-integrity.mjs",
+    "serve:built": "node scripts/serve-built-web.mjs",
+    "qa:browser": "playwright test"
   },
   "dependencies": {
     "@fontsource-variable/cairo": "5.3.0",
@@ -38,9 +40,11 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.5",
+    "@types/node": "^26.5.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.1.0",
