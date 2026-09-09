@@ -74,27 +74,24 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | AirPort | `updateOption("airportEnabled", …)` | Upstream's `--airport-baud`. Writes `is-airport` so the device acts as a transparent serial bridge. Independent of the option above; neither derives from the other. | `BROWSER_VERIFIED` |
 | Cancel the operation | `cancelCurrentOperation` | As above. | `EMULATOR_VERIFIED` |
 
-### Every write, end to end
+### Every operation, end to end
 
-The chain each device-changing operation actually travels, and what has to be
-true before it is allowed to report success. A control is dynamically disabled
-only when one of its listed prerequisites is unmet, and the unmet ones are
-rendered beside it.
+Control → readiness → driver → write authority → verification → recovery, for
+every operation the shipped application offers. Reachability of each driver
+from `apps/web/src/main.tsx` is enforced by `pnpm check:reachability`.
 
-| Operation | Control | Handler | Controller gate | Driver | Success requires |
-| --- | --- | --- | --- | --- | --- |
-| Identify | Identify over CRSF | `connectHardware` | `readiness.connect` — idle, port cleanup proven | `serial.ts` → CRSF Device Info `0x29` | A well-formed Device Info with a valid CRC. No identity is shown without one. |
-| Settings write | Save with read-back | `writeSetting` | `readiness.settingsWrite` — idle, live identity, port clean, recovery journal read, no open checkpoint, a writable parameter chosen | CRSF parameter write | The device reads the value back and it matches exactly. A write that returns without a matching read-back is a failure. |
-| Settings restore | Restore the snapshot | `restoreSettings` | `readiness.settingsRestore` — as above, plus a backup exists | CRSF parameter write, per parameter | Every restored parameter reads back. A single mismatch fails the restore. |
-| Binding | Run the real binding | `startBinding` | `readiness.binding` — as settings, plus the operator's acknowledgement | CRSF command `0x32`, then Link Statistics `0x14` observation | Never `VERIFIED_SUCCESS` from the command alone. Graded `COMMAND_ACKNOWLEDGED_ONLY` unless the operator confirms a live link, which records `USER_CONFIRMED_LINK`. |
-| Firmware write | Start the real flash | `flashPreparedFirmware` | `readiness.firmwareWrite` — idle, Target chosen, port clean, journal read, no open checkpoint, package built, recovery archive downloaded, power acknowledged, antenna acknowledged for a TX, Target confirmed where the identity does not pin it, live identity for a UART write | esptool-js, STM32 DFU (WebUSB), XMODEM, or passthrough | Reboot, reconnect, read identity, confirm Target, confirm version. Any failure keeps the recovery checkpoint. |
-| Receiver as transmitter | The mode selector, then the flash | `flashPreparedFirmware` with `rxAsTxMode` | `readiness.rxAsTx` — a Target that upstream builds transmitter firmware for, in the chosen mode | The same flashers, against the `_TX` artifact | Everything a firmware write requires, **and** the rebooted device must report a transmitter role. A device that comes back as a receiver fails with `RX_AS_TX_ROLE_NOT_APPLIED` and keeps its checkpoint. |
-| Recovery | Restore from the recovery package | `recoverFromCheckpoint` | `readiness.recovery` — idle, Target chosen, port clean, journal read, a package or an open checkpoint, power acknowledged | The same flashers | Write, reboot, reconnect, read identity, confirm Target, confirm version, then clear the checkpoint. Anything short of that stays `RECOVERY_INCOMPLETE`. |
-| Diagnostics | Show / copy / download | `captureDiagnostics` | `readiness.diagnostics` — always ready; it reads and redacts, and writes nothing | None | Not a write. Secrets are redacted before the report leaves the page. |
-
-Every write additionally passes the single-use write capability described in
-`docs/architecture/`: bound to the session, the device fingerprint and the
-operation, with a 180-second TTL, and consumed on use.
+| Operation | Control | Handler | Readiness gate (live prerequisites) | Driver | Write authority | Success requires | On failure |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Identify | Identify over CRSF | `connectHardware` | `connect` — idle, port cleanup proven | `serial.ts` → CRSF Device Info `0x29` | none (read) | A well-formed Device Info with a valid CRC. No identity is shown without one. | Port closed, no identity retained |
+| Diagnostics | Show / copy / download | `captureDiagnostics` | `diagnostics` — always ready | none | none (read) | Not a write. Secrets redacted before the report leaves the page. | — |
+| Settings write | Save with read-back | `writeSetting` | `settingsWrite` — idle, live identity, port clean, journal read, no open checkpoint, a writable parameter chosen | CRSF parameter write | single-use capability, 180 s TTL, bound to session + device fingerprint + operation | The device reads the value back and it matches exactly | Reported unapplied; the prior value stands |
+| Settings restore | Restore the snapshot | `restoreSettings` | `settingsRestore` — as above, plus a backup exists | CRSF parameter write, per parameter | as above | Every restored parameter reads back | Named parameter reported; restore fails |
+| Binding | Run the real binding | `startBinding` | `binding` — as settings, plus the operator's acknowledgement (`bindingPrerequisites` gates the acknowledgement itself) | CRSF command `0x32`, then Link Statistics `0x14` observation | as above | Never `VERIFIED_SUCCESS` from the command. Graded `COMMAND_ACKNOWLEDGED_ONLY` unless the operator confirms a live link → `USER_CONFIRMED_LINK` | Graded down, never up |
+| Firmware write | Start the real flash | `flashPreparedFirmware` | `firmwareWrite` — idle, Target chosen, port clean, journal read, no open checkpoint, package built, recovery archive downloaded, power acknowledged, antenna acknowledged for a TX, Target confirmed where identity does not pin it, live identity for a UART write | esptool-js, STM32 DFU (WebUSB), XMODEM, or passthrough | as above | Reboot, reconnect, read identity, confirm Target, confirm version | Checkpoint kept at the reached stage; recovery offered |
+| Receiver as transmitter | Mode selector, then the flash | `flashPreparedFirmware` with `rxAsTxMode` | `rxAsTx` — a Target upstream builds transmitter firmware for, in the chosen mode | the same flashers, against the `_TX` artifact | as above | Everything a firmware write requires, **and** the rebooted device's CRSF Device Info origin must be `0xEE` | `WRITE_COMPLETED_RECONNECT_UNVERIFIED`; checkpoint kept; the original receiver image is still restorable |
+| AirPort | AirPort switch | `updateOption("airportEnabled", …)` | `airport` — a Target chosen | options block in the packaged firmware | via the firmware write it is part of | The packaged options block carries `is-airport`. Independent of the role. | as firmware write |
+| Recovery | Restore from the package | `recoverFromCheckpoint` | `recovery` — idle, Target chosen, port clean, journal read, a package or an open checkpoint, power acknowledged | the same flashers | as above | Write, reboot, reconnect, read identity, confirm Target, confirm version, then clear the checkpoint | `RECOVERY_INCOMPLETE`; checkpoint kept for another attempt |
+| Cancel | Cancel the operation | `cancelCurrentOperation` | available whenever an operation is in flight | the operation's `AbortSignal` | — | The in-flight operation stops and the port is released | Late results are quarantined, not applied |
 
 ### Diagnostics
 

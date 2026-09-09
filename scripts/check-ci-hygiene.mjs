@@ -5,10 +5,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 //   ci.yml            the quality, license and security gates
 //   deploy-pages.yml  the GitHub Pages deploy
 //   upstream-live.yml the opt-in live suites against the official mirror
+//   android.yml       the Android host APK, lint and unit tests
 const allowedWorkflows = new Set([
   "ci.yml",
   "deploy-pages.yml",
   "upstream-live.yml",
+  "android.yml",
 ]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [

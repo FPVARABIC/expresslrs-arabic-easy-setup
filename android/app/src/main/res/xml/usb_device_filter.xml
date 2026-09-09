@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      USB CDC-ACM. This is the class the bridge speaks today; a device using a
+      vendor-specific bridge chip (CP210x, CH34x, FTDI) is not matched, and the
+      application says so rather than appearing to support it.
+    -->
+    <usb-device class="2" subclass="2" />
+    <usb-device class="10" />
+</resources>

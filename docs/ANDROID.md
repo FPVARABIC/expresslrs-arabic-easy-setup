@@ -155,3 +155,66 @@ In order, each producing evidence rather than an opinion:
 Until one of those produces a report, the honest status for Android is
 `UNSUPPORTED_WITH_EVIDENCE` for every browser in the table that reports `n`,
 and **unverified** for Chrome for Android — not "supported".
+
+## The Android host APK
+
+`android/` is a real Gradle project that CI builds into a debug APK
+(`.github/workflows/android.yml`), with Gradle lint and JVM unit tests.
+
+### Why it is a WebView with a native bridge
+
+Three shapes were possible and only one can drive a device:
+
+| Shape | Web Serial | Can supply a native bridge |
+| --- | --- | --- |
+| Trusted Web Activity / Custom Tab | yes — it *is* Chrome | **no**, the page runs outside this app |
+| Plain WebView | **no** — WebView implements neither Web Serial nor WebUSB | not useful alone |
+| WebView + native USB host bridge | not needed | **yes** |
+
+A Trusted Web Activity would add a launcher icon and nothing else; an operator
+is already better served by installing the PWA in Chrome. A plain WebView would
+be strictly *worse* than the browser, because every device operation would
+fail. So the host is a WebView that supplies `elrsNativeBridge` from Android's
+USB Host API — the seam `apps/web/src/hardware/native-bridge.ts` exists for.
+
+### What the APK proves, and what it does not
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Project compiles, lint clean | `IMPLEMENTED` | `gradle lintDebug` in CI |
+| USB permission and interface rules | `EMULATOR_VERIFIED` | `UsbDeviceGateTest`, JVM unit tests in CI |
+| Debug APK produced with a recorded SHA-256 | `IMPLEMENTED` | `android.yml` artifact |
+| USB CDC-ACM byte transport | `IMPLEMENTED` | **not executed anywhere** |
+| Anything over real USB OTG | **`UNVERIFIED`** | none |
+
+An emulator cannot close this gap: it has no USB host, so no emulator run can
+exercise an OTG path. Only a physical phone or tablet with an OTG cable can.
+
+### Still open — needs a physical Android device
+
+Not one of these has been run. None may be marked passed from CI.
+
+| # | Case | State |
+| --- | --- | --- |
+| A1 | Install the debug APK on a phone or tablet with USB OTG | UNVERIFIED |
+| A2 | Attach an ExpressLRS device; the attach intent offers the app | UNVERIFIED |
+| A3 | USB permission **granted** — a port opens and identity is read | UNVERIFIED |
+| A4 | USB permission **denied** — a named refusal, no port held | UNVERIFIED |
+| A5 | USB permission **revoked** after being granted — the stale handle is refused, not used | UNVERIFIED |
+| A6 | Detach during identify / settings write / binding / firmware write / recovery — each closes the port | UNVERIFIED |
+| A7 | Background and resume mid-operation | UNVERIFIED |
+| A8 | Screen rotation mid-operation | UNVERIFIED |
+| A9 | Cancel an operation and confirm the port is released, not left open | UNVERIFIED |
+| A10 | Firmware file selection through the Android picker | UNVERIFIED |
+| A11 | Recovery after an interrupted write, on Android | UNVERIFIED |
+| A12 | Arabic and English, RTL and LTR, at phone width | UNVERIFIED |
+| A13 | No feature is hidden merely because the platform is Android | UNVERIFIED |
+
+### Hardware required to close them
+
+| Need | Precise requirement |
+| --- | --- |
+| Phone or tablet | Android 7.0 (API 24) or newer **with USB host/OTG support** — many budget devices omit it; check the device's `android.hardware.usb.host` feature before buying |
+| Cable | USB-C OTG cable, or USB-C to USB-A adapter plus the device's own cable |
+| Device under test | An ExpressLRS TX or RX presenting a **USB CDC-ACM** serial interface — for example an ESP32-S3 or ESP32-C3 based module with native USB |
+| Not yet supported | A module behind a CP210x, CH340 or FTDI bridge chip. The USB filter matches CDC-ACM only, and the application says so rather than appearing to support it. |
