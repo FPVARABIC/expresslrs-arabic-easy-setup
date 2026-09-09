@@ -8,6 +8,12 @@ thing in this repository that can support a `BROWSER_VERIFIED` claim: jsdom
 does not enforce a Content-Security-Policy, does not run a service worker, and
 does not decide whether `navigator.serial` exists.
 
+The document also carries the policy in a `<meta http-equiv>` tag, so the
+Content-Security-Policy is in force here whether or not the server sets a
+header. That is deliberate: GitHub Pages sets none, and neither does the
+Android host's asset loader — which is the one context where this page can
+reach USB hardware.
+
 - Suite: [`browser-qa/shipped-application.spec.ts`](../../browser-qa/shipped-application.spec.ts)
 - Config: [`playwright.config.ts`](../../playwright.config.ts)
 - Server: [`scripts/serve-built-web.mjs`](../../scripts/serve-built-web.mjs)
@@ -17,6 +23,18 @@ does not decide whether `navigator.serial` exists.
 ```bash
 pnpm --filter @elrs-easy/web build
 pnpm qa:browser
+```
+
+`pnpm qa:browser:pinned` builds with the current commit SHA first, which is
+what CI does. Use it before pushing: a build with no commit identity leaves the
+candidate-SHA field empty, and an empty field cannot overflow a narrow layout
+the way a real 40-character hex run once did.
+
+Where a Chromium is already installed rather than downloaded by Playwright,
+point at it instead of running `playwright install`:
+
+```bash
+PLAYWRIGHT_CHROMIUM_PATH=/path/to/chromium pnpm qa:browser:pinned
 ```
 
 The server reads `apps/web/dist/_headers` and applies its `/*` block, because
