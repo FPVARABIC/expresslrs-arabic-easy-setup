@@ -739,25 +739,6 @@ export function EasySetup({
                     })}
                   </p>
                 )}
-
-                {checkpoint === null ? null : (
-                  <div className="easy-error">
-                    <p>{t("easy.fw.pending", { stage: checkpoint.stage })}</p>
-                    <p>{t("easy.fw.recoveryNote")}</p>
-                    <label>
-                      <span>{t("easy.fw.recoverFile")}</span>
-                      <input
-                        type="file"
-                        accept=".zip,application/zip"
-                        disabled={busy}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.[0];
-                          if (file !== undefined) void runRecovery(file);
-                        }}
-                      />
-                    </label>
-                  </div>
-                )}
               </div>
             ) : null}
 
@@ -825,26 +806,44 @@ export function EasySetup({
                 </button>
               </div>
             ) : null}
-
-            {evidenceLevel === null ? null : (
-              <p className="easy-note" data-evidence={evidenceLevel}>
-                {evidenceLevel}
-              </p>
-            )}
-
-            {outcome.kind === "none" ? null : (
-              <p
-                data-outcome={outcome.kind}
-                className={
-                  outcome.kind === "failed" ? "easy-error" : "easy-note"
-                }
-              >
-                {outcome.text}
-              </p>
-            )}
-            {copied === "failed" ? <p>{t("easy.copyFailed")}</p> : null}
           </>
         )}
+        {/* A pending recovery and the last result stay visible even when
+            the device is gone: a write that detached the port is exactly
+            when the operator needs both. */}
+        {checkpoint === null ? null : (
+          <div className="easy-error">
+            <p>{t("easy.fw.pending", { stage: checkpoint.stage })}</p>
+            <p>{t("easy.fw.recoveryNote")}</p>
+            <label>
+              <span>{t("easy.fw.recoverFile")}</span>
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file !== undefined) void runRecovery(file);
+                }}
+              />
+            </label>
+          </div>
+        )}
+        {evidenceLevel === null ? null : (
+          <p className="easy-note" data-evidence={evidenceLevel}>
+            {evidenceLevel}
+          </p>
+        )}
+
+        {outcome.kind === "none" ? null : (
+          <p
+            data-outcome={outcome.kind}
+            className={outcome.kind === "failed" ? "easy-error" : "easy-note"}
+          >
+            {outcome.text}
+          </p>
+        )}
+        {copied === "failed" ? <p>{t("easy.copyFailed")}</p> : null}
       </div>
 
       <p className="easy-note">{t("easy.noHardwareClaim")}</p>

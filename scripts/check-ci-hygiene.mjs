@@ -79,6 +79,10 @@ if (!existsSync(canonicalCiPath)) {
     fail("ci.yml does not enforce device write-path integrity");
   }
 
+  if (!/^\s*run:\s*pnpm check:ui-honesty\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce interface honesty");
+  }
+
   // Browser QA is the only thing that can make a BROWSER_VERIFIED claim. If it
   // stops running, every such claim in the matrix becomes unsupported.
   if (!canonicalCi.includes("pnpm qa:browser")) {

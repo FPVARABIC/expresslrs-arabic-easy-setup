@@ -621,6 +621,78 @@ describe("public product shell", () => {
     );
   });
 
+  it("refuses to report a firmware update that the device never came back from", async () => {
+    const user = userEvent.setup();
+    firmwareMocks.loadCatalog.mockResolvedValue(easyCatalog);
+    firmwareMocks.preparePackage.mockResolvedValue({
+      ...easyPackage,
+      target: (easyCatalog as unknown as { targets: unknown[] }).targets[0],
+    });
+    // The write succeeds; the device then never answers again.
+    firmwareMocks.flashEspFirmware.mockResolvedValue({
+      chipName: "ESP32",
+      bytesWritten: 3,
+      cleanupVerified: true,
+    });
+    const connector = connectedConnector({ withBootloaderCommand: true });
+    (connector as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      (
+        connector as unknown as ReturnType<typeof vi.fn>
+      ).getMockImplementation() as never,
+    );
+    let attempts = 0;
+    const failingAfterFirst: typeof connector = (async (input: never) => {
+      attempts += 1;
+      if (attempts === 1) {
+        return (connector as unknown as (value: never) => unknown)(input);
+      }
+      return { status: "TIMED_OUT", message: "no answer after the write" };
+    }) as unknown as typeof connector;
+
+    render(<ProductShell hardwareConnector={failingAfterFirst} />);
+
+    await user.click(
+      screen.getAllByRole("button", { name: "ابدأ" })[2] as HTMLElement,
+    );
+    await user.click(screen.getByRole("button", { name: "تعرّف على جهازي" }));
+    await screen.findByText("Reference TX");
+    await user.click(
+      screen.getByRole("button", { name: "جهّز مصدر التحديث الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Reference TX" });
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "جهّز الحزمة الرسمية وتحقق منها" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "نزّل حزمة الاستعادة" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: /حفظ حزمة الاستعادة/u }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: /الطاقة ثابتة/u }));
+    await user.click(screen.getByRole("checkbox", { name: /هوائي جهاز/u }));
+    await user.click(
+      screen.getByRole("button", { name: "اكتب Firmware إلى الجهاز" }),
+    );
+
+    await waitFor(() =>
+      expect(firmwareMocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    // The bytes went out. Without a device that came back and proved its
+    // Target and version, that is not a completed update.
+    await waitFor(() =>
+      expect(document.querySelector('[data-outcome="failed"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-outcome="verified"]')).toBeNull();
+    expect(
+      screen.queryByText(/عاد الجهاز وأعلن Target والإصدار المتوقعين/u),
+    ).not.toBeInTheDocument();
+  });
+
   it("exposes a skip link and a focusable main region for keyboard users", () => {
     render(<ProductShell />);
 
