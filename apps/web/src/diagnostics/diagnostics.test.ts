@@ -19,6 +19,7 @@ function snapshot(
       secureContext: true,
       webSerialSupported: true,
       webUsbSupported: false,
+      nativeBridge: false,
       language: "ar",
       platform: "Linux",
       standaloneDisplay: false,

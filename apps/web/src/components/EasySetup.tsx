@@ -86,6 +86,8 @@ export function EasySetup({
     cancelCurrentOperation,
     cancellable,
     captureDiagnostics,
+    deviceTransportBlocker,
+    platformCapabilities,
     catalog,
     catalogState,
     checkpoint,
@@ -371,6 +373,22 @@ export function EasySetup({
         {device.kind !== "IDENTIFIED" ? (
           <>
             <p>{t("easy.step.connectHint")}</p>
+            {deviceTransportBlocker === null ? null : (
+              <div
+                className="easy-error"
+                data-transport={deviceTransportBlocker}
+              >
+                <p>{t(`transport.${deviceTransportBlocker}`)}</p>
+                <p>
+                  {t("transport.detected", {
+                    webSerial: String(platformCapabilities.webSerial),
+                    webUsb: String(platformCapabilities.webUsb),
+                    bridge: String(platformCapabilities.nativeBridge),
+                    secure: String(platformCapabilities.secureContext),
+                  })}
+                </p>
+              </div>
+            )}
             <fieldset className="easy-role" disabled={busy}>
               <legend>{t("easy.roleLabel")}</legend>
               {(["tx", "rx"] as const).map((value) => (
@@ -392,7 +410,7 @@ export function EasySetup({
               type="button"
               className="easy-primary"
               onClick={() => void identify()}
-              disabled={busy}
+              disabled={busy || deviceTransportBlocker !== null}
             >
               {busy ? t("easy.connecting") : t("easy.connect")}
             </button>

@@ -56,6 +56,14 @@ export const en = {
   "error.INTERNAL_ERROR": "An unexpected internal error occurred.",
   "debug.englishOnly": "English fallback verified",
 
+  "transport.INSECURE_CONTEXT":
+    "This page is not running in a secure context, so the browser exposes no device APIs at all. Open it over HTTPS or from localhost.",
+  "transport.NO_SERIAL_TRANSPORT":
+    "This browser exposes neither the Web Serial API nor a native bridge, so no device port can be opened here. Use a desktop Chrome, Edge or Opera, or a host application that provides the bridge.",
+  "transport.USB_ONLY":
+    "This browser exposes WebUSB but not Web Serial, so CRSF identification and serial flashing cannot run here. Only an STM32 DFU device could be reached over USB.",
+  "transport.detected":
+    "Detected: Web Serial {webSerial}, WebUSB {webUsb}, native bridge {bridge}, secure context {secure}.",
   "diagnostics.heading": "Diagnostics",
   "diagnostics.intro":
     "A report of what this session actually observed: the browser's capabilities, what the device reported, the package that was prepared, and the recovery state.",

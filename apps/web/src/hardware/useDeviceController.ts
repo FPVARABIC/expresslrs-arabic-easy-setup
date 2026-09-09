@@ -23,7 +23,17 @@ import {
   prepareOfficialFirmwarePackage,
 } from "./firmware-package";
 import { acquireOfficialLuaScript } from "./lua-package";
+import {
+  nativeBridgeNavigator,
+  readNativeHardwareBridge,
+} from "./native-bridge";
 import { loadOfficialExpressLrsCatalog } from "./official-catalog";
+import {
+  devicePathBlocker,
+  readPlatformCapabilities,
+  type DevicePathBlocker,
+  type PlatformCapabilities,
+} from "./platform-capabilities";
 import {
   initializeSerialPassthrough,
   requestHardwarePort,
@@ -383,6 +393,18 @@ export function useDeviceController({
   );
   const [hardwareCloseUncertain, setHardwareCloseUncertain] = useState(false);
   const [hardwareCloseInProgress, setHardwareCloseInProgress] = useState(false);
+
+  // Read once per render from the APIs themselves. A test connector means the
+  // host is driving the device path directly, so it is reported as available.
+  const platformCapabilities: PlatformCapabilities =
+    hardwareConnector === undefined
+      ? readPlatformCapabilities()
+      : Object.freeze({
+          ...readPlatformCapabilities(),
+          webSerial: true,
+        });
+  const deviceTransportBlocker: DevicePathBlocker | null =
+    devicePathBlocker(platformCapabilities);
 
   const sessionRef = useRef<UserHardwareSession | null>(null);
   const hardwareCloseUncertainRef = useRef(false);
@@ -898,11 +920,17 @@ export function useDeviceController({
       "اختر منفذ وحدة ExpressLRS المباشر؛ جارٍ إرسال CRSF Device Ping…",
     );
     try {
+      // A native host that implements the bridge supplies the serial API; the
+      // rest of the device path is the same code either way.
+      const bridge = readNativeHardwareBridge();
       const outcome = await connectUserHardwareSession({
         role: requestedRole,
         ...(hardwareConnector === undefined
           ? {}
           : { connector: hardwareConnector }),
+        ...(hardwareConnector === undefined && bridge !== null
+          ? { navigatorObject: nativeBridgeNavigator(bridge) }
+          : {}),
         signal: controller.signal,
         onCleanupUnconfirmed: latchUnconfirmedHardwareClose,
       });
@@ -1994,6 +2022,7 @@ export function useDeviceController({
         secureContext: window.isSecureContext,
         webSerialSupported: "serial" in navigator,
         webUsbSupported: navigatorObject.usb !== undefined,
+        nativeBridge: platformCapabilities.nativeBridge,
         language: navigator.language,
         // userAgentData is absent outside Chromium, and the full user-agent
         // string is a fingerprint, so only the coarse platform hint is taken.
@@ -2200,6 +2229,8 @@ export function useDeviceController({
     canObserveFrames,
     wipeSecretOptions,
     captureDiagnostics,
+    platformCapabilities,
+    deviceTransportBlocker,
     bindEvidence,
   } as const;
 }

@@ -21,6 +21,8 @@ export interface DiagnosticsSnapshot {
     readonly secureContext: boolean;
     readonly webSerialSupported: boolean;
     readonly webUsbSupported: boolean;
+    /** A native host supplied the serial transport instead of the browser. */
+    readonly nativeBridge: boolean;
     readonly language: string;
     readonly platform: string;
     readonly standaloneDisplay: boolean;
@@ -121,6 +123,7 @@ export function serializeDiagnosticsMarkdown(
     redactedLine("Secure context", snapshot.environment.secureContext),
     redactedLine("Web Serial", snapshot.environment.webSerialSupported),
     redactedLine("WebUSB", snapshot.environment.webUsbSupported),
+    redactedLine("Native bridge", snapshot.environment.nativeBridge),
     redactedLine("Service worker", snapshot.environment.serviceWorkerSupported),
     redactedLine("Standalone display", snapshot.environment.standaloneDisplay),
     redactedLine("Platform", snapshot.environment.platform),

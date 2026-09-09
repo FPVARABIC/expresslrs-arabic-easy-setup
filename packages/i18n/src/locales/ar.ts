@@ -51,6 +51,14 @@ export const ar = {
   "error.RECOVERY_REQUIRED": "يحتاج الجهاز إلى مسار استعادة قبل المتابعة.",
   "error.INTERNAL_ERROR": "حدث خطأ داخلي غير متوقع.",
 
+  "transport.INSECURE_CONTEXT":
+    "هذه الصفحة لا تعمل في سياق آمن، لذلك لا يعرض المتصفح أي واجهات أجهزة إطلاقًا. افتحها عبر HTTPS أو من localhost.",
+  "transport.NO_SERIAL_TRANSPORT":
+    "هذا المتصفح لا يعرض واجهة Web Serial ولا جسرًا أصليًا، فلا يمكن فتح منفذ جهاز هنا. استخدم Chrome أو Edge أو Opera على حاسوب مكتبي، أو تطبيقًا مضيفًا يوفّر الجسر.",
+  "transport.USB_ONLY":
+    "هذا المتصفح يعرض WebUSB دون Web Serial، فلا يمكن تنفيذ تعريف CRSF ولا التفليش التسلسلي هنا. يمكن الوصول فقط إلى جهاز STM32 DFU عبر USB.",
+  "transport.detected":
+    "المرصود: Web Serial {webSerial}، WebUSB {webUsb}، الجسر الأصلي {bridge}، السياق الآمن {secure}.",
   "diagnostics.heading": "التشخيص",
   "diagnostics.intro":
     "تقرير بما رصدته هذه الجلسة فعلًا: قدرات المتصفح، وما أعلنه الجهاز، والحزمة التي جُهّزت، وحالة الاستعادة.",
