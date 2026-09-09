@@ -17,17 +17,79 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = "https://expresslrs.github.io/web-flasher/assets/firmware";
 
+/**
+ * A third-party CDN over the public internet will reset a connection
+ * sometimes. One `ECONNRESET` mid-TLS-read failed this whole workflow on
+ * `b4ed6c7` — a transport failure reported as though upstream had changed.
+ *
+ * Retried with backoff, and only for transport and 5xx failures: a 404 means
+ * the path moved, which is exactly the upstream drift this script exists to
+ * surface, and retrying it would only delay the report.
+ */
+const ATTEMPTS = 4;
+const BACKOFF_MS = [1_000, 3_000, 8_000];
+
+function retryable(error) {
+  const cause = error?.cause;
+  return (
+    error?.name === "TypeError" ||
+    [
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+      "UND_ERR_SOCKET",
+    ].includes(cause?.code ?? "")
+  );
+}
+
+async function sleep(milliseconds) {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function fetchJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`${url} returned HTTP ${response.status}`);
+  let lastError;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (response.status >= 500) {
+        throw new Error(`${url} returned HTTP ${response.status}`);
+      }
+      if (!response.ok) {
+        // A 4xx is upstream telling us the path is gone. That is a finding.
+        throw Object.assign(
+          new Error(`${url} returned HTTP ${response.status}`),
+          { fatal: true },
+        );
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return {
+        bytes,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        value: JSON.parse(new TextDecoder().decode(bytes)),
+      };
+    } catch (error) {
+      if (error?.fatal === true) throw error;
+      lastError = error;
+      const isLast = attempt === ATTEMPTS - 1;
+      if (isLast || !(retryable(error) || /HTTP 5\d\d/u.test(String(error)))) {
+        break;
+      }
+      const wait = BACKOFF_MS[attempt] ?? 8_000;
+      console.warn(
+        `${url} failed (${error?.cause?.code ?? error?.message}); ` +
+          `retrying in ${wait}ms — attempt ${attempt + 2} of ${ATTEMPTS}`,
+      );
+      await sleep(wait);
+    }
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  return {
-    bytes,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
-    value: JSON.parse(new TextDecoder().decode(bytes)),
-  };
+  throw new Error(
+    `${url} could not be read after ${ATTEMPTS} attempts: ` +
+      `${lastError?.cause?.code ?? lastError?.message}. ` +
+      "The official mirror is unreachable from this runner; this is a network " +
+      "result, not a change in what upstream publishes.",
+    { cause: lastError },
+  );
 }
 
 /** Stable ordering, so the same upstream state always hashes the same. */
