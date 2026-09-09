@@ -77,6 +77,12 @@ export type DeviceOperation =
   | "settingsWrite"
   | "settingsRestore"
   | "binding"
+  /**
+   * Everything binding needs *except* the operator's own acknowledgement, so
+   * the acknowledgement control can be gated on real conditions without being
+   * gated on itself.
+   */
+  | "bindingPrerequisites"
   | "firmwareWrite"
   | "recovery"
   | "rxAsTx"
@@ -676,6 +682,14 @@ export function useDeviceController({
     message("wb.need.target"),
   ] as const;
 
+  const bindingPreconditions = [
+    notBusy,
+    liveDevice,
+    portClean,
+    journalReady,
+    noPendingCheckpoint,
+  ] as const;
+
   const readiness: Readonly<Record<DeviceOperation, OperationReadiness>> =
     Object.freeze({
       connect: readinessFrom([notBusy, portClean]),
@@ -699,12 +713,9 @@ export function useDeviceController({
         noPendingCheckpoint,
         [settingsBackup !== null, message("wb.need.settingsBackup")] as const,
       ]),
+      bindingPrerequisites: readinessFrom(bindingPreconditions),
       binding: readinessFrom([
-        notBusy,
-        liveDevice,
-        portClean,
-        journalReady,
-        noPendingCheckpoint,
+        ...bindingPreconditions,
         [
           bindingAcknowledged,
           message("wb.need.bindingAcknowledgement"),

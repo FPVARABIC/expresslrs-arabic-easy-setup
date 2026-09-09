@@ -5,6 +5,7 @@ import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
 import type { RxAsTxMode } from "../hardware/rx-as-tx";
+import type { DeviceOperation } from "../hardware/useDeviceController";
 import {
   MAX_BIND_PHRASE_LENGTH,
   bindPhraseIssue,
@@ -80,7 +81,6 @@ export function ExpressLrsParityWorkbenchView({
     catalogState,
     checkpoint,
     connectHardware,
-    deviceWritesReady,
     disconnectHardware,
     downloadFirmware,
     downloadLuaScript,
@@ -136,7 +136,6 @@ export function ExpressLrsParityWorkbenchView({
     setTargetId,
     setVendorKey,
     settingDraft,
-    settingsBackup,
     startBinding,
     status,
     targetDefaults,
@@ -148,9 +147,26 @@ export function ExpressLrsParityWorkbenchView({
     vendors,
     visibleTargets,
     writableParameters,
-    writeReady,
     writeSetting,
   } = controller;
+
+  /**
+   * Renders the live reasons one operation is not ready, right beside the
+   * control it blocks. A disabled control that does not say why is a dead end
+   * for the operator; this makes every one of them explainable.
+   */
+  const blockers = (operation: DeviceOperation) =>
+    readiness[operation].ready ? null : (
+      <ul
+        className="parity-note operation-blockers"
+        data-operation={operation}
+        data-ready="no"
+      >
+        {readiness[operation].missing.map((reason) => (
+          <li key={reason.key}>{renderMessage(reason)}</li>
+        ))}
+      </ul>
+    );
 
   return (
     <main className="parity-shell" dir={getDirection(locale)}>
@@ -638,9 +654,7 @@ export function ExpressLrsParityWorkbenchView({
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={
-                    busy || selectedSetting === undefined || !deviceWritesReady
-                  }
+                  disabled={!readiness.settingsWrite.ready}
                   onClick={() => void writeSetting()}
                 >
                   {t("wb.ui.saveWithReadBack")}
@@ -648,9 +662,7 @@ export function ExpressLrsParityWorkbenchView({
                 <button
                   type="button"
                   className="secondary-button"
-                  disabled={
-                    busy || settingsBackup === null || !deviceWritesReady
-                  }
+                  disabled={!readiness.settingsRestore.ready}
                   onClick={() => void restoreSettings()}
                 >
                   {t("wb.ui.restoreSnapshot")}
@@ -659,21 +671,22 @@ export function ExpressLrsParityWorkbenchView({
                   <button
                     type="button"
                     className="secondary-button"
-                    disabled={
-                      busy || !bindingAcknowledged || !deviceWritesReady
-                    }
+                    disabled={!readiness.binding.ready}
                     onClick={() => void startBinding()}
                   >
                     {t("wb.ui.runRealBinding")}
                   </button>
                 ) : null}
               </div>
+              {blockers("settingsWrite")}
+              {blockers("settingsRestore")}
+              {hasBindCommand ? blockers("binding") : null}
               {hasBindCommand ? (
                 <label className="check-field">
                   <input
                     type="checkbox"
                     checked={bindingAcknowledged}
-                    disabled={busy || !deviceWritesReady}
+                    disabled={!readiness.bindingPrerequisites.ready}
                     onChange={(event) =>
                       setBindingAcknowledged(event.currentTarget.checked)
                     }
@@ -1031,7 +1044,10 @@ export function ExpressLrsParityWorkbenchView({
               <label className="check-field danger-note">
                 <input
                   type="checkbox"
-                  checked={false}
+                  // False in this branch by construction — the confirmed case
+                  // renders the note above instead — but bound to the state it
+                  // reflects rather than pinned to a literal.
+                  checked={recoveryDownloaded}
                   disabled={busy}
                   onChange={(event) => {
                     if (!event.currentTarget.checked) return;
@@ -1093,7 +1109,7 @@ export function ExpressLrsParityWorkbenchView({
             <button
               type="button"
               className="danger-button"
-              disabled={busy || !writeReady}
+              disabled={!readiness.firmwareWrite.ready}
               onClick={() => void flashPreparedFirmware()}
             >
               {method === "wifi"

@@ -1,7 +1,7 @@
 import "@fontsource-variable/cairo/wght.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { defaultLocale, getDirection } from "@elrs-easy/i18n";
+import { defaultLocale, getDirection, translate } from "@elrs-easy/i18n";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { ProductShell } from "./components/ProductShell";
 import { ApplicationUpdateNotice } from "./pwa/ApplicationUpdateNotice";
@@ -16,7 +16,10 @@ import "./easy.css";
 document.documentElement.lang = defaultLocale;
 document.documentElement.dir = getDirection(defaultLocale);
 
-document.title = "إعداد ExpressLRS بسهولة";
+// The title follows the chosen locale, so ProductShell owns it alongside
+// `lang` and `dir`. Seeding it here from the default keeps the tab named
+// before React mounts.
+document.title = translate(defaultLocale, "app.name");
 
 const root = document.getElementById("root");
 

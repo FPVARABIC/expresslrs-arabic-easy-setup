@@ -231,4 +231,5 @@ export const acceptanceAr = {
   "accp.msg.imported": "تم استيراد الجلسة والتحقق من بنيتها وحدودها.",
   "accp.msg.importUnreadable": "تعذر قراءة ملف النتائج.",
   "accp.msg.captureBlock": "لقطة {at}",
+  "accp.candidateShaUnknown": "غير مرتبطة بنسخة محددة",
 } satisfies Record<keyof typeof acceptanceEn, string>;

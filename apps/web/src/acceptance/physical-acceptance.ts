@@ -416,6 +416,8 @@ export function redactSensitiveAcceptanceText(value: unknown): string {
       // A binding UID is written as an octet list. Redact every octet, not just
       // the first one before the separating comma.
       .replace(
+        // The Arabic comma here is redaction data, not interface text: a UID an
+        // operator pasted may be separated by either comma.
         /\b(uid)\b[ \t]*[:=][ \t]*\[?[ \t]*\d{1,3}(?:[ \t]*[,،][ \t]*\d{1,3})*[ \t]*\]?/giu,
         "$1=[REDACTED]",
       )

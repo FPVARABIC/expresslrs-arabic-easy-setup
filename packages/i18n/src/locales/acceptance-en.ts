@@ -233,4 +233,5 @@ export const acceptanceEn = {
     "The session was imported, and its structure and bounds verified.",
   "accp.msg.importUnreadable": "The results file could not be read.",
   "accp.msg.captureBlock": "Snapshot {at}",
+  "accp.candidateShaUnknown": "Not pinned to a build",
 } as const;

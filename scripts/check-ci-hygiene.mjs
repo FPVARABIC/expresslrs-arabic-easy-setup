@@ -83,6 +83,13 @@ if (!existsSync(canonicalCiPath)) {
     fail("ci.yml does not enforce interface honesty");
   }
 
+  // The corrective-review gates: Arabic left in the English interface, a pinned
+  // locale or direction, a build-stage lock, a dead control, rx-as-tx conflated
+  // with AirPort, or success claimed without verification.
+  if (!/^\s*run:\s*pnpm check:ui-reality\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce interface reality");
+  }
+
   // The Pages deploy runs the tests with VITE_BUILD_SHA set for the whole job.
   // CI must exercise that same shape, or a pinned-build failure first appears
   // during a deploy rather than on the pull request.

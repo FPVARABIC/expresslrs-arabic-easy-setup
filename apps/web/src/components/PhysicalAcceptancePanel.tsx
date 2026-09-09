@@ -53,7 +53,10 @@ const STATUS_OPTIONS: readonly PhysicalAcceptanceStepStatus[] = Object.freeze([
  * separately by the controller, so an operator can see exactly which
  * prerequisite is missing for which operation instead of one blanket verdict.
  */
-type ReportedOperation = Exclude<DeviceOperation, "connect" | "diagnostics">;
+type ReportedOperation = Exclude<
+  DeviceOperation,
+  "connect" | "diagnostics" | "bindingPrerequisites"
+>;
 
 const REPORTED_OPERATIONS: readonly ReportedOperation[] = Object.freeze([
   "settingsWrite",
@@ -478,17 +481,20 @@ export function PhysicalAcceptancePanel({
             }
           />
         </label>
-        <label>
+        <div className="acceptance-candidate-sha">
+          {/*
+            The candidate SHA is the build's own identity, read from the
+            bundle. It is shown rather than offered as a field, because an
+            editable one would only invite an operator to type a provenance
+            the report cannot support.
+          */}
           <span>Candidate SHA</span>
-          <input
-            type="text"
-            value={session.candidateSha}
-            maxLength={80}
-            dir="ltr"
-            placeholder={t("accp.candidateShaPlaceholder")}
-            readOnly
-          />
-        </label>
+          <output dir="ltr">
+            {session.candidateSha === ""
+              ? t("accp.candidateShaUnknown")
+              : session.candidateSha}
+          </output>
+        </div>
       </div>
 
       <label className="acceptance-overall-notes">

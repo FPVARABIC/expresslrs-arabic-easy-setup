@@ -4,6 +4,7 @@ import {
   defaultLocale,
   getDirection,
   supportedLocales,
+  translate,
   type Locale,
 } from "@elrs-easy/i18n";
 
@@ -45,6 +46,7 @@ export function ProductShell({
   useEffect(() => {
     document.documentElement.lang = locale;
     document.documentElement.dir = getDirection(locale);
+    document.title = translate(locale, "app.name");
   }, [locale]);
 
   // A mode switch replaces the whole view, so move focus to the new content

@@ -125,6 +125,7 @@ describe("PhysicalAcceptancePanel", () => {
           },
           settingsRestore: { ready: true, missing: [] },
           binding: { ready: true, missing: [] },
+          bindingPrerequisites: { ready: true, missing: [] },
           firmwareWrite: {
             ready: false,
             missing: [{ key: "wb.need.preparedPackage" }],
@@ -163,6 +164,10 @@ describe("PhysicalAcceptancePanel", () => {
             missing: [{ key: "wb.need.idle" }],
           },
           binding: { ready: false, missing: [{ key: "wb.need.idle" }] },
+          bindingPrerequisites: {
+            ready: false,
+            missing: [{ key: "wb.need.idle" }],
+          },
           firmwareWrite: { ready: false, missing: [{ key: "wb.need.idle" }] },
           recovery: { ready: false, missing: [{ key: "wb.need.idle" }] },
           rxAsTx: { ready: false, missing: [{ key: "wb.need.idle" }] },
@@ -367,8 +372,10 @@ describe("PhysicalAcceptancePanel", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Candidate SHA")).toHaveValue("b".repeat(40));
-    expect(screen.getByLabelText("Candidate SHA")).toHaveAttribute("readonly");
+    // The SHA is shown, not offered as a field: it is the build's own
+    // identity, and an editable one would only invite a forged provenance.
+    expect(document.querySelector("output")?.textContent).toBe("b".repeat(40));
+    expect(screen.queryByLabelText("Candidate SHA")).toBeNull();
     expect(screen.getByLabelText("اسم المشغل المختصر")).toHaveValue("");
     expect(
       screen.getByText(/المحفوظ لا يطابق SHA هذه النسخة/u),
@@ -416,7 +423,7 @@ describe("PhysicalAcceptancePanel", () => {
         /Candidate SHA في الملف لا يطابق SHA هذه النسخة/u,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Candidate SHA")).toHaveValue("b".repeat(40));
+    expect(document.querySelector("output")?.textContent).toBe("b".repeat(40));
   });
 
   it("starts a clean session without disabling the tool", () => {

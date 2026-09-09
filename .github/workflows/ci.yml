@@ -55,6 +55,9 @@ jobs:
       - name: Enforce interface honesty
         run: pnpm check:ui-honesty
 
+      - name: Enforce interface reality
+        run: pnpm check:ui-reality
+
       - name: Check formatting
         run: pnpm format:check
 
