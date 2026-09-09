@@ -124,3 +124,38 @@ export function expressLrsBindingUid(bindPhrase: string): Uint8Array {
   const buildFlag = `-DMY_BINDING_PHRASE=\"${normalized}\"`;
   return md5Bytes(new TextEncoder().encode(buildFlag)).slice(0, 6);
 }
+
+/** Why a typed binding phrase cannot be used, or null when it can. */
+export type BindPhraseIssue =
+  /** Longer than the derivation accepts. */
+  | "TOO_LONG"
+  /** Only whitespace: a UID from blanks cannot be retyped on the other side. */
+  | "BLANK"
+  /** Contains a control character, which cannot survive the build flag. */
+  | "CONTROL_CHARACTER";
+
+/** Longest phrase the ExpressLRS build flag and this derivation accept. */
+export const MAX_BIND_PHRASE_LENGTH = 128 as const;
+
+/**
+ * Checks a phrase before it is used. An empty phrase is deliberately allowed:
+ * it means "do not set one", and derives no UID.
+ */
+export function bindPhraseIssue(phrase: string): BindPhraseIssue | null {
+  const normalized = phrase.normalize("NFC");
+  if (normalized.length === 0) return null;
+  if (normalized.length > MAX_BIND_PHRASE_LENGTH) return "TOO_LONG";
+  if (normalized.trim().length === 0) return "BLANK";
+  if (/\p{Cc}|\p{Cf}/u.test(normalized)) return "CONTROL_CHARACTER";
+  return null;
+}
+
+/**
+ * Overwrites a phrase held in a mutable buffer. JavaScript strings are
+ * immutable, so a phrase that lived in a string cannot be scrubbed in place:
+ * the only honest mitigation is to stop referencing it, which callers do by
+ * clearing the state that held it as soon as the UID has been derived.
+ */
+export function forgetBindPhrase(buffer: Uint8Array): void {
+  buffer.fill(0);
+}

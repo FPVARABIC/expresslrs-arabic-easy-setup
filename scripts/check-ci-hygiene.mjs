@@ -78,6 +78,19 @@ if (!existsSync(canonicalCiPath)) {
   if (!/^\s*run:\s*pnpm check:write-path-integrity\s*$/mu.test(canonicalCi)) {
     fail("ci.yml does not enforce device write-path integrity");
   }
+
+  if (!/^\s*run:\s*pnpm check:ui-honesty\s*$/mu.test(canonicalCi)) {
+    fail("ci.yml does not enforce interface honesty");
+  }
+
+  // Browser QA is the only thing that can make a BROWSER_VERIFIED claim. If it
+  // stops running, every such claim in the matrix becomes unsupported.
+  if (!canonicalCi.includes("pnpm qa:browser")) {
+    fail("ci.yml does not run browser QA against the shipped build");
+  }
+  if (!canonicalCi.includes("playwright install")) {
+    fail("ci.yml does not install the browser QA runtime");
+  }
   if (!canonicalCi.includes("VITE_BUILD_SHA: ${{ github.sha }}")) {
     fail("ci.yml does not bind the Pages artifact to github.sha");
   }

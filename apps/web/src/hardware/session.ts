@@ -896,6 +896,15 @@ export class ExpressLrsHardwareSession {
     });
   }
 
+  /**
+   * Observes every CRSF frame the device emits, including unsolicited link
+   * statistics. This is how a bind attempt can be graded on telemetry instead
+   * of on a command acknowledgement alone.
+   */
+  public subscribeFrames(listener: (frame: CrsfFrame) => void): () => void {
+    return this.#link.subscribe(listener);
+  }
+
   public async startBinding(signal?: AbortSignal): Promise<BindingResult> {
     this.#assertOpen();
     assertHardwareOperationActive(

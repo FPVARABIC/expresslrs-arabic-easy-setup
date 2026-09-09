@@ -57,7 +57,10 @@ export function validateFirmwareOptions(input: {
   const options = input.options;
   const region = boundedText("region", options.region, 64, false);
   const domain = boundedInteger("domain", options.domain, 0, 255);
-  const bindPhrase = boundedText("bindPhrase", options.bindPhrase, 192, true);
+  // 128 characters is the bound the UID derivation itself enforces. Accepting
+  // more here would pass validation and then throw inside packaging, which
+  // reads as a build failure rather than as an input the operator can fix.
+  const bindPhrase = boundedText("bindPhrase", options.bindPhrase, 128, true);
   const wifiSsid = boundedText("wifiSsid", options.wifiSsid, 32, true);
   const wifiPassword = boundedText(
     "wifiPassword",

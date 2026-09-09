@@ -28,10 +28,12 @@ const WRITE_MODULES = [
 ];
 
 /**
- * The single reviewed module allowed to import them. It must request a
- * capability from the authority before every over-the-wire write.
+ * The single reviewed module allowed to import them: the device controller
+ * both product views share. It must request a capability from the authority
+ * before every over-the-wire write. Keeping it out of the view layer is what
+ * makes "Easy Mode has no write path of its own" checkable.
  */
-const WRITE_BOUNDARY = "apps/web/src/components/ExpressLrsParityWorkbench.tsx";
+const WRITE_BOUNDARY = "apps/web/src/hardware/useDeviceController.ts";
 
 // 1. No user interface may reach a flasher except through the boundary.
 function* walkSources(directory) {
@@ -132,6 +134,7 @@ if (!existsSync(path.join(root, authorityPath))) {
 //    not ship.
 const UI_FILES = [
   "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
+  "apps/web/src/components/BuildBanner.tsx",
   "apps/web/src/components/EasySetup.tsx",
   "apps/web/src/components/ProductShell.tsx",
 ];

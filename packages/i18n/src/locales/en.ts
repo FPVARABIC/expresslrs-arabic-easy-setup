@@ -1,10 +1,7 @@
 export const en = {
   "app.name": "ExpressLRS Easy Setup",
-  "app.shortName": "ELRS Easy",
-  "app.tagline": "Connect with confidence",
   "app.independent":
     "Compatible with ExpressLRS — independent community project, not affiliated with or endorsed by ExpressLRS LLC",
-  "app.mockNotice": "Development preview. Device writes remain disabled.",
   "navigation.skip": "Skip to content",
   "language.arabic": "العربية",
   "language.english": "English",
@@ -12,50 +9,6 @@ export const en = {
   "mode.easy": "Easy mode",
   "mode.advanced": "Advanced mode",
   "mode.advancedHint": "Simulation, device reading, and technical details",
-  "status.systemReady": "Safe preview",
-  "status.readOnly": "Read-only simulation",
-  "status.mockBadge": "MOCK",
-  "status.previewBadge": "HARDWARE NOT TESTED",
-  "home.eyebrow": "Three direct steps",
-  "home.title": "Set up the device",
-  "home.description":
-    "Connect the device. The app identifies it and shows only the required actions.",
-  "home.stepsLabel": "Setup flow",
-  "home.step.connect": "Connect the device",
-  "home.step.identify": "Automatic identification",
-  "home.step.complete": "Run and verify",
-  "home.actionsTitle": "Essential actions",
-  "home.actionsDescription": "Choose an action. Only required steps are shown.",
-  "home.mockLabel": "Test lab",
-  "home.mockHelp":
-    "These scenarios exercise the UI safely until real adapters are validated.",
-  "real.kicker": "Technical spike · read only",
-  "real.heading": "Read your ExpressLRS device over Wi-Fi",
-  "real.description":
-    "Join the device Wi-Fi first, choose one official ExpressLRS address, then start the read explicitly. The app never scans your network.",
-  "real.impactTitle": "Before you connect",
-  "real.impactDescription":
-    "Putting ExpressLRS into Wi-Fi mode stops its normal RF link. A telemetry or control-link disconnect while it is in Wi-Fi mode is expected.",
-  "real.originLabel": "ExpressLRS device address",
-  "real.origin.ap": "Device access point · 10.0.0.1",
-  "real.origin.rx": "Receiver (RX) · elrs_rx.local",
-  "real.origin.tx": "Transmitter (TX) · elrs_tx.local",
-  "real.readAction": "Read device information",
-  "real.refreshAction": "Read device information again",
-  "real.cancelAction": "Cancel read",
-  "real.retryAction": "Try again",
-  "real.loading": "Reading the device configuration safely…",
-  "real.idleHelp":
-    "Your browser may request Local Network Access. No Binding, update, reboot, or configuration request is sent.",
-  "real.connectionHelp":
-    "If the read fails, check Wi-Fi mode, the network, the selected address, and Local Network Access permission. The browser may also block the request because of CORS, or the connection may time out.",
-  "real.changeOriginHelp":
-    "If this address does not work, choose another official address that matches how your device is connected, then start a new read.",
-  "real.readOnlyBadge": "GET /config only",
-  "real.unvalidatedBadge": "Hardware validation pending",
-  "real.reportedBadge": "Device-reported",
-  "real.snapshotNotice":
-    "This is a snapshot from the last completed read, not a live connection status.",
   "real.progress.heading": "Read progress",
   "real.progress.preparing": "Preparing a read-only request",
   "real.progress.discovering": "Trying to reach the selected device address",
@@ -78,186 +31,6 @@ export const en = {
     "After connectivity was restored, at least one reported Target, Firmware version, or TX/RX role differed from the first successful read. Review it before continuing.",
   "real.reconnect.required":
     "Put the device back in Wi-Fi mode, make sure you are on the correct network, then read it again.",
-  "real.successTitle": "Device facts collected",
-  "real.successDescription":
-    "Success here means only that safe reported fields were collected and rebuilt. It does not confirm the Target or hardware support.",
-  "real.unknownTitle": "Target not confirmed",
-  "real.unknownDescription":
-    "These facts come from one self-reported Firmware source. Binding and update remain blocked until an independent cross-check is available.",
-  "real.errorTitle": "The device could not be read",
-  "real.errorDescription": "Reason: {message}",
-  "real.retryUnavailable":
-    "Automatic retry will not help for this response. Choose another address or a device with a supported version.",
-  "real.cancelled": "The read was cancelled. No device change was requested.",
-  "real.noSecrets":
-    "UID, Wi-Fi options, SSID, password, and the raw response are not retained or displayed.",
-  "real.mockDivider": "Separate experimental real-device read",
-  "real.fact.product": "Reported product",
-  "real.fact.target": "Reported Target",
-  "real.fact.version": "Reported Firmware",
-  "real.fact.commit": "Reported commit",
-  "real.fact.role": "Reported device role",
-  "real.fact.radio": "Reported radio family",
-  "real.fact.band": "Reported band capability",
-  "real.fact.regLow": "Reported low-band domain",
-  "real.fact.regHigh": "Reported high-band domain",
-  "real.fact.custom": "Custom hardware reported",
-  "real.value.yes": "Yes",
-  "real.value.no": "No",
-  "real.value.lowBand": "Low band",
-  "real.value.highBand": "High band",
-  "real.value.dualBand": "Low + high band",
-  "real.value.unknownBand": "Not reported",
-  "task.bind.title": "Bind transmitter and receiver",
-  "task.bind.description": "Safe binding with verification after reconnect.",
-  "task.bind.action": "Start",
-  "task.update.title": "Update to the latest version",
-  "task.update.description":
-    "The app identifies the device and its version before updating.",
-  "task.update.action": "Check and update",
-  "task.setup.title": "Essential settings",
-  "task.setup.description": "Only the required options, previewed first.",
-  "task.setup.action": "Open settings",
-  "task.diagnose.title": "Diagnose a problem",
-  "task.diagnose.description":
-    "Collect evidence and explain safe next steps in plain language.",
-  "task.diagnose.action": "Run diagnostics",
-  "task.selected": "Selected task",
-  "task.previewOnly": "Safe preview. No command is sent to real hardware.",
-  "task.confirmTitle": "Run the safe preview",
-  "task.confirmDescription":
-    "The preview shows the complete flow without accessing real hardware.",
-  "task.confirmAction": "Run preview",
-  "task.cancelAction": "Cancel",
-  "task.blocked":
-    "This scenario does not satisfy the identity and connection gates, so binding and update stay disabled.",
-  "task.mockRunning": "Running the preview…",
-  "task.mockPending": "The preview is ready.",
-  "task.mockVerified": "Preview complete. The result was verified.",
-  "task.mockNotVerified": "The preview stopped before verification.",
-  "task.mockError": "The preview stopped: {message}",
-  "device.heading": "Detected device",
-  "device.none": "No device connected",
-  "device.noneDescription":
-    "Connect a supported device when a real provider is available. For now, choose a simulation above.",
-  "device.receiver": "Receiver (RX)",
-  "device.transmitter": "Transmitter (TX)",
-  "device.target": "Target",
-  "device.firmware": "Firmware",
-  "device.band": "Frequency band",
-  "device.connection": "Connection",
-  "device.connection.connected": "Connected",
-  "device.connection.reconnecting": "Reconnecting",
-  "device.connection.disconnected": "Disconnected",
-  "device.manufacturer": "Manufacturer",
-  "device.unknown": "Not confirmed",
-  "simple.device.kicker": "Device status",
-  "simple.device.connected": "ExpressLRS device",
-  "simple.device.demo": "Demonstration data",
-  "simple.device.installed": "Installed version",
-  "simple.device.latest": "Latest approved version",
-  "simple.device.upToDate": "Up to date",
-  "simple.device.updateAvailable": "Update available",
-  "simple.device.connect": "Connect the device to begin.",
-  "confidence.label": "Detection confidence",
-  "confidence.confirmed": "Confirmed",
-  "confidence.high": "High confidence",
-  "confidence.ambiguous": "Ambiguous",
-  "confidence.unknown": "Unknown",
-  "confidence.confirmedHelp":
-    "The identity is supported by matching independent evidence.",
-  "confidence.highHelp":
-    "Strong evidence exists, but the write gate still requires confirmation.",
-  "confidence.ambiguousHelp":
-    "More than one target matches. Sensitive operations are blocked.",
-  "confidence.unknownHelp":
-    "There is not enough evidence to identify this device safely.",
-  "discovery.heading": "Discovery progress",
-  "discovery.description": "Every claim stays tied to its source.",
-  "discovery.discover": "Discover connection",
-  "discovery.identify": "Identify device",
-  "discovery.crossCheck": "Cross-check target",
-  "discovery.ready": "Ready for a safe workflow",
-  "discovery.complete": "Complete",
-  "discovery.active": "In progress",
-  "discovery.pending": "Waiting",
-  "discovery.blocked": "Blocked",
-  "evidence.heading": "Identity evidence",
-  "evidence.source": "Source",
-  "evidence.value": "Observed value",
-  "evidence.strength": "Strength",
-  "evidence.runtime": "Device runtime configuration",
-  "evidence.mdns": "Local service announcement",
-  "evidence.catalog": "Synthetic target fixture",
-  "evidence.usb": "USB interface",
-  "evidence.strong": "Strong",
-  "evidence.supporting": "Supporting",
-  "evidence.weak": "Weak",
-  "safety.heading": "Your device stays protected",
-  "safety.description":
-    "No update or binding workflow may report success until the expected device reconnects and its result is verified.",
-  "safety.blockedTitle": "Sensitive operations are blocked",
-  "safety.blockedDescription":
-    "We could not resolve one exact target. The app will never guess which firmware belongs to this device.",
-  "safety.readOnlyTitle": "Read-only foundation",
-  "safety.readOnlyDescription":
-    "This screen uses deterministic mock scenarios. Hardware access and write providers are intentionally disabled.",
-  "advanced.heading": "Technical details",
-  "advanced.health.heading": "Read-only device health",
-  "advanced.session": "Session",
-  "advanced.owner": "Session owner",
-  "advanced.ownerValue": "Web foundation preview",
-  "advanced.provider": "Provider",
-  "advanced.providerValue": "Deterministic Mock provider",
-  "advanced.operation": "Operation state",
-  "advanced.operationValue": "IDLE · READ_ONLY",
-  "advanced.log": "Local operation log",
-  "advanced.logLevel": "INFO",
-  "advanced.logEntry": "Mock scenario loaded; no device command was sent.",
-  "advanced.exportDescription":
-    "The copied JSON contains only synthetic confidence, Target, provider, and validation level. Session identifiers, raw evidence, hardware identifiers, and secrets are excluded.",
-  "advanced.copy": "Copy technical details",
-  "advanced.copied": "Details copied",
-  "advanced.copyFailed":
-    "Copy failed. Check clipboard permission and try again.",
-  "scenario.disconnected": "No device",
-  "scenario.rx24": "Known 2.4 GHz transmitter",
-  "scenario.txSubGhz": "Known Sub-GHz receiver",
-  "scenario.dualBand": "Known dual-band transmitter",
-  "scenario.ambiguous": "Ambiguous target",
-  "scenario.reconnecting": "Device reconnecting",
-  "scenarioValue.manufacturer.synthetic": "Synthetic fixture",
-  "scenarioValue.manufacturer.unconfirmed": "Not confirmed",
-  "scenarioValue.model.txAlpha2g4": "TX Alpha 2.4",
-  "scenarioValue.model.rxBetaSubGhz": "RX Beta Sub-GHz",
-  "scenarioValue.model.txGammaDual": "TX Gamma Dual Band",
-  "scenarioValue.model.esp8285Receiver": "ESP8285 receiver",
-  "scenarioValue.model.rxReconnect": "RX Beta reconnecting",
-  "scenarioValue.target.txAlpha2g4": "fixture.tx.alpha-2g4",
-  "scenarioValue.target.rxBetaSubGhz": "fixture.rx.beta-subghz",
-  "scenarioValue.target.txGammaDual": "fixture.tx.gamma-dual",
-  "scenarioValue.target.ambiguous": "2 possible targets",
-  "scenarioValue.firmware.v410": "ExpressLRS 4.1.0",
-  "scenarioValue.firmware.v353": "ExpressLRS 3.5.3",
-  "scenarioValue.band.2g4": "2.4 GHz",
-  "scenarioValue.band.subGhz": "Sub-GHz · 868/915 MHz",
-  "scenarioValue.band.dual": "2.4 GHz + Sub-GHz",
-  "scenarioValue.evidence.txVersion410": "type=TX · version=4.1.0",
-  "scenarioValue.evidence.subGhzRx": "Sub-GHz radio · RX",
-  "scenarioValue.evidence.lr1121Dual": "LR1121 · dual-band",
-  "scenarioValue.evidence.esp8285": "ESP8285",
-  "scenarioValue.evidence.ambiguousCandidates": "Candidate A · Candidate B",
-  "scenarioValue.evidence.awaitSameSession": "Awaiting the same device session",
-  "scenarioValue.session.rx24": "MOCK-RX24-7F3A",
-  "scenarioValue.session.txSubGhz": "MOCK-TXSG-04C1",
-  "scenarioValue.session.dualBand": "MOCK-DUAL-E221",
-  "scenarioValue.session.ambiguous": "MOCK-AMB-912D",
-  "scenarioValue.session.reconnecting": "MOCK-RECON-33E8",
-  "scenarioValue.session.none": "NO-SESSION",
-  "footer.localFirst": "Local-first",
-  "footer.noCloud": "Device data stays on this device by default.",
-  "footer.version": "M2A public preview",
-  "footer.notices": "Third-party notices",
   "error.DEVICE_NOT_FOUND": "The device could not be found.",
   "error.DEVICE_BUSY": "Another operation is using this device.",
   "error.PERMISSION_DENIED": "Permission to access the device was denied.",
@@ -283,6 +56,34 @@ export const en = {
   "error.INTERNAL_ERROR": "An unexpected internal error occurred.",
   "debug.englishOnly": "English fallback verified",
 
+  "transport.INSECURE_CONTEXT":
+    "This page is not running in a secure context, so the browser exposes no device APIs at all. Open it over HTTPS or from localhost.",
+  "transport.NO_SERIAL_TRANSPORT":
+    "This browser exposes neither the Web Serial API nor a native bridge, so no device port can be opened here. Use a desktop Chrome, Edge or Opera, or a host application that provides the bridge.",
+  "transport.USB_ONLY":
+    "This browser exposes WebUSB but not Web Serial, so CRSF identification and serial flashing cannot run here. Only an STM32 DFU device could be reached over USB.",
+  "transport.detected":
+    "Detected: Web Serial {webSerial}, WebUSB {webUsb}, native bridge {bridge}, secure context {secure}.",
+  "build.stage": "Hardware validation beta",
+  "build.note":
+    "Every operation is available. Nothing has been proven on a physical device yet.",
+  "build.copyFull": "Copy the full commit",
+  "build.copied": "Copied",
+  "build.copyFailed":
+    "Copy failed. The full commit is in the code element's title.",
+  "build.unpinned":
+    "This build carries no commit identity, so a result recorded from it cannot be tied to one tree.",
+  "diagnostics.heading": "Diagnostics",
+  "diagnostics.intro":
+    "A report of what this session actually observed: the browser's capabilities, what the device reported, the package that was prepared, and the recovery state.",
+  "diagnostics.privacy":
+    "The binding phrase, the derived UID, Wi-Fi credentials and the USB serial number are never collected, and free text is redacted on the way out.",
+  "diagnostics.show": "Show the report",
+  "diagnostics.copy": "Copy the report",
+  "diagnostics.copied": "Copied",
+  "diagnostics.copyFailed": "Copy failed. Select the report text manually.",
+  "diagnostics.downloadJson": "Download JSON",
+  "diagnostics.downloadMarkdown": "Download Markdown",
   "easy.title": "Set up ExpressLRS",
   "easy.intro":
     "Choose what you want to do. The app walks you through it: connect the device, identify it, check what it supports, run the operation, then verify the result.",
@@ -291,22 +92,10 @@ export const en = {
   "easy.roleRx": "Receiver (RX)",
   "easy.connect": "Identify my device",
   "easy.connecting": "Reading the device…",
-  "easy.cancel": "Cancel",
-  "easy.identityHeading": "Your device",
   "easy.fieldProduct": "Model",
   "easy.fieldFirmware": "Firmware version",
-  "easy.fieldHardware": "Hardware version",
-  "easy.fieldRole": "Type",
   "easy.confidence": "Identification confidence",
   "easy.confidenceConfirmed": "Confirmed by the device itself",
-  "easy.confidenceUnconfirmed": "Not confirmed",
-  "easy.recheck": "Re-check the device",
-  "easy.rechecking": "Re-checking…",
-  "easy.recheckOk": "The same device answered again with the same identity.",
-  "easy.recheckChanged":
-    "The device that answered is not the one identified before. The session was closed for safety.",
-  "easy.disconnected":
-    "The device was disconnected. Reconnect it and identify again.",
   "easy.disconnect": "Close the connection",
   "easy.noHardwareClaim":
     "Nothing here is proof that a device was bound, configured, or flashed.",
@@ -318,8 +107,6 @@ export const en = {
   "easy.copied": "Copied",
   "easy.copyFailed": "Copy failed. Select the text manually.",
   "easy.errorHeading": "Could not identify the device",
-  "easy.browserUnsupported":
-    "This browser cannot talk to USB devices. Use Chrome or Edge on a computer, over HTTPS.",
   "easy.fail.CANCELLED": "You cancelled before the device answered.",
   "easy.fail.TIMED_OUT": "The device did not answer in time.",
   "easy.fail.INVALID_PARAMETER_TABLE":
@@ -349,17 +136,13 @@ export const en = {
     "Connect the device over USB, then choose its port in the browser prompt.",
   "easy.run.binding": "Put the device into bind mode",
   "easy.run.settings": "Apply the change",
-  "easy.run.firmware": "Continue in advanced mode",
+  "easy.run.firmware": "Start the firmware update",
   "easy.run.busy": "Working…",
   "easy.binding.sent":
     "The device accepted the bind command. Bring the other side into bind range now and confirm below whether the link came up.",
   "easy.binding.confirmQuestion": "Did the other side link",
   "easy.binding.linked": "The link came up",
   "easy.binding.notLinked": "No link yet",
-  "easy.binding.verified":
-    "You observed the link. Binding is recorded as confirmed by that observation, not by the command alone.",
-  "easy.binding.unverified":
-    "The command was accepted but no link was observed, so binding is not reported as successful. Check the other side and try again.",
   "easy.settings.current": "Current value on the device",
   "easy.settings.choose": "Setting",
   "easy.settings.newValue": "New value",
@@ -396,6 +179,61 @@ export const en = {
     "Confirm stable power, and a fitted transmitter antenna, before writing.",
   "easy.deny.USER_CONFIRMATION_MISSING":
     "Confirm the operation before it runs.",
+  "easy.binding.observing":
+    "Bind command accepted. Watching the device's link telemetry — bring the other side into range now.",
+  "easy.binding.telemetry":
+    "The device reported a live RF link ({quality}% link quality). This is machine evidence, not a report.",
+  "easy.binding.userConfirmed":
+    "Recorded as confirmed by you. The device did not report link telemetry, so this is your observation and not machine evidence.",
+  "easy.binding.commandOnly":
+    "The command was accepted, but no link was observed and none was reported. Binding is not recorded as successful.",
+  "easy.binding.ready":
+    "The other side is ready to bind, and power and antennas are in a safe state",
+  "easy.fw.bindPhrase": "Binding phrase (optional)",
+  "easy.fw.bindPhraseHint":
+    "Flash the transmitter and the receiver with the same phrase. A different phrase on either side means they will not link.",
+  "easy.fw.bindPhraseConfigured":
+    "A binding phrase will be compiled into this package.",
+  "easy.fw.bindPhraseUnverifiable":
+    "The device does not report its UID back over CRSF, so a matching phrase is proven by a live link, not by this write.",
+  "easy.fw.bindPhrase.TOO_LONG":
+    "The phrase is longer than 128 characters, which the derivation cannot accept.",
+  "easy.fw.bindPhrase.BLANK":
+    "The phrase is only spaces. Leave it empty to set none, or type a phrase you can retype exactly on the other side.",
+  "easy.fw.bindPhrase.CONTROL_CHARACTER":
+    "The phrase contains an invisible control character. Retype it as plain text.",
+  "easy.fw.loadCatalog": "Prepare the official update source",
+  "easy.fw.catalogReady":
+    "Loaded {releases} buildable versions and {targets} official Targets.",
+  "easy.fw.release": "ExpressLRS version",
+  "easy.fw.target": "Target for this device",
+  "easy.fw.targetExact":
+    "Matched to one official Target from the identity the device reported.",
+  "easy.fw.targetConfirm":
+    "Type the Target key exactly to confirm it belongs to this device",
+  "easy.fw.region": "Regulatory region",
+  "easy.fw.method": "Update path",
+  "easy.fw.build": "Prepare and verify the official package",
+  "easy.fw.prepared":
+    "Prepared {segments} segments with a SHA-256 for each. Download the recovery package before any write.",
+  "easy.fw.downloadRecovery": "Download the recovery package",
+  "easy.fw.recoverySaved":
+    "I checked the recovery package is saved on my computer",
+  "easy.fw.power":
+    "Power is stable and will not be interrupted during the write",
+  "easy.fw.antenna": "The transmitter antenna is fitted",
+  "easy.fw.write": "Write the firmware to the device",
+  "easy.fw.writeBlocked":
+    "The write stays unavailable until every condition above is met. Each unmet one is listed there.",
+  "easy.fw.progress": "{stage}: {written} of {total} bytes",
+  "easy.fw.cancel": "Stop the current step",
+  "easy.fw.pending":
+    "An interrupted update is waiting for recovery at stage {stage}. Choose the matching recovery package to finish it.",
+  "easy.fw.recoverFile": "Choose the recovery package",
+  "easy.fw.recoveryNote":
+    "Recovery reopens the port and writes the package saved before this update, then reads the identity back.",
+  "easy.fw.verified":
+    "The device came back and reported the expected Target and version after rebooting.",
 } as const;
 
 export type MessageKey = keyof typeof en;

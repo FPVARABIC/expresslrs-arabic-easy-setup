@@ -52,6 +52,9 @@ jobs:
       - name: Enforce device write-path integrity
         run: pnpm check:write-path-integrity
 
+      - name: Enforce interface honesty
+        run: pnpm check:ui-honesty
+
       - name: Check formatting
         run: pnpm format:check
 
@@ -76,6 +79,23 @@ jobs:
         run: |
           pnpm --filter @elrs-easy/web build
           pnpm check:pages-build
+
+      - name: Install the browser QA runtime
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run browser QA against the shipped build
+        run: pnpm qa:browser
+
+      - name: Preserve browser QA report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-qa-${{ github.run_attempt }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Generate dependency license inventory
         run: pnpm licenses:report

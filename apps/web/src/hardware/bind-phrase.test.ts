@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { bytesToHex, expressLrsBindingUid, md5Bytes } from "./bind-phrase";
+import {
+  MAX_BIND_PHRASE_LENGTH,
+  bindPhraseIssue,
+  bytesToHex,
+  expressLrsBindingUid,
+  forgetBindPhrase,
+  md5Bytes,
+} from "./bind-phrase";
 
 describe("ExpressLRS binding phrase UID", () => {
   it.each([
@@ -31,5 +38,37 @@ describe("ExpressLRS binding phrase UID", () => {
 
   it("rejects an unbounded phrase", () => {
     expect(() => expressLrsBindingUid("x".repeat(129))).toThrow(RangeError);
+  });
+});
+
+describe("binding phrase validation", () => {
+  it("accepts an empty phrase as a deliberate choice to set none", () => {
+    expect(bindPhraseIssue("")).toBeNull();
+  });
+
+  it("accepts a phrase the derivation can use", () => {
+    expect(bindPhraseIssue("FPV Arabic")).toBeNull();
+    expect(bindPhraseIssue("x".repeat(MAX_BIND_PHRASE_LENGTH))).toBeNull();
+  });
+
+  it("refuses a phrase longer than the derivation accepts", () => {
+    expect(bindPhraseIssue("x".repeat(MAX_BIND_PHRASE_LENGTH + 1))).toBe(
+      "TOO_LONG",
+    );
+  });
+
+  it("refuses a phrase that is only whitespace", () => {
+    expect(bindPhraseIssue("   ")).toBe("BLANK");
+  });
+
+  it("refuses an invisible control or format character", () => {
+    expect(bindPhraseIssue("phrase\u0007")).toBe("CONTROL_CHARACTER");
+    expect(bindPhraseIssue("phrase\u200e")).toBe("CONTROL_CHARACTER");
+  });
+
+  it("overwrites a phrase buffer in place", () => {
+    const buffer = new TextEncoder().encode("secret phrase");
+    forgetBindPhrase(buffer);
+    expect([...buffer].every((byte) => byte === 0)).toBe(true);
   });
 });

@@ -109,11 +109,25 @@ const shell = await readFile(
 if (!main.includes("<ProductShell />")) {
   failures.push("the public entrypoint must mount the product shell");
 }
-if (!shell.includes("<ExpressLrsParityWorkbench />")) {
-  failures.push("the product shell must mount the canonical workbench");
+if (
+  !shell.includes("<ExpressLrsParityWorkbenchView controller={controller} />")
+) {
+  failures.push(
+    "the product shell must mount the canonical workbench over the shared controller",
+  );
 }
 if (!shell.includes("<EasySetup")) {
   failures.push("the product shell must mount Easy Mode");
+}
+if (!shell.includes("controller={controller}")) {
+  failures.push("the product shell must hand Easy Mode the shared controller");
+}
+// One controller means one session, one identity, and one write authority for
+// both views. A second call here would silently give each mode its own device.
+if ((shell.match(/useDeviceController\(/gu) ?? []).length !== 1) {
+  failures.push(
+    "the product shell must create exactly one device controller for both modes",
+  );
 }
 if (!packageJson.includes('"check:physical-acceptance"')) {
   failures.push("package.json does not expose the permanent acceptance gate");
