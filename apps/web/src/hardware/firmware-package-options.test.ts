@@ -92,13 +92,18 @@ describe("firmware package option gate", () => {
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
-  it("fails before acquisition for unverified receiver-as-transmitter packaging", async () => {
+  it("refuses receiver-as-transmitter before acquisition when the Target cannot carry it", async () => {
     const fetchImplementation = vi.fn();
 
     await expect(
       prepareOfficialFirmwarePackage({
         release,
-        target: { ...target, role: "rx" },
+        // An STM32 receiver's packed configuration block has no AirPort field.
+        target: {
+          ...target,
+          role: "rx",
+          config: { ...target.config, platform: "stm32" },
+        },
         options: {
           region: "FCC",
           domain: 0,

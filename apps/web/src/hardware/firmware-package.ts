@@ -1021,6 +1021,7 @@ export async function prepareOfficialFirmwarePackage(input: {
   const validatedOptions = validateFirmwareOptions({
     target: input.target,
     options: input.options,
+    release: input.release,
   });
   assertRegulatorySelection(input.target, validatedOptions);
   assertReleaseCompatibility(input.release, input.target);

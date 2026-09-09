@@ -116,7 +116,10 @@ export function ProductShell({
             >
               {t("easy.easyCta")}
             </button>
-            <ExpressLrsParityWorkbenchView controller={controller} />
+            <ExpressLrsParityWorkbenchView
+              controller={controller}
+              locale={locale}
+            />
           </>
         )}
       </main>

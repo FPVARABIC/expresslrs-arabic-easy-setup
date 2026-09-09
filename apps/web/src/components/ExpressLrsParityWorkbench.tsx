@@ -1,3 +1,5 @@
+import { createTranslator, getDirection, type Locale } from "@elrs-easy/i18n";
+
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
@@ -20,6 +22,7 @@ import {
 
 export interface ExpressLrsParityWorkbenchProps {
   readonly hardwareConnector?: HardwareDriverConnector;
+  readonly locale?: Locale;
 }
 
 /**
@@ -28,15 +31,24 @@ export interface ExpressLrsParityWorkbenchProps {
  */
 export function ExpressLrsParityWorkbench({
   hardwareConnector,
+  locale = "ar",
 }: ExpressLrsParityWorkbenchProps = {}) {
   const controller = useDeviceController(
     hardwareConnector === undefined ? {} : { hardwareConnector },
   );
-  return <ExpressLrsParityWorkbenchView controller={controller} />;
+  return (
+    <ExpressLrsParityWorkbenchView controller={controller} locale={locale} />
+  );
 }
 
 export interface ExpressLrsParityWorkbenchViewProps {
   readonly controller: DeviceController;
+  /**
+   * Chosen by the operator in the shell. The workbench used to hardcode Arabic
+   * and `dir="rtl"`, so choosing English left the technical view unreadable in
+   * the wrong direction.
+   */
+  readonly locale: Locale;
 }
 
 /**
@@ -46,7 +58,9 @@ export interface ExpressLrsParityWorkbenchViewProps {
  */
 export function ExpressLrsParityWorkbenchView({
   controller,
+  locale,
 }: ExpressLrsParityWorkbenchViewProps) {
+  const t = createTranslator(locale);
   const {
     antennaAcknowledged,
     availableMethods,
@@ -57,6 +71,7 @@ export function ExpressLrsParityWorkbenchView({
     cancelCurrentOperation,
     cancellable,
     captureDiagnostics,
+    rxAsTxSupport,
     captureDiagnosticsWithGrants,
     catalog,
     catalogState,
@@ -134,7 +149,7 @@ export function ExpressLrsParityWorkbenchView({
   } = controller;
 
   return (
-    <main className="parity-shell" dir="rtl">
+    <main className="parity-shell" dir={getDirection(locale)}>
       <header className="parity-header">
         <div>
           <span className="section-kicker">ELRS السهل · Hardware Lab</span>
@@ -879,12 +894,30 @@ export function ExpressLrsParityWorkbenchView({
                 <span>R9MM Mini SBUS</span>
               </label>
               <label className="check-field">
-                <input type="checkbox" checked={false} disabled readOnly />
-                <span>
-                  استخدام RX كمرسل — مقفل حتى تنفيذ تحويل ملف TX ومخطط العتاد
-                  والتحقق منهما
-                </span>
+                <input
+                  type="checkbox"
+                  checked={options.receiverAsTransmitter}
+                  disabled={busy || !rxAsTxSupport.supported}
+                  onChange={(event) =>
+                    updateOption(
+                      "receiverAsTransmitter",
+                      event.currentTarget.checked,
+                    )
+                  }
+                />
+                <span>{t("workbench.options.rxAsTx")}</span>
               </label>
+              {rxAsTxSupport.supported ? null : (
+                <p
+                  className="parity-note"
+                  data-rx-as-tx-reason={rxAsTxSupport.reason}
+                >
+                  {t(`workbench.rxAsTx.${rxAsTxSupport.reason}`, {
+                    target: rxAsTxSupport.targetName,
+                    platform: rxAsTxSupport.platform,
+                  })}
+                </p>
+              )}
             </>
           )}
         </div>
@@ -1077,7 +1110,7 @@ export function ExpressLrsParityWorkbenchView({
       />
 
       <DiagnosticsPanel
-        locale="ar"
+        locale={locale}
         capture={captureDiagnostics}
         captureWithGrants={captureDiagnosticsWithGrants}
       />

@@ -1,4 +1,7 @@
+import { workbenchEn } from "./workbench-en";
+
 export const en = {
+  ...workbenchEn,
   "app.name": "ExpressLRS Easy Setup",
   "app.independent":
     "Compatible with ExpressLRS — independent community project, not affiliated with or endorsed by ExpressLRS LLC",

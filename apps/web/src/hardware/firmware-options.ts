@@ -1,4 +1,9 @@
-import type { ExpressLrsFirmwareOptions, OfficialTarget } from "./parity-types";
+import { evaluateRxAsTxSupport } from "./rx-as-tx";
+import type {
+  ExpressLrsFirmwareOptions,
+  OfficialRelease,
+  OfficialTarget,
+} from "./parity-types";
 
 export class FirmwareOptionsError extends Error {
   public constructor(
@@ -53,6 +58,8 @@ function boundedText(
 export function validateFirmwareOptions(input: {
   readonly target: OfficialTarget;
   readonly options: ExpressLrsFirmwareOptions;
+  /** Optional: lets the AirPort check reject a release that predates it. */
+  readonly release?: OfficialRelease;
 }): ExpressLrsFirmwareOptions {
   const options = input.options;
   const region = boundedText("region", options.region, 64, false);
@@ -113,10 +120,18 @@ export function validateFirmwareOptions(input: {
   });
 
   if (validated.receiverAsTransmitter) {
-    throw new FirmwareOptionsError(
-      "receiverAsTransmitter",
-      "Receiver-as-transmitter packaging is disabled until its TX binary and hardware-layout transformations are implemented and verified",
-    );
+    // Whether a device can run as a transmitter follows from where the
+    // `is-airport` option lands in its firmware, not from the project's phase.
+    const support = evaluateRxAsTxSupport({
+      target: input.target,
+      release: input.release ?? null,
+    });
+    if (!support.supported) {
+      throw new FirmwareOptionsError(
+        "receiverAsTransmitter",
+        `UNSUPPORTED_BY_TARGET (${support.reason}): ${support.targetName === "" ? "no target" : support.targetName} on platform ${support.platform === "" ? "unknown" : support.platform} cannot carry the AirPort option`,
+      );
+    }
   }
   return validated;
 }

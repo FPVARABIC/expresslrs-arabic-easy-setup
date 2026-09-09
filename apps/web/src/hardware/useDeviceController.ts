@@ -55,6 +55,7 @@ import {
   regulatoryRegionByKey,
   regulatoryRegionsForRadioKey,
 } from "./regulatory-domain";
+import { evaluateRxAsTxSupport, type RxAsTxSupport } from "./rx-as-tx";
 import {
   clearRecoveryCheckpoint,
   loadRecoveryCheckpoint,
@@ -476,6 +477,13 @@ export function useDeviceController({
   const selectedSetting = writableParameters.find(
     (parameter) => String(parameter.id) === selectedSettingId,
   );
+  // Derived from the chosen Target and release, so the answer changes with the
+  // device rather than with the build.
+  const rxAsTxSupport: RxAsTxSupport = evaluateRxAsTxSupport({
+    target: selectedTarget,
+    release: selectedRelease,
+  });
+
   const exactHardwareTarget =
     selectedTarget !== null &&
     targetMatch?.confidence === "EXACT" &&
@@ -2245,6 +2253,7 @@ export function useDeviceController({
     deviceWriteLockMessage,
     subscribeFrames,
     canObserveFrames,
+    rxAsTxSupport,
     wipeSecretOptions,
     captureDiagnostics,
     captureDiagnosticsWithGrants,

@@ -268,6 +268,65 @@ describe("official firmware package preparation", () => {
     expect(recovery["segments/firmware.bin"]).toEqual(application);
   });
 
+  // AirPort is what "run this receiver as a transmitter" actually is. The
+  // option has to reach the firmware's own options block, not merely be
+  // accepted by validation.
+  it("writes the AirPort option into a supported receiver's options block", async () => {
+    const firmwareUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
+    const fetchImplementation = assetFetcher(
+      new Map([[firmwareUrl, esp8285Image()]]),
+    ) as unknown as typeof fetch;
+    const rxTarget: OfficialTarget = {
+      ...target,
+      id: "vendor/rx_2400/example-rx",
+      role: "rx",
+      radioKey: "rx_2400",
+      targetKey: "example-rx",
+      config: {
+        ...target.config,
+        productName: "Example RX",
+        platform: "esp8285",
+        firmware: "EXAMPLE_RX_2400",
+        layoutFile: null,
+        customLayout: {},
+      },
+    };
+
+    const asTransmitter = await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTarget,
+      options: { ...options, receiverAsTransmitter: true },
+      fetchImplementation,
+    });
+    const asReceiver = await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTarget,
+      options: { ...options, receiverAsTransmitter: false },
+      fetchImplementation,
+    });
+
+    const readOptions = (bytes: Uint8Array): Record<string, unknown> => {
+      const text = strFromU8(bytes);
+      const start = text.indexOf('{"');
+      const end = text.indexOf("}", start);
+      return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+    };
+
+    const transmitting = readOptions(
+      asTransmitter.segments[0]?.bytes ?? new Uint8Array(),
+    );
+    const receiving = readOptions(
+      asReceiver.segments[0]?.bytes ?? new Uint8Array(),
+    );
+
+    expect(transmitting["is-airport"]).toBe(true);
+    expect(receiving["is-airport"]).toBe(false);
+    // The two packages must differ, or the option changed nothing.
+    expect(asTransmitter.segments[0]?.sha256).not.toBe(
+      asReceiver.segments[0]?.sha256,
+    );
+  });
+
   it("creates a gzip Wi-Fi image for ESP8285 without changing the serial segment bytes", async () => {
     const firmwareUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
     const fetchImplementation = assetFetcher(
