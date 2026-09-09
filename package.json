@@ -33,7 +33,9 @@
     "serve:built": "node scripts/serve-built-web.mjs",
     "qa:browser": "playwright test",
     "check:ui-honesty": "node scripts/check-ui-honesty.mjs",
-    "check:ui-reality": "node scripts/check-ui-reality.mjs"
+    "check:ui-reality": "node scripts/check-ui-reality.mjs",
+    "build:pinned": "node scripts/build-pinned-for-qa.mjs",
+    "qa:browser:pinned": "pnpm build:pinned && pnpm qa:browser"
   },
   "dependencies": {
     "@fontsource-variable/cairo": "5.3.0",

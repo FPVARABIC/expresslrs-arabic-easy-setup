@@ -84,6 +84,7 @@
 }
 
 .acceptance-metadata-grid label,
+.acceptance-candidate-sha,
 .acceptance-overall-notes,
 .acceptance-text-field,
 .acceptance-step-controls label {
@@ -92,6 +93,23 @@
   color: var(--text-muted, #8b949e);
   font-size: 0.7rem;
   font-weight: 700;
+}
+
+/*
+ * The candidate SHA is a 40-character hex run with no break opportunity in it.
+ * Left to itself it sets the grid column's min-content width and pushes the
+ * whole panel wider than a narrow viewport, so it is allowed to wrap.
+ */
+.acceptance-candidate-sha {
+  min-width: 0;
+}
+
+.acceptance-candidate-sha output {
+  overflow-wrap: anywhere;
+  color: var(--text, #e6edf3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .acceptance-metadata-grid input,

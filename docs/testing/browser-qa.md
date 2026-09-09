@@ -69,3 +69,24 @@ context):
 
 This is desktop Linux Chromium. It says nothing about Chrome for Android; see
 [ANDROID.md](../ANDROID.md) for what is and is not known there.
+
+## Run it the way CI does
+
+`pnpm qa:browser` tests whatever is in `apps/web/dist`. In CI that is the real
+GitHub Pages artifact, built with the commit SHA embedded as the build
+identity. A local `pnpm build` leaves that identity unset, so the banner reads
+`unpinned-development-build` and the acceptance panel's candidate SHA is empty.
+
+That difference is not cosmetic. A 40-character hex run has no break
+opportunity in it, and one shipped defect — the candidate SHA setting the
+metadata grid's minimum width and pushing the whole panel past a 320px viewport
+— was invisible against an unpinned build and only appeared in CI.
+
+Before pushing, run:
+
+```sh
+pnpm qa:browser:pinned
+```
+
+which builds with the current commit SHA first, then runs the same suite. That
+is the pre-push equivalent of the CI step.
