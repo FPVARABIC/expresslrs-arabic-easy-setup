@@ -20,6 +20,10 @@ import {
   type EasyStepId,
 } from "../easy/easyOperations";
 import type { CrsfParameter } from "../hardware/crsf";
+import {
+  MAX_BIND_PHRASE_LENGTH,
+  bindPhraseIssue,
+} from "../hardware/bind-phrase";
 import { isMachineVerifiedBinding } from "../hardware/binding-evidence";
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
 import type {
@@ -301,6 +305,7 @@ export function EasySetup({
     (parameter) => String(parameter.id) === settingId,
   );
   const evidenceLevel = operatorBindEvidence ?? bindEvidence;
+  const phraseIssue = bindPhraseIssue(options.bindPhrase);
 
   if (operation === null) {
     return (
@@ -553,6 +558,31 @@ export function EasySetup({
                     )}
 
                     <label>
+                      <span>{t("easy.fw.bindPhrase")}</span>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        maxLength={MAX_BIND_PHRASE_LENGTH}
+                        value={options.bindPhrase}
+                        disabled={busy}
+                        onChange={(event) =>
+                          updateOption("bindPhrase", event.currentTarget.value)
+                        }
+                      />
+                    </label>
+                    <p className="easy-note">{t("easy.fw.bindPhraseHint")}</p>
+                    {phraseIssue === null ? null : (
+                      <p className="easy-error">
+                        {t(`easy.fw.bindPhrase.${phraseIssue}`)}
+                      </p>
+                    )}
+                    {options.bindPhrase === "" ? null : (
+                      <p className="easy-note">
+                        {t("easy.fw.bindPhraseUnverifiable")}
+                      </p>
+                    )}
+
+                    <label>
                       <span>{t("easy.fw.region")}</span>
                       <select
                         value={options.region}
@@ -594,7 +624,8 @@ export function EasySetup({
                         busy ||
                         selectedRelease === null ||
                         selectedTarget === null ||
-                        options.region === ""
+                        options.region === "" ||
+                        phraseIssue !== null
                       }
                     >
                       {t("easy.fw.build")}
@@ -607,6 +638,11 @@ export function EasySetup({
                             segments: prepared.segments.length,
                           })}
                         </p>
+                        {prepared.optionsSummary.bindingConfigured ? (
+                          <p className="easy-note">
+                            {t("easy.fw.bindPhraseConfigured")}
+                          </p>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => downloadRecovery()}

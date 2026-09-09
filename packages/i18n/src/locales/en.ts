@@ -161,6 +161,19 @@ export const en = {
     "The command was accepted, but no link was observed and none was reported. Binding is not recorded as successful.",
   "easy.binding.ready":
     "The other side is ready to bind, and power and antennas are in a safe state",
+  "easy.fw.bindPhrase": "Binding phrase (optional)",
+  "easy.fw.bindPhraseHint":
+    "Flash the transmitter and the receiver with the same phrase. A different phrase on either side means they will not link.",
+  "easy.fw.bindPhraseConfigured":
+    "A binding phrase will be compiled into this package.",
+  "easy.fw.bindPhraseUnverifiable":
+    "The device does not report its UID back over CRSF, so a matching phrase is proven by a live link, not by this write.",
+  "easy.fw.bindPhrase.TOO_LONG":
+    "The phrase is longer than 128 characters, which the derivation cannot accept.",
+  "easy.fw.bindPhrase.BLANK":
+    "The phrase is only spaces. Leave it empty to set none, or type a phrase you can retype exactly on the other side.",
+  "easy.fw.bindPhrase.CONTROL_CHARACTER":
+    "The phrase contains an invisible control character. Retype it as plain text.",
   "easy.fw.loadCatalog": "Prepare the official update source",
   "easy.fw.catalogReady":
     "Loaded {releases} buildable versions and {targets} official Targets.",

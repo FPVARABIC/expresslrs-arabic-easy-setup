@@ -1,6 +1,10 @@
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
+import {
+  MAX_BIND_PHRASE_LENGTH,
+  bindPhraseIssue,
+} from "../hardware/bind-phrase";
 import { regulatoryRegionByKey } from "../hardware/regulatory-domain";
 import type { HardwareDriverConnector } from "../hardware/userSession";
 import {
@@ -697,12 +701,22 @@ export function ExpressLrsParityWorkbenchView({
               type="password"
               autoComplete="off"
               value={options.bindPhrase}
-              maxLength={128}
+              maxLength={MAX_BIND_PHRASE_LENGTH}
               disabled={busy}
               onChange={(event) =>
                 updateOption("bindPhrase", event.currentTarget.value)
               }
             />
+            <small>
+              اكتب العبارة نفسها في جهاز الإرسال وجهاز الاستقبال. أي اختلاف
+              بينهما يعني أن الرابط لن يقوم. الجهاز لا يعلن UID عبر CRSF، لذلك
+              تطابق العبارة يثبته قيام رابط حي لا هذه الكتابة.
+            </small>
+            {bindPhraseIssue(options.bindPhrase) === null ? null : (
+              <small className="parity-error">
+                عبارة الربط غير صالحة: تجاوز الطول، أو مسافات فقط، أو محرف خفي.
+              </small>
+            )}
           </label>
           <label>
             <span>اسم شبكة Wi-Fi</span>

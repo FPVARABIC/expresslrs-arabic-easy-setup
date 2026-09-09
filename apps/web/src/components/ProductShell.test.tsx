@@ -546,6 +546,60 @@ describe("public product shell", () => {
     expect(document.querySelector('[data-outcome="verified"]')).not.toBeNull();
   });
 
+  it("compiles a binding phrase into the package and then forgets it", async () => {
+    const user = userEvent.setup();
+    const phrase = "shared-bench-phrase";
+    firmwareMocks.loadCatalog.mockResolvedValue(easyCatalog);
+    firmwareMocks.preparePackage.mockImplementation(
+      async (input: { options: { bindPhrase: string } }) => ({
+        ...easyPackage,
+        target: (easyCatalog as unknown as { targets: unknown[] }).targets[0],
+        optionsSummary: {
+          ...easyPackage.optionsSummary,
+          bindingConfigured: input.options.bindPhrase.length > 0,
+        },
+      }),
+    );
+    render(<ProductShell hardwareConnector={connectedConnector()} />);
+
+    await user.click(
+      screen.getAllByRole("button", { name: "ابدأ" })[2] as HTMLElement,
+    );
+    await user.click(screen.getByRole("button", { name: "تعرّف على جهازي" }));
+    await screen.findByText("Reference TX");
+    await user.click(
+      screen.getByRole("button", { name: "جهّز مصدر التحديث الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Reference TX" });
+
+    const field = screen.getByLabelText(/عبارة الربط/u);
+    await user.type(field, phrase);
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "جهّز الحزمة الرسمية وتحقق منها" }),
+    );
+
+    // The phrase reached the packager exactly once, as typed.
+    await waitFor(() =>
+      expect(firmwareMocks.preparePackage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({ bindPhrase: phrase }),
+        }),
+      ),
+    );
+
+    // Once compiled, the plaintext is dropped: the field is empty and the
+    // phrase appears nowhere in the rendered document.
+    await waitFor(() => expect(field).toHaveValue(""));
+    expect(document.body.textContent ?? "").not.toContain(phrase);
+    expect(
+      await screen.findByText(/ستُضمَّن عبارة ربط داخل هذه الحزمة/u),
+    ).toBeInTheDocument();
+  });
+
   it("exposes a skip link and a focusable main region for keyboard users", () => {
     render(<ProductShell />);
 

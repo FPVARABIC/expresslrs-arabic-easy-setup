@@ -486,6 +486,21 @@ export function useDeviceController({
     (!operationNeedsTargetConfirmation || manualTargetConfirmed) &&
     (!firmwareWriteMethod || method !== "uart" || identity !== null);
 
+  /**
+   * Drops the secrets the operator typed as soon as they have been compiled
+   * into the package. The derived UID and the Wi-Fi block already live inside
+   * the prepared bytes, so keeping the plaintext in component state would only
+   * widen where it can leak from — into a later render, a copied context, or a
+   * rebuild the operator did not intend.
+   */
+  function wipeSecretOptions(): void {
+    setOptions((current) =>
+      current.bindPhrase === "" && current.wifiPassword === ""
+        ? current
+        : { ...current, bindPhrase: "", wifiPassword: "" },
+    );
+  }
+
   function resetPreparedState(): void {
     setPrepared(null);
     setRecoveryDownloadStarted(false);
@@ -624,6 +639,7 @@ export function useDeviceController({
     sessionIdRef.current = null;
     writeAuthorityRef.current.revokeAll();
     clearHardwarePresentation();
+    wipeSecretOptions();
     if (session === null) return true;
 
     setHardwareCloseInProgress(true);
@@ -1154,8 +1170,11 @@ export function useDeviceController({
         return;
       }
       setPrepared(result);
+      // The phrase and Wi-Fi password are now inside the verified package, so
+      // the plaintext is dropped rather than kept for a possible rebuild.
+      wipeSecretOptions();
       setStatus(
-        `تم تجهيز ${result.segments.length} قطاعًا والتحقق من SHA-256. نزّل حزمة الاستعادة قبل أي كتابة.`,
+        `تم تجهيز ${result.segments.length} قطاعًا والتحقق من SHA-256${result.optionsSummary.bindingConfigured ? " مع عبارة ربط مضمّنة" : ""}. نزّل حزمة الاستعادة قبل أي كتابة.`,
       );
     } catch (error: unknown) {
       setStatus(`تعذر تجهيز Firmware: ${safeMessage(error)}`);
@@ -2027,6 +2046,7 @@ export function useDeviceController({
     deviceWriteLockMessage,
     subscribeFrames,
     canObserveFrames,
+    wipeSecretOptions,
     bindEvidence,
   } as const;
 }
