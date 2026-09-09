@@ -31,6 +31,8 @@ const mocks = vi.hoisted(() => ({
   initializeSerialPassthrough: vi.fn(),
   loadCatalog: vi.fn(),
   loadCheckpoint: vi.fn(),
+  saveCheckpoint: vi.fn(),
+  clearCheckpoint: vi.fn(),
   preparePackage: vi.fn(),
   requestHardwarePort: vi.fn(),
   validateRecoveryPackage: vi.fn(),
@@ -61,8 +63,8 @@ vi.mock("../hardware/passthrough", async (importOriginal) => ({
 vi.mock("../hardware/recovery-package", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../hardware/recovery-package")>()),
   loadRecoveryCheckpoint: mocks.loadCheckpoint,
-  saveRecoveryCheckpoint: vi.fn().mockResolvedValue(undefined),
-  clearRecoveryCheckpoint: vi.fn().mockResolvedValue(undefined),
+  saveRecoveryCheckpoint: mocks.saveCheckpoint,
+  clearRecoveryCheckpoint: mocks.clearCheckpoint,
   validateRecoveryPackage: mocks.validateRecoveryPackage,
 }));
 
@@ -377,6 +379,8 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     mocks.initializeSerialPassthrough.mockReset().mockResolvedValue(undefined);
     mocks.loadCatalog.mockReset().mockResolvedValue(catalog);
     mocks.loadCheckpoint.mockReset().mockResolvedValue(null);
+    mocks.saveCheckpoint.mockReset().mockResolvedValue(undefined);
+    mocks.clearCheckpoint.mockReset().mockResolvedValue(undefined);
     mocks.preparePackage.mockReset().mockResolvedValue(preparedPackage);
     mocks.requestHardwarePort.mockReset().mockResolvedValue({
       open: vi.fn().mockResolvedValue(undefined),
@@ -1573,6 +1577,90 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       }),
     ).not.toBeChecked();
     expect(recoveryInput).toBeDisabled();
+  });
+
+  it("keeps the checkpoint when a recovery write finishes but the device does not come back", async () => {
+    const user = userEvent.setup();
+    // The recovery write succeeds; the device then fails to answer, so its
+    // identity, Target and version can never be read back.
+    const hardware = connectedHardware({ productName: "Vendor TX Module" });
+    (hardware.connector as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(hardware.outcome)
+      .mockResolvedValue({
+        status: "TIMED_OUT",
+        message: "no answer after the recovery write",
+      });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.loadCheckpoint.mockResolvedValueOnce(recoveryCheckpoint);
+    mocks.validateRecoveryPackage.mockReset().mockResolvedValue({
+      targetId: "vendor/tx_2400/module",
+      productName: "Vendor TX Module",
+      platform: "esp32",
+      firmware: "VENDOR_TX",
+      releaseLabel: "4.1.0",
+      releaseRevision: "release410",
+      packageSha256: recoveryCheckpoint.packageSha256,
+      segments: [
+        {
+          name: "firmware.bin",
+          address: 0x10000,
+          bytes: new Uint8Array([1, 2, 3]),
+          sha256: "a".repeat(64),
+        },
+      ],
+    });
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await screen.findByText(/استعادة معلّقة/u);
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Vendor TX Module" });
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+
+    const confirmation = await screen.findByLabelText(
+      /تأكيد Target للاستعادة/u,
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء الاستعادة" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "هوائي جهاز الإرسال مثبت أثناء الاستعادة",
+      }),
+    );
+    await user.type(confirmation, "module");
+
+    const recoveryBytes = new TextEncoder().encode("recovery");
+    const recoveryFile = new File([recoveryBytes], "recovery.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(recoveryFile, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(recoveryBytes.buffer),
+    });
+    await user.upload(
+      screen.getByLabelText("اختيار حزمة الاستعادة"),
+      recoveryFile,
+    );
+
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    // The bytes went out, so the checkpoint must survive and say so. Clearing
+    // it here would leave a half-recovered device with no way back.
+    expect(
+      await screen.findByText(/تعذّر إثبات عودة الجهاز/u),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText(/استعادة معلّقة · RECOVERY_INCOMPLETE/u),
+    ).toBeInTheDocument();
+    expect(mocks.clearCheckpoint).not.toHaveBeenCalled();
   });
 
   it("keeps destructive flashing locked until the recovery journal finishes loading", async () => {

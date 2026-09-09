@@ -25,7 +25,13 @@ export interface RecoveryCheckpoint {
     | "VERIFYING"
     | "REBOOTING"
     | "RECONNECTING"
-    | "RECOVERY_REQUIRED";
+    | "RECOVERY_REQUIRED"
+    /**
+     * A recovery write finished but the device's identity could not be read
+     * and matched afterwards. The checkpoint deliberately survives: a write
+     * that completed is not evidence that the device came back.
+     */
+    | "RECOVERY_INCOMPLETE";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly safeError: string | null;
@@ -529,6 +535,7 @@ export async function loadRecoveryCheckpoint(): Promise<RecoveryCheckpoint | nul
     "REBOOTING",
     "RECONNECTING",
     "RECOVERY_REQUIRED",
+    "RECOVERY_INCOMPLETE",
   ]);
   const createdAt = safeString(value.createdAt);
   const updatedAt = safeString(value.updatedAt);

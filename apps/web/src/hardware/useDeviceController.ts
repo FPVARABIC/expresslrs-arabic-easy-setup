@@ -1268,6 +1268,26 @@ export function useDeviceController({
     setCheckpoint(value);
   }
 
+  /**
+   * Moves an existing checkpoint to a new stage without inventing one. The
+   * checkpoint is what makes a second recovery attempt possible, so it is only
+   * ever restaged here — never cleared by this path.
+   */
+  async function restageCheckpoint(
+    previous: RecoveryCheckpoint,
+    stage: RecoveryCheckpoint["stage"],
+    safeError: string | null,
+  ): Promise<void> {
+    const value: RecoveryCheckpoint = Object.freeze({
+      ...previous,
+      stage,
+      updatedAt: nowIso(),
+      safeError,
+    });
+    await saveRecoveryCheckpoint(value);
+    setCheckpoint(value);
+  }
+
   async function reconnectAndVerify(input: {
     readonly target: OfficialTarget;
     readonly release: OfficialRelease;
@@ -1306,6 +1326,14 @@ export function useDeviceController({
         "اكتملت إعادة قراءة الجهاز بعد رصد منفذ سابق غير مثبت الإغلاق.",
       );
     }
+    // Each step of the post-write sequence is reported as it is reached, so
+    // "the device came back" is never a single opaque claim.
+    setFlashProgress({
+      stage: "RECONNECT",
+      writtenBytes: input.totalBytes,
+      totalBytes: input.totalBytes,
+      detail: "قراءة هوية الجهاز بعد الإقلاع",
+    });
     const match = matchHardwareIdentityToOfficialTargets({
       identity: outcome.identity,
       targets: catalog?.targets ?? [],
@@ -1326,6 +1354,12 @@ export function useDeviceController({
         `عاد جهاز، لكن أدلة Target لا تطابق العملية المخططة (${targetVerification.reason}).`,
       );
     }
+    setFlashProgress({
+      stage: "RECONNECT",
+      writtenBytes: input.totalBytes,
+      totalBytes: input.totalBytes,
+      detail: "تأكيد مطابقة Target المقروء",
+    });
     const build = verifyObservedFirmwareBuild({
       release: input.release,
       observedVersion: outcome.identity.firmwareVersion,
@@ -1340,6 +1374,12 @@ export function useDeviceController({
         `عاد الجهاز، لكن الإصدار/Commit لا يطابق ${build.expected}.`,
       );
     }
+    setFlashProgress({
+      stage: "RECONNECT",
+      writtenBytes: input.totalBytes,
+      totalBytes: input.totalBytes,
+      detail: "تأكيد الإصدار/Commit المقروء",
+    });
     const oldSession = sessionRef.current;
     disconnectUnsubscribeRef.current?.();
     disconnectUnsubscribeRef.current = null;
@@ -1396,6 +1436,9 @@ export function useDeviceController({
     );
     setSettingDraft(currentSettingValue(firstWritable));
     setTargetMatch(match);
+    // Only now, with the identity read and the Target and version confirmed,
+    // is the checkpoint cleared. A completed write never reaches this line on
+    // its own.
     await clearRecoveryCheckpoint();
     if (
       !hardwareCleanupGateOpen() ||
@@ -1426,7 +1469,7 @@ export function useDeviceController({
       stage: "COMPLETE",
       writtenBytes: input.totalBytes,
       totalBytes: input.totalBytes,
-      detail: "تم إثبات الجهاز والإصدار/Commit بعد الإقلاع",
+      detail: "أُثبتت الهوية وTarget والإصدار، وأُغلق سجل الاستعادة",
     });
   }
 
@@ -1762,6 +1805,7 @@ export function useDeviceController({
     setCancellable(true);
     setBusy(true);
     setStatus("جارٍ فحص حزمة الاستعادة وSHA-256 لكل قطاع…");
+    let writeFinished = false;
     try {
       const bytes = await boundedFileBytes(file, 64 * 1024 * 1024);
       const validated = await validateRecoveryPackage({
@@ -1860,6 +1904,9 @@ export function useDeviceController({
           throw new Error("منصة الاستعادة غير مدعومة.");
         }
       }
+      // The write finished. That is not yet a recovery: the device still has
+      // to come back and prove its Target and version.
+      writeFinished = true;
       await reconnectAndVerify({
         target: selectedTarget,
         release: officialReleaseFromRecovery(validated),
@@ -1878,7 +1925,22 @@ export function useDeviceController({
           "تعذر إثبات إغلاق منفذ الكتابة بعد توقف الاستعادة",
         );
       }
-      const reported = `توقفت الاستعادة: ${safeMessage(error)}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`;
+      const detail = safeMessage(error);
+      if (writeFinished) {
+        // The bytes went out but the device did not come back readable. The
+        // checkpoint is kept and restaged so a second attempt is still
+        // possible; a completed write never clears it on its own.
+        try {
+          await restageCheckpoint(
+            trustedCheckpoint,
+            "RECOVERY_INCOMPLETE",
+            detail,
+          );
+        } catch {
+          // The visible pending recovery remains even if IndexedDB is blocked.
+        }
+      }
+      const reported = `${writeFinished ? "اكتملت كتابة الاستعادة لكن تعذّر إثبات عودة الجهاز، فبقيت العملية غير مكتملة" : "توقفت الاستعادة"}: ${detail}${cleanupUnconfirmed ? " أعد تحميل الصفحة قبل فتح أي منفذ آخر." : ""}`;
       setStatus(reported);
       return Object.freeze({ verified: false, message: reported });
     } finally {
