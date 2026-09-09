@@ -133,7 +133,6 @@ export const en = {
     "This scenario does not satisfy the identity and connection gates, so binding and update stay disabled.",
   "task.mockRunning": "Running the preview…",
   "task.mockPending": "The preview is ready.",
-  "task.notImplemented": "This action is being prepared and cannot write yet.",
   "task.mockVerified": "Preview complete. The result was verified.",
   "task.mockNotVerified": "The preview stopped before verification.",
   "task.mockError": "The preview stopped: {message}",
