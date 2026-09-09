@@ -12,6 +12,12 @@ export interface DiagnosticsPanelProps {
   readonly locale: Locale;
   /** Reads the live session at the moment the operator asks. */
   readonly capture: () => DiagnosticsSnapshot;
+  /**
+   * The same read plus the browser's answer about already-granted devices,
+   * which only an async call can obtain. Every action prefers this and falls
+   * back to the synchronous read if the browser refuses to answer.
+   */
+  readonly captureWithGrants?: () => Promise<DiagnosticsSnapshot>;
 }
 
 function downloadTextFile(
@@ -34,20 +40,34 @@ function downloadTextFile(
  * controller, so what Easy Mode exports and what the Advanced view exports
  * describe one session, and neither can report a state the other cannot see.
  */
-export function DiagnosticsPanel({ locale, capture }: DiagnosticsPanelProps) {
+export function DiagnosticsPanel({
+  locale,
+  capture,
+  captureWithGrants,
+}: DiagnosticsPanelProps) {
   const t = createTranslator(locale);
   const [report, setReport] = useState<string | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
 
-  function show(): void {
+  async function snapshot(): Promise<DiagnosticsSnapshot> {
+    if (captureWithGrants === undefined) return capture();
+    try {
+      return await captureWithGrants();
+    } catch {
+      // A browser that refuses to answer must not cost the whole report.
+      return capture();
+    }
+  }
+
+  async function show(): Promise<void> {
     setCopied("idle");
-    setReport(serializeDiagnosticsMarkdown(capture()));
+    setReport(serializeDiagnosticsMarkdown(await snapshot()));
   }
 
   async function copy(): Promise<void> {
     try {
       await navigator.clipboard.writeText(
-        serializeDiagnosticsMarkdown(capture()),
+        serializeDiagnosticsMarkdown(await snapshot()),
       );
       setCopied("done");
     } catch {
@@ -55,20 +75,20 @@ export function DiagnosticsPanel({ locale, capture }: DiagnosticsPanelProps) {
     }
   }
 
-  function downloadJson(): void {
-    const snapshot = capture();
+  async function downloadJson(): Promise<void> {
+    const value = await snapshot();
     downloadTextFile(
-      serializeDiagnosticsJson(snapshot),
-      `${diagnosticsFileStem(snapshot)}.json`,
+      serializeDiagnosticsJson(value),
+      `${diagnosticsFileStem(value)}.json`,
       "application/json",
     );
   }
 
-  function downloadMarkdown(): void {
-    const snapshot = capture();
+  async function downloadMarkdown(): Promise<void> {
+    const value = await snapshot();
     downloadTextFile(
-      serializeDiagnosticsMarkdown(snapshot),
-      `${diagnosticsFileStem(snapshot)}.md`,
+      serializeDiagnosticsMarkdown(value),
+      `${diagnosticsFileStem(value)}.md`,
       "text/markdown",
     );
   }
@@ -79,16 +99,16 @@ export function DiagnosticsPanel({ locale, capture }: DiagnosticsPanelProps) {
       <p className="easy-note">{t("diagnostics.intro")}</p>
       <p className="easy-note">{t("diagnostics.privacy")}</p>
       <div className="diagnostics-actions">
-        <button type="button" onClick={() => show()}>
+        <button type="button" onClick={() => void show()}>
           {t("diagnostics.show")}
         </button>
         <button type="button" onClick={() => void copy()}>
           {copied === "done" ? t("diagnostics.copied") : t("diagnostics.copy")}
         </button>
-        <button type="button" onClick={() => downloadJson()}>
+        <button type="button" onClick={() => void downloadJson()}>
           {t("diagnostics.downloadJson")}
         </button>
-        <button type="button" onClick={() => downloadMarkdown()}>
+        <button type="button" onClick={() => void downloadMarkdown()}>
           {t("diagnostics.downloadMarkdown")}
         </button>
       </div>

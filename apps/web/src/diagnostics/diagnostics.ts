@@ -27,6 +27,21 @@ export interface DiagnosticsSnapshot {
     readonly platform: string;
     readonly standaloneDisplay: boolean;
     readonly serviceWorkerSupported: boolean;
+    /** The browser's own version claim, e.g. "Chrome 154". */
+    readonly browserVersion: string;
+    /** Whether the platform reports itself as Android. */
+    readonly android: boolean;
+    /** Whether the document's permissions policy allows the device APIs. */
+    readonly serialPolicyAllowed: boolean | null;
+    readonly usbPolicyAllowed: boolean | null;
+    /**
+     * Devices this origin has already been granted. Neither Web Serial nor
+     * WebUSB reveals OTG state or an unprompted device list, so this is the
+     * closest observable to "a device is attached". Zero before a first grant
+     * is normal, and null means the browser would not answer.
+     */
+    readonly grantedSerialPorts: number | null;
+    readonly grantedUsbDevices: number | null;
   };
   readonly device: {
     readonly connected: boolean;
@@ -121,8 +136,26 @@ export function serializeDiagnosticsMarkdown(
     "",
     "## Environment",
     redactedLine("Secure context", snapshot.environment.secureContext),
+    redactedLine("Browser", snapshot.environment.browserVersion),
+    redactedLine("Android", snapshot.environment.android),
     redactedLine("Web Serial", snapshot.environment.webSerialSupported),
     redactedLine("WebUSB", snapshot.environment.webUsbSupported),
+    redactedLine(
+      "Serial permitted by policy",
+      snapshot.environment.serialPolicyAllowed,
+    ),
+    redactedLine(
+      "USB permitted by policy",
+      snapshot.environment.usbPolicyAllowed,
+    ),
+    redactedLine(
+      "Serial ports already granted",
+      snapshot.environment.grantedSerialPorts,
+    ),
+    redactedLine(
+      "USB devices already granted",
+      snapshot.environment.grantedUsbDevices,
+    ),
     redactedLine("Native bridge", snapshot.environment.nativeBridge),
     redactedLine("Service worker", snapshot.environment.serviceWorkerSupported),
     redactedLine("Standalone display", snapshot.environment.standaloneDisplay),

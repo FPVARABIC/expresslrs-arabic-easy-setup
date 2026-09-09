@@ -134,6 +134,7 @@ if (!existsSync(path.join(root, authorityPath))) {
 //    not ship.
 const UI_FILES = [
   "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
+  "apps/web/src/components/BuildBanner.tsx",
   "apps/web/src/components/EasySetup.tsx",
   "apps/web/src/components/ProductShell.tsx",
 ];

@@ -693,6 +693,55 @@ describe("public product shell", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("names the build stage without locking a single operation", async () => {
+    const user = userEvent.setup();
+    render(<ProductShell hardwareConnector={connectedConnector()} />);
+
+    // The stage is stated plainly.
+    expect(
+      screen.getByText("نسخة تجريبية للتحقق على العتاد"),
+    ).toBeInTheDocument();
+    // An unpinned development build says so rather than showing a fake SHA.
+    expect(screen.getByText("unpinned-development-build")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "انسخ رقم الإصدار الكامل" }),
+    ).toBeEnabled();
+
+    // And every operation is still offered and pressable.
+    const starts = screen.getAllByRole("button", { name: "ابدأ" });
+    expect(starts).toHaveLength(3);
+    for (const start of starts) expect(start).toBeEnabled();
+
+    await user.click(starts[0] as HTMLElement);
+    expect(
+      screen.getByRole("button", { name: "تعرّف على جهازي" }),
+    ).toBeEnabled();
+  });
+
+  it("reports the browser and Android state the diagnostics can observe", async () => {
+    const user = userEvent.setup();
+    render(<ProductShell hardwareConnector={connectedConnector()} />);
+
+    await user.click(
+      screen.getAllByRole("button", { name: "اعرض التقرير" })[0] as HTMLElement,
+    );
+
+    const report = await screen.findByTestId("diagnostics-report");
+    for (const line of [
+      "Browser:",
+      "Android:",
+      "Web Serial:",
+      "WebUSB:",
+      "Serial permitted by policy:",
+      "USB permitted by policy:",
+      "Serial ports already granted:",
+      "USB devices already granted:",
+      "Secure context:",
+    ]) {
+      expect(report).toHaveTextContent(line);
+    }
+  });
+
   it("exposes a skip link and a focusable main region for keyboard users", () => {
     render(<ProductShell />);
 

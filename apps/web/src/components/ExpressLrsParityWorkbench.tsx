@@ -57,6 +57,7 @@ export function ExpressLrsParityWorkbenchView({
     cancelCurrentOperation,
     cancellable,
     captureDiagnostics,
+    captureDiagnosticsWithGrants,
     catalog,
     catalogState,
     checkpoint,
@@ -1075,7 +1076,11 @@ export function ExpressLrsParityWorkbenchView({
         deviceChangesEnabled={deviceWritesReady}
       />
 
-      <DiagnosticsPanel locale="ar" capture={captureDiagnostics} />
+      <DiagnosticsPanel
+        locale="ar"
+        capture={captureDiagnostics}
+        captureWithGrants={captureDiagnosticsWithGrants}
+      />
 
       <footer className="parity-footer">
         <span>المصدر: ExpressLRS الرسمي</span>

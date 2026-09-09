@@ -45,19 +45,60 @@ as either a yes or a no.
 Everything else in that table is a plain `n`: Samsung Internet, Firefox for
 Android, the legacy Android Browser, and every iOS browser expose neither API.
 
-## Why no APK was built here
+## The first path is the web, not a package
 
-Building an Android package needs the Android SDK. It is not installed, and it
-cannot be fetched:
+The plan is deliberate, not a fallback from a blocked download:
+
+1. **Open the deployed page in Chrome for Android on a real phone.** That is
+   the first test, and it may be the last one needed. Nothing about the
+   application assumes a desktop.
+2. **Read the diagnostics report on that phone.** It states the browser and
+   version, whether the platform is Android, whether `navigator.serial` and
+   `navigator.usb` exist, whether the document's permissions policy allows
+   them, whether the context is secure, and how many devices this origin has
+   already been granted.
+3. **Only if that report shows the transport is genuinely missing** does a
+   host application become the answer.
+
+A packaged application is **not** on the critical path and must not be started
+on a guess. Building one before a phone has been tested would be building
+around a problem nobody has observed.
+
+### What the diagnostics report can and cannot see
+
+| Observable | How |
+| --- | --- |
+| Browser and version | `navigator.userAgentData.brands`, ignoring Chromium's decoy brand; the user-agent string only as a fallback |
+| Android | the reported platform, or the user-agent string |
+| `navigator.serial`, `navigator.usb` | the objects themselves |
+| Secure context | `isSecureContext` |
+| Permissions-policy allowance | `document.permissionsPolicy.allowsFeature("serial" / "usb")`, reported as `null` where the browser will not answer |
+| Devices already granted | `serial.getPorts()` and `usb.getDevices()` |
+
+**OTG or physical attachment is not observable from a page.** Neither Web
+Serial nor WebUSB exposes cable state or an unprompted device list; both return
+only what the user has already permitted. So "0 granted" is the normal state
+before a first grant and is never reported as a fault. The closest honest
+signal the application can give is: the API exists, the policy allows it, the
+context is secure — press connect and the browser will show whatever the OS
+enumerates.
+
+## If a package is ever needed
+
+The Android SDK is not installed in the development environment used here, and
+it cannot be fetched from it:
 
 ```
 $ curl -sS --max-time 25 https://dl.google.com/android/repository/repository2-3.xml
 curl: (56) CONNECT tunnel failed, response 403
 ```
 
-`adb` is absent (`adb: not found`). Java 21 and Gradle 8.14.3 are present, but
-without the SDK and without a device, an APK could be neither built nor run.
-This is an environment limit, stated as one — not a design decision.
+`adb` is absent (`adb: not found`); Java 21 and Gradle 8.14.3 are present.
+
+That is a limit of one sandbox, **not a reason to stop**. GitHub Actions runners
+ship the Android SDK, so a package would be built there and published as a
+downloadable artifact. The blocked host above is a note about where a build
+must run, and nothing more.
 
 ## What was built instead, and what it is worth
 
@@ -74,13 +115,20 @@ Two things, both real code with tests:
    Status: `IMPLEMENTED`, unit tested.
 
 2. **The native bridge seam** — `apps/web/src/hardware/native-bridge.ts`.
-   A native host injects `globalThis.elrsNativeBridge`, a validated object
-   exposing a Web Serial-shaped `requestPort()`. The controller then passes it
-   as the session layer's `navigatorObject`, so **every existing device code
-   path runs unchanged over it**: CRSF framing, identity, parameter reads and
-   writes, ESP flashing, XMODEM, passthrough, recovery. The native side only
-   has to open a USB serial device and move bytes.
-   Status: `IMPLEMENTED` (web half), unit tested. `HARDWARE_VERIFIED`: none.
+   An **architectural fallback, and nothing more.** A host injects
+   `globalThis.elrsNativeBridge`, a validated object exposing a Web
+   Serial-shaped `requestPort()`; the controller passes it as the session
+   layer's `navigatorObject`, so every existing device code path would run
+   unchanged over it. The point of shipping the seam now is that choosing this
+   route later costs no rewrite.
+
+   It is **not complete and not tested as a bridge.** No host implements it, no
+   package exists, and nothing has spoken to a device through it. What is
+   tested is the web half: that a well-formed bridge is accepted, that a
+   wrong-version or malformed one is ignored rather than half-trusted, and that
+   an accepted one is presented as the serial API. Do not describe it as
+   working. Status: the web-side contract is `IMPLEMENTED` and unit tested; the
+   bridge as a whole is unbuilt.
 
 The bridge is deliberately the narrowest contract that works. A host
 implementing it needs Android's `UsbManager` plus a USB-serial driver for the
@@ -93,14 +141,16 @@ this environment for the reason recorded above.
 In order, each producing evidence rather than an opinion:
 
 1. Open the deployed page in Chrome for Android on a real phone and read the
-   diagnostics report. It states `Web Serial`, `WebUSB`, `Native bridge` and
-   `Secure context` as the APIs actually report them. That single report
-   settles the `y #1` caveat for that phone and browser version.
-2. If Web Serial is present: connect a real TX over OTG and run the identify
-   step. A CRSF identity read on the phone is `HARDWARE_VERIFIED` for the read
-   path on that device.
-3. If Web Serial is absent: build the host application against the bridge
-   contract above and repeat step 2 through it.
+   diagnostics report. That single report settles the `y #1` caveat for that
+   phone and browser version, and it is the only thing that should be done
+   first.
+2. If Web Serial is present — the expected case — connect a real TX over OTG
+   and run the identify step. A CRSF identity read on the phone is
+   `HARDWARE_VERIFIED` for the read path on that device, and no package is
+   needed at all.
+3. Only if step 1 shows the transport is genuinely absent: build a host
+   application against the bridge contract on a runner that has the Android
+   SDK, publish it as an artifact, and repeat step 2 through it.
 
 Until one of those produces a report, the honest status for Android is
 `UNSUPPORTED_WITH_EVIDENCE` for every browser in the table that reports `n`,

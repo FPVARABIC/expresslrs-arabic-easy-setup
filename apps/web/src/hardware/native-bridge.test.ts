@@ -6,6 +6,7 @@ import {
 } from "./native-bridge";
 import {
   devicePathBlocker,
+  readGrantedDevices,
   readPlatformCapabilities,
 } from "./platform-capabilities";
 
@@ -105,5 +106,95 @@ describe("platform capabilities", () => {
 
     expect(capabilities.nativeBridge).toBe(true);
     expect(devicePathBlocker(capabilities)).toBeNull();
+  });
+});
+
+describe("device environment reporting", () => {
+  it("reads the browser version from the structured brand list", () => {
+    const capabilities = readPlatformCapabilities({
+      navigator: {
+        userAgentData: {
+          platform: "Android",
+          brands: [
+            { brand: "Not/A)Brand", version: "99" },
+            { brand: "Chromium", version: "154" },
+          ],
+        },
+      },
+      isSecureContext: true,
+    });
+
+    // The decoy brand Chromium ships is not a browser.
+    expect(capabilities.browserVersion).toBe("Chromium 154");
+    expect(capabilities.android).toBe(true);
+  });
+
+  it("falls back to the user-agent string only for name and version", () => {
+    const capabilities = readPlatformCapabilities({
+      navigator: {
+        userAgent:
+          "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 Chrome/154.0.0.0 Mobile Safari/537.36",
+      },
+      isSecureContext: true,
+    });
+
+    expect(capabilities.browserVersion).toBe("Chrome 154.0.0.0");
+    expect(capabilities.android).toBe(true);
+  });
+
+  it("does not call a desktop platform Android", () => {
+    expect(
+      readPlatformCapabilities({
+        navigator: { userAgentData: { platform: "Linux" } },
+        isSecureContext: true,
+      }).android,
+    ).toBe(false);
+  });
+
+  it("reports a permissions-policy refusal instead of guessing", () => {
+    const denied = readPlatformCapabilities({
+      navigator: { serial: {} },
+      isSecureContext: true,
+      document: { permissionsPolicy: { allowsFeature: () => false } },
+    });
+    expect(denied.serialPolicyAllowed).toBe(false);
+
+    const unknown = readPlatformCapabilities({
+      navigator: { serial: {} },
+      isSecureContext: true,
+    });
+    expect(unknown.serialPolicyAllowed).toBeNull();
+  });
+
+  it("counts the devices this origin was already granted", async () => {
+    const base = readPlatformCapabilities({ isSecureContext: true });
+    const granted = await readGrantedDevices(base, {
+      navigator: {
+        serial: { getPorts: async () => [{}, {}] },
+        usb: { getDevices: async () => [] },
+      },
+    });
+
+    expect(granted.grantedSerialPorts).toBe(2);
+    // Zero granted devices is the normal state before a first grant.
+    expect(granted.grantedUsbDevices).toBe(0);
+  });
+
+  it("reports null rather than zero when the browser refuses to answer", async () => {
+    const granted = await readGrantedDevices(
+      readPlatformCapabilities({ isSecureContext: true }),
+      {
+        navigator: {
+          serial: {
+            getPorts: async () => {
+              throw new Error("refused");
+            },
+          },
+        },
+      },
+    );
+
+    expect(granted.grantedSerialPorts).toBeNull();
+    expect(granted.grantedUsbDevices).toBeNull();
   });
 });

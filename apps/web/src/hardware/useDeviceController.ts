@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PhysicalAcceptanceContextSnapshot } from "../acceptance/physical-acceptance";
+import { buildSha } from "../build-identity";
 import {
   DIAGNOSTICS_SCHEMA_VERSION,
   type DiagnosticsSnapshot,
@@ -30,6 +31,7 @@ import {
 import { loadOfficialExpressLrsCatalog } from "./official-catalog";
 import {
   devicePathBlocker,
+  readGrantedDevices,
   readPlatformCapabilities,
   type DevicePathBlocker,
   type PlatformCapabilities,
@@ -181,14 +183,6 @@ export interface SettingWriteResult {
   /** null when the attempt was refused before any command was sent. */
   readonly applied: boolean | null;
   readonly message: string;
-}
-
-/** The reviewed commit this bundle was built from, when it was pinned. */
-function buildSha(): string {
-  const value = import.meta.env.VITE_BUILD_SHA;
-  return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value)
-    ? value
-    : "unpinned-development-build";
 }
 
 function nowIso(): string {
@@ -2010,6 +2004,24 @@ export function useDeviceController({
    * render, so a diagnostics report cannot describe a different session than
    * the one on screen.
    */
+  /**
+   * The same snapshot, after asking the browser how many devices this origin
+   * has already been granted. That answer is asynchronous, so a caller that
+   * can await it gets a fuller report than the synchronous capture.
+   */
+  async function captureDiagnosticsWithGrants(): Promise<DiagnosticsSnapshot> {
+    const snapshot = captureDiagnostics();
+    const granted = await readGrantedDevices(platformCapabilities);
+    return Object.freeze({
+      ...snapshot,
+      environment: Object.freeze({
+        ...snapshot.environment,
+        grantedSerialPorts: granted.grantedSerialPorts,
+        grantedUsbDevices: granted.grantedUsbDevices,
+      }),
+    });
+  }
+
   function captureDiagnostics(): DiagnosticsSnapshot {
     const navigatorObject = navigator as Navigator & {
       readonly usb?: unknown;
@@ -2029,10 +2041,16 @@ export function useDeviceController({
         platform:
           (navigator as Navigator & { userAgentData?: { platform?: string } })
             .userAgentData?.platform ?? "unknown",
-        standaloneDisplay:
-          typeof window.matchMedia === "function" &&
-          window.matchMedia("(display-mode: standalone)").matches,
+        standaloneDisplay: platformCapabilities.standalone,
         serviceWorkerSupported: "serviceWorker" in navigator,
+        browserVersion: platformCapabilities.browserVersion,
+        android: platformCapabilities.android,
+        serialPolicyAllowed: platformCapabilities.serialPolicyAllowed,
+        usbPolicyAllowed: platformCapabilities.usbPolicyAllowed,
+        // Filled by the panel, which can await the browser's answer. A
+        // synchronous capture cannot, and must not guess a number.
+        grantedSerialPorts: platformCapabilities.grantedSerialPorts,
+        grantedUsbDevices: platformCapabilities.grantedUsbDevices,
       }),
       device: Object.freeze({
         connected: identity !== null,
@@ -2229,6 +2247,7 @@ export function useDeviceController({
     canObserveFrames,
     wipeSecretOptions,
     captureDiagnostics,
+    captureDiagnosticsWithGrants,
     platformCapabilities,
     deviceTransportBlocker,
     bindEvidence,

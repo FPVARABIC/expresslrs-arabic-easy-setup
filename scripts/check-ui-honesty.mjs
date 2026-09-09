@@ -27,6 +27,7 @@ function read(relative) {
 /** Every module that renders a control in the shipped product. */
 const UI_MODULES = [
   "apps/web/src/components/ProductShell.tsx",
+  "apps/web/src/components/BuildBanner.tsx",
   "apps/web/src/components/EasySetup.tsx",
   "apps/web/src/components/ExpressLrsParityWorkbench.tsx",
   "apps/web/src/components/DiagnosticsPanel.tsx",

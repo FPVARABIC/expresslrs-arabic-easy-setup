@@ -64,6 +64,15 @@ export const en = {
     "This browser exposes WebUSB but not Web Serial, so CRSF identification and serial flashing cannot run here. Only an STM32 DFU device could be reached over USB.",
   "transport.detected":
     "Detected: Web Serial {webSerial}, WebUSB {webUsb}, native bridge {bridge}, secure context {secure}.",
+  "build.stage": "Hardware validation beta",
+  "build.note":
+    "Every operation is available. Nothing has been proven on a physical device yet.",
+  "build.copyFull": "Copy the full commit",
+  "build.copied": "Copied",
+  "build.copyFailed":
+    "Copy failed. The full commit is in the code element's title.",
+  "build.unpinned":
+    "This build carries no commit identity, so a result recorded from it cannot be tied to one tree.",
   "diagnostics.heading": "Diagnostics",
   "diagnostics.intro":
     "A report of what this session actually observed: the browser's capabilities, what the device reported, the package that was prepared, and the recovery state.",

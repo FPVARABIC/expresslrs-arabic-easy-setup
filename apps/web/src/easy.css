@@ -389,3 +389,49 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.build-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 auto;
+  padding: 0.6rem 1rem;
+  max-width: 72rem;
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.88rem;
+}
+
+.build-banner-stage {
+  color: var(--amber);
+}
+
+.build-banner-note {
+  flex: 1 1 16rem;
+  color: var(--muted);
+}
+
+.build-banner-sha {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-strong);
+  direction: ltr;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.build-banner button {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.build-banner-error {
+  flex: 1 1 100%;
+  color: var(--danger);
+}

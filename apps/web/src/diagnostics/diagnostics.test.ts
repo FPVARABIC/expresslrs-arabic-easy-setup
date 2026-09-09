@@ -24,6 +24,12 @@ function snapshot(
       platform: "Linux",
       standaloneDisplay: false,
       serviceWorkerSupported: true,
+      browserVersion: "Chromium 154",
+      android: false,
+      serialPolicyAllowed: true,
+      usbPolicyAllowed: true,
+      grantedSerialPorts: 0,
+      grantedUsbDevices: 0,
     },
     device: {
       connected: true,

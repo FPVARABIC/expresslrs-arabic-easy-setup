@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createTranslator, type Locale } from "@elrs-easy/i18n";
 
+import { buildSha } from "../build-identity";
 import {
   easyStateFromIdentity,
   easyStateFromOutcome,
@@ -49,13 +50,6 @@ type Outcome =
   | Readonly<{ kind: "verified"; text: string }>
   | Readonly<{ kind: "failed"; text: string }>;
 
-function buildSha(): string {
-  const value = import.meta.env.VITE_BUILD_SHA;
-  return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value)
-    ? value
-    : "unpinned-development-build";
-}
-
 function parameterValue(parameter: CrsfParameter): number | null {
   return parameter.kind === "selection" || parameter.kind === "number"
     ? parameter.value
@@ -86,6 +80,7 @@ export function EasySetup({
     cancelCurrentOperation,
     cancellable,
     captureDiagnostics,
+    captureDiagnosticsWithGrants,
     deviceTransportBlocker,
     platformCapabilities,
     catalog,
@@ -339,7 +334,11 @@ export function EasySetup({
           {t("easy.advancedCta")}
         </button>
         <p className="easy-note">{t("easy.advancedHint")}</p>
-        <DiagnosticsPanel locale={locale} capture={captureDiagnostics} />
+        <DiagnosticsPanel
+          locale={locale}
+          capture={captureDiagnostics}
+          captureWithGrants={captureDiagnosticsWithGrants}
+        />
       </section>
     );
   }
@@ -847,7 +846,11 @@ export function EasySetup({
       </div>
 
       <p className="easy-note">{t("easy.noHardwareClaim")}</p>
-      <DiagnosticsPanel locale={locale} capture={captureDiagnostics} />
+      <DiagnosticsPanel
+        locale={locale}
+        capture={captureDiagnostics}
+        captureWithGrants={captureDiagnosticsWithGrants}
+      />
     </section>
   );
 }

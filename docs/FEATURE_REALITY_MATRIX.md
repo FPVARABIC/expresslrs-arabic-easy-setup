@@ -33,6 +33,7 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | --- | --- | --- | --- |
 | Easy / Advanced mode | `setMode` | Switches which view renders the one shared device controller. The session, identity and write authority are not re-created. | `BROWSER_VERIFIED` |
 | Arabic / English | `setLocale` | Switches the message catalog and the document direction. | `BROWSER_VERIFIED` |
+| Copy the full commit | `copyFullSha` | Copies the build's full commit. The banner states the stage and the short commit; it gates nothing and disables nothing. | `EMULATOR_VERIFIED` |
 
 ### Easy Mode
 
@@ -135,8 +136,8 @@ Columns:
 | PWA / offline shell | E + A | yes | Service Worker | — | browser-verified | yes | NONE |
 | Diagnostics report | E + A | yes | — | no | redaction plus absent-by-construction secrets | yes | NONE |
 | Device transport detection | E + A | yes | Web Serial / WebUSB probe | no | the APIs themselves | yes | NONE |
-| Native bridge seam | E + A | yes | injected host transport | n/a | shape validated before use | yes | NONE |
-| Android | see [ANDROID.md](ANDROID.md) | — | — | — | evidence recorded, no device | yes | **UNVERIFIED** |
+| Native bridge seam | E + A | web half only | injected host transport | n/a | shape validated before use; no host implements it | yes | NONE |
+| Android (PWA on Chrome) | E + A | yes | Web Serial / WebUSB as the browser exposes them | same as desktop | diagnostics reports the real APIs; see [ANDROID.md](ANDROID.md) | yes | **UNVERIFIED** |
 
 ## Features that are deliberately not in the shipped product
 

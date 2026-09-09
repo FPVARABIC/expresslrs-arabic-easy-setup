@@ -7,6 +7,7 @@ import {
   type Locale,
 } from "@elrs-easy/i18n";
 
+import { BuildBanner } from "./BuildBanner";
 import { EasySetup } from "./EasySetup";
 import { ExpressLrsParityWorkbenchView } from "./ExpressLrsParityWorkbench";
 import { useDeviceController } from "../hardware/useDeviceController";
@@ -96,6 +97,8 @@ export function ProductShell({
           </div>
         </nav>
       </header>
+
+      <BuildBanner locale={locale} />
 
       <main id="product-main" ref={mainRef} tabIndex={-1}>
         {mode === "easy" ? (

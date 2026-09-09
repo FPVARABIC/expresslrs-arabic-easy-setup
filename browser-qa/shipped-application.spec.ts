@@ -103,6 +103,36 @@ test("exports a diagnostics report that claims no hardware validation", async ({
   await expect(report).toContainText(`Web Serial: ${String(serialAvailable)}`);
 });
 
+test("states the build stage and commit without disabling anything", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const banner = page.locator(".build-banner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("نسخة تجريبية للتحقق على العتاد");
+
+  // The banner reports the commit the bundle was actually built from.
+  const declared = (await banner.getAttribute("data-build")) ?? "";
+  expect(declared.length).toBeGreaterThan(0);
+  if (/^[0-9a-f]{40}$/u.test(declared)) {
+    await expect(banner.locator(".build-banner-sha")).toHaveText(
+      declared.slice(0, 7),
+    );
+  } else {
+    // An unpinned build says so instead of showing a plausible fake.
+    await expect(banner.locator(".build-banner-sha")).toHaveText(declared);
+  }
+
+  // Naming the stage must not disable a single operation.
+  const starts = page.getByRole("button", { name: "ابدأ" });
+  await expect(starts).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    await expect(starts.nth(index)).toBeEnabled();
+  }
+  expect(await page.locator("button:disabled").count()).toBe(0);
+});
+
 test("registers a service worker that controls the page on return", async ({
   page,
 }) => {
