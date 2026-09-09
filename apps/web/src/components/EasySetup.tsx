@@ -19,6 +19,7 @@ import {
   type EasyOperationId,
   type EasyStepId,
 } from "../easy/easyOperations";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import type { CrsfParameter } from "../hardware/crsf";
 import {
   MAX_BIND_PHRASE_LENGTH,
@@ -84,6 +85,7 @@ export function EasySetup({
     busy,
     cancelCurrentOperation,
     cancellable,
+    captureDiagnostics,
     catalog,
     catalogState,
     checkpoint,
@@ -335,6 +337,7 @@ export function EasySetup({
           {t("easy.advancedCta")}
         </button>
         <p className="easy-note">{t("easy.advancedHint")}</p>
+        <DiagnosticsPanel locale={locale} capture={captureDiagnostics} />
       </section>
     );
   }
@@ -827,6 +830,7 @@ export function EasySetup({
       </div>
 
       <p className="easy-note">{t("easy.noHardwareClaim")}</p>
+      <DiagnosticsPanel locale={locale} capture={captureDiagnostics} />
     </section>
   );
 }

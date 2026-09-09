@@ -51,6 +51,17 @@ export const ar = {
   "error.RECOVERY_REQUIRED": "يحتاج الجهاز إلى مسار استعادة قبل المتابعة.",
   "error.INTERNAL_ERROR": "حدث خطأ داخلي غير متوقع.",
 
+  "diagnostics.heading": "التشخيص",
+  "diagnostics.intro":
+    "تقرير بما رصدته هذه الجلسة فعلًا: قدرات المتصفح، وما أعلنه الجهاز، والحزمة التي جُهّزت، وحالة الاستعادة.",
+  "diagnostics.privacy":
+    "عبارة الربط وUID المشتق وبيانات Wi-Fi والرقم التسلسلي لـUSB لا تُجمع إطلاقًا، والنص الحر يُنقَّح عند التصدير.",
+  "diagnostics.show": "اعرض التقرير",
+  "diagnostics.copy": "انسخ التقرير",
+  "diagnostics.copied": "نُسخ",
+  "diagnostics.copyFailed": "تعذّر النسخ. حدّد نص التقرير يدويًا.",
+  "diagnostics.downloadJson": "نزّل JSON",
+  "diagnostics.downloadMarkdown": "نزّل Markdown",
   "easy.title": "إعداد ExpressLRS",
   "easy.intro":
     "اختر العملية التي تريدها. سيرشدك التطبيق خطوة بخطوة: توصيل الجهاز، ثم التعرف عليه، ثم فحص ما يدعمه، ثم التنفيذ، ثم التحقق من النتيجة.",

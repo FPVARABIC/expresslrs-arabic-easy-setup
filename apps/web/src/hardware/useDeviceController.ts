@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PhysicalAcceptanceContextSnapshot } from "../acceptance/physical-acceptance";
+import {
+  DIAGNOSTICS_SCHEMA_VERSION,
+  type DiagnosticsSnapshot,
+} from "../diagnostics/diagnostics";
 import { readBackMatches } from "../easy/easyOperations";
 
 import {
@@ -167,6 +171,14 @@ export interface SettingWriteResult {
   /** null when the attempt was refused before any command was sent. */
   readonly applied: boolean | null;
   readonly message: string;
+}
+
+/** The reviewed commit this bundle was built from, when it was pinned. */
+function buildSha(): string {
+  const value = import.meta.env.VITE_BUILD_SHA;
+  return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value)
+    ? value
+    : "unpinned-development-build";
 }
 
 function nowIso(): string {
@@ -1964,6 +1976,84 @@ export function useDeviceController({
     resetPreparedState();
   }
 
+  /**
+   * Captures what this session can actually be said to know. It is read at the
+   * moment the operator asks for it, from the same live state both views
+   * render, so a diagnostics report cannot describe a different session than
+   * the one on screen.
+   */
+  function captureDiagnostics(): DiagnosticsSnapshot {
+    const navigatorObject = navigator as Navigator & {
+      readonly usb?: unknown;
+    };
+    return Object.freeze({
+      schemaVersion: DIAGNOSTICS_SCHEMA_VERSION,
+      capturedAt: nowIso(),
+      buildSha: buildSha(),
+      environment: Object.freeze({
+        secureContext: window.isSecureContext,
+        webSerialSupported: "serial" in navigator,
+        webUsbSupported: navigatorObject.usb !== undefined,
+        language: navigator.language,
+        // userAgentData is absent outside Chromium, and the full user-agent
+        // string is a fingerprint, so only the coarse platform hint is taken.
+        platform:
+          (navigator as Navigator & { userAgentData?: { platform?: string } })
+            .userAgentData?.platform ?? "unknown",
+        standaloneDisplay:
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(display-mode: standalone)").matches,
+        serviceWorkerSupported: "serviceWorker" in navigator,
+      }),
+      device: Object.freeze({
+        connected: identity !== null,
+        productName: identity?.productName ?? null,
+        firmwareVersion: identity?.firmwareVersion ?? null,
+        hardwareVersion: identity?.hardwareVersion ?? null,
+        role: identity?.role ?? null,
+        identityValidation: identity?.validation ?? null,
+        parameterCount: identity?.parameterCount ?? null,
+        usbVendorId: identity?.usb.usbVendorId ?? null,
+        usbProductId: identity?.usb.usbProductId ?? null,
+      }),
+      capabilities: Object.freeze({
+        writableParameterCount: writableParameters.length,
+        bindCommandAvailable: hasBindCommand,
+        linkTelemetryObservable: canObserveFrames(),
+        settingsBackupAvailable: settingsBackup !== null,
+      }),
+      firmware: Object.freeze({
+        catalogState,
+        releaseLabel: selectedRelease?.label ?? null,
+        targetId: selectedTarget?.id ?? null,
+        targetPlatform: selectedTarget?.config.platform ?? null,
+        targetConfidence: targetMatch?.confidence ?? null,
+        updateMethod: method,
+        regulatoryRegion: options.region === "" ? null : options.region,
+        packageSegmentCount: prepared?.segments.length ?? 0,
+        packageSegmentHashes: Object.freeze(
+          prepared?.segments.map((segment) => segment.sha256) ?? [],
+        ),
+        // The phrase itself is never carried; only whether one was compiled in.
+        bindingPhraseConfigured:
+          prepared?.optionsSummary.bindingConfigured ?? false,
+        recoveryPackageDownloaded: recoveryDownloaded,
+      }),
+      recovery: Object.freeze({
+        journalState: recoveryJournalState,
+        checkpointStage: checkpoint?.stage ?? null,
+        checkpointProductName: checkpoint?.productName ?? null,
+        checkpointSafeError: checkpoint?.safeError ?? null,
+      }),
+      binding: Object.freeze({ evidenceLevel: bindEvidence }),
+      lastStatusMessage: status,
+      evidence: Object.freeze({
+        hardwareValidation: "NONE" as const,
+        deviceWrites: "EVIDENCE_GATED" as const,
+      }),
+    });
+  }
+
   const physicalAcceptanceContext: PhysicalAcceptanceContextSnapshot =
     Object.freeze({
       capturedAt: nowIso(),
@@ -2109,6 +2199,7 @@ export function useDeviceController({
     subscribeFrames,
     canObserveFrames,
     wipeSecretOptions,
+    captureDiagnostics,
     bindEvidence,
   } as const;
 }

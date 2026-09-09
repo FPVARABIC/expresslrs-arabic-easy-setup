@@ -600,6 +600,27 @@ describe("public product shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers the same diagnostics report in both modes", async () => {
+    const user = userEvent.setup();
+    render(<ProductShell hardwareConnector={connectedConnector()} />);
+
+    // Easy Mode, before any device is connected.
+    await user.click(
+      screen.getAllByRole("button", { name: "اعرض التقرير" })[0] as HTMLElement,
+    );
+    const easyReport = screen.getByTestId("diagnostics-report");
+    expect(easyReport).toHaveTextContent("Hardware validation: NONE");
+    expect(easyReport).toHaveTextContent("Device writes: EVIDENCE_GATED");
+    expect(easyReport).toHaveTextContent("Connected: false");
+
+    // The Advanced view exports the same report from the same controller.
+    await user.click(screen.getByRole("button", { name: "الوضع المتقدم" }));
+    await user.click(screen.getByRole("button", { name: "اعرض التقرير" }));
+    expect(screen.getByTestId("diagnostics-report")).toHaveTextContent(
+      "Hardware validation: NONE",
+    );
+  });
+
   it("exposes a skip link and a focusable main region for keyboard users", () => {
     render(<ProductShell />);
 

@@ -308,3 +308,84 @@
   color: var(--text);
   cursor: pointer;
 }
+
+.easy-firmware {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.easy-firmware label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.easy-firmware select,
+.easy-firmware input[type="text"],
+.easy-firmware input[type="password"] {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+}
+
+.easy-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.easy-check input {
+  margin-top: 0.25rem;
+}
+
+.diagnostics {
+  margin: 1.5rem 0 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.diagnostics h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+.diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.diagnostics-actions button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.diagnostics-report {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  max-height: 22rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+  color: var(--text);
+  direction: ltr;
+  text-align: left;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

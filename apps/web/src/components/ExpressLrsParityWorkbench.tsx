@@ -1,3 +1,4 @@
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
@@ -55,6 +56,7 @@ export function ExpressLrsParityWorkbenchView({
     busy,
     cancelCurrentOperation,
     cancellable,
+    captureDiagnostics,
     catalog,
     catalogState,
     checkpoint,
@@ -1072,6 +1074,8 @@ export function ExpressLrsParityWorkbenchView({
         context={physicalAcceptanceContext}
         deviceChangesEnabled={deviceWritesReady}
       />
+
+      <DiagnosticsPanel locale="ar" capture={captureDiagnostics} />
 
       <footer className="parity-footer">
         <span>المصدر: ExpressLRS الرسمي</span>

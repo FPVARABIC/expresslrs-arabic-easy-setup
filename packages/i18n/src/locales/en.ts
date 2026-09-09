@@ -56,6 +56,17 @@ export const en = {
   "error.INTERNAL_ERROR": "An unexpected internal error occurred.",
   "debug.englishOnly": "English fallback verified",
 
+  "diagnostics.heading": "Diagnostics",
+  "diagnostics.intro":
+    "A report of what this session actually observed: the browser's capabilities, what the device reported, the package that was prepared, and the recovery state.",
+  "diagnostics.privacy":
+    "The binding phrase, the derived UID, Wi-Fi credentials and the USB serial number are never collected, and free text is redacted on the way out.",
+  "diagnostics.show": "Show the report",
+  "diagnostics.copy": "Copy the report",
+  "diagnostics.copied": "Copied",
+  "diagnostics.copyFailed": "Copy failed. Select the report text manually.",
+  "diagnostics.downloadJson": "Download JSON",
+  "diagnostics.downloadMarkdown": "Download Markdown",
   "easy.title": "Set up ExpressLRS",
   "easy.intro":
     "Choose what you want to do. The app walks you through it: connect the device, identify it, check what it supports, run the operation, then verify the result.",
