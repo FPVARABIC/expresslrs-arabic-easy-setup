@@ -167,6 +167,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
 
+    env:
+      # `avdmanager` honours XDG_CONFIG_HOME and writes to
+      # `$HOME/.config/.android/avd`; the `emulator` binary does not, and looks
+      # in `$HOME/.android/avd`. On this runner they disagreed, so a
+      # successfully created AVD was invisible to the emulator, which exited
+      # with "Unknown AVD name [ci]". `ANDROID_AVD_HOME` is first in the
+      # emulator's search order and is honoured by both, so naming it once here
+      # is what keeps them pointed at the same directory.
+      ANDROID_AVD_HOME: ${{ runner.temp }}/avd
+
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -225,6 +235,7 @@ jobs:
           # WebMessageListener and document-start scripts, and the AOSP images
           # below API 30 ship one that does not.
           image="system-images;android-34;google_apis;x86_64"
+          mkdir -p "$ANDROID_AVD_HOME"
           # A bounded feed rather than `yes`: `yes` is killed by SIGPIPE as soon
           # as sdkmanager stops reading, and `pipefail` turns that into a failed
           # step. setup-android has already accepted the licences, so this only
@@ -236,20 +247,45 @@ jobs:
           printf 'no\n' | avdmanager create avd --force --name ci \
             --package "$image" --device "pixel_6" \
             || printf 'no\n' | avdmanager create avd --force --name ci --package "$image"
+          # The check that would have caught the directory mismatch here
+          # rather than five minutes later: ask the *emulator* what it can see,
+          # not just avdmanager what it wrote.
           avdmanager list avd
+          echo "emulator sees:"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx ci
 
       - name: Boot the emulator
         run: |
           set -euo pipefail
           "$ANDROID_HOME/emulator/emulator" -avd ci \
             -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
-            -accel on -camera-back none -camera-front none &
-          # Bounded: an emulator that died leaves `wait-for-device` waiting
-          # forever, which spends the whole job timeout learning nothing.
-          timeout 300 adb wait-for-device
-          # And `wait-for-device` returns as soon as adb can talk to it, which
-          # is long before the framework is up. Installing then would fail.
-          timeout 600 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'
+            -accel on -camera-back none -camera-front none > emulator.log 2>&1 &
+          emulator_pid=$!
+
+          # One loop that watches both the boot property and whether the
+          # emulator is still alive. Waiting on adb alone spent the full
+          # timeout on a process that had already exited, and reported nothing
+          # but exit 124 — the emulator's own error was in a log nobody read.
+          booted=0
+          for _ in $(seq 1 150); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo "::error::the emulator exited before it finished booting"
+              cat emulator.log
+              exit 1
+            fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              booted=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$booted" != "1" ]; then
+            echo "::error::the emulator did not report sys.boot_completed within 750s"
+            cat emulator.log
+            exit 1
+          fi
+
           # Cosmetic, and not worth failing the run over on an image that
           # refuses one of them.
           adb shell settings put global window_animation_scale 0 || true
@@ -277,5 +313,6 @@ jobs:
             android/app/build/reports/androidTests/
             android/app/build/outputs/androidTest-results/
             android-logcat.txt
+            emulator.log
           if-no-files-found: ignore
           retention-days: 14
