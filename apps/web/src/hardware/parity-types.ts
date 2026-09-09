@@ -1,3 +1,5 @@
+import type { RxAsTxMode } from "./rx-as-tx";
+
 export type ExpressLrsDeviceRole = "tx" | "rx";
 
 export type ExpressLrsFlashMethod =
@@ -62,7 +64,17 @@ export interface ExpressLrsFirmwareOptions {
   readonly receiverInvertTx: boolean;
   readonly lockOnFirstConnection: boolean;
   readonly r9mmMiniSbus: boolean;
-  readonly receiverAsTransmitter: boolean;
+  /**
+   * Upstream `--rx-as-tx`: flash TX firmware onto receiver hardware so the
+   * device changes role. Independent of {@link airportEnabled}.
+   */
+  readonly rxAsTxMode: RxAsTxMode;
+  /**
+   * Upstream `--airport-baud`: set `is-airport` so the device acts as a
+   * transparent serial bridge. This never changes the RX/TX role, and is
+   * deliberately not derived from {@link rxAsTxMode}.
+   */
+  readonly airportEnabled: boolean;
 }
 
 export interface FirmwareSegment {
@@ -81,6 +93,8 @@ export interface PreparedFirmwarePackage {
     readonly domain: number;
     readonly bindingConfigured: boolean;
     readonly wifiConfigured: boolean;
+    readonly rxAsTxMode: RxAsTxMode;
+    readonly airportEnabled: boolean;
   }>;
   readonly segments: readonly FirmwareSegment[];
   readonly primaryFileName: string;

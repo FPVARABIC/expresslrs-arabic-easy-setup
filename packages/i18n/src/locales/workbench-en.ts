@@ -44,18 +44,27 @@ export const workbenchEn = {
   "wb.method.stlink": "STM32 DFU",
   "wb.method.download": "Download only",
 
-  // --- receiver as transmitter -------------------------------------------
-  "workbench.options.rxAsTx": "Run this receiver as a transmitter (AirPort)",
+  // --- receiver as transmitter (upstream `--rx-as-tx`) --------------------
+  // Distinct from AirPort: this replaces the receiver's firmware with the
+  // transmitter build so the device changes role.
+  "workbench.options.rxAsTx": "Flash this receiver with transmitter firmware",
+  "workbench.options.rxAsTx.off": "Off — keep it a receiver",
+  "workbench.options.rxAsTx.internal": "Internal (full-duplex)",
+  "workbench.options.rxAsTx.external": "External (half-duplex)",
+  "workbench.options.airport":
+    "AirPort — transparent serial bridge (does not change the RX/TX role)",
   "workbench.rxAsTx.NO_TARGET_SELECTED":
-    "Choose an official Target first; whether it can run as a transmitter depends on the device.",
+    "Choose an official Target first; whether it can run transmitter firmware depends on the device.",
   "workbench.rxAsTx.TARGET_IS_TRANSMITTER":
-    "{target} is a transmitter, so there is no receiver to repurpose.",
-  "workbench.rxAsTx.PLATFORM_HAS_NO_AIRPORT_FIELD":
-    "UNSUPPORTED_BY_TARGET: {target} runs on {platform}, whose packed configuration block has three receiver flags and no AirPort field, so the option cannot be written to it.",
-  "workbench.rxAsTx.PLATFORM_UNKNOWN":
-    "UNSUPPORTED_BY_TARGET: this application cannot configure the {platform} platform that {target} reports.",
-  "workbench.rxAsTx.RELEASE_TOO_OLD":
-    "UNSUPPORTED_BY_TARGET: the selected ExpressLRS release predates AirPort. Choose 3.0.0 or newer.",
+    "{target} is already a transmitter, so there is no role to change.",
+  "workbench.rxAsTx.PLATFORM_UNSUPPORTED":
+    "UNSUPPORTED_BY_TARGET: {target} runs on {platform}. ExpressLRS builds receiver-as-transmitter firmware only for ESP32 and ESP8285 receivers, so this device cannot take it.",
+  "workbench.rxAsTx.MODE_UNSUPPORTED_BY_PLATFORM":
+    "UNSUPPORTED_BY_TARGET: {target} runs on {platform}, which supports only {modes} mode. ESP8285 receivers have no second UART, so half-duplex external mode is unavailable.",
+  "workbench.rxAsTx.NO_TX_ARTIFACT":
+    "UNSUPPORTED_BY_TARGET: the official catalog entry for {target} names no receiver artifact that a transmitter build can be selected from, so no transmitter firmware exists for it.",
+  "workbench.rxAsTx.LAYOUT_HAS_NO_SERIAL_PINS":
+    "UNSUPPORTED_BY_TARGET: the official hardware layout for {target} declares no serial_rx/serial_tx pair, so transmitter firmware has no serial port to drive.",
 
   // --- controller status --------------------------------------------------
   "wb.status.idle":

@@ -1,4 +1,5 @@
-import { evaluateRxAsTxSupport } from "./rx-as-tx";
+import { evaluateRxAsTxSupport, RX_AS_TX_ACTIVE_MODES } from "./rx-as-tx";
+import type { RxAsTxActiveMode, RxAsTxMode } from "./rx-as-tx";
 import type {
   ExpressLrsFirmwareOptions,
   OfficialRelease,
@@ -13,6 +14,17 @@ export class FirmwareOptionsError extends Error {
     super(message);
     this.name = "FirmwareOptionsError";
   }
+}
+
+function validatedRxAsTxMode(value: unknown): RxAsTxMode {
+  if (value === undefined || value === "off") return "off";
+  if (RX_AS_TX_ACTIVE_MODES.includes(value as RxAsTxActiveMode)) {
+    return value as RxAsTxActiveMode;
+  }
+  throw new FirmwareOptionsError(
+    "rxAsTxMode",
+    `rxAsTxMode must be one of off, ${RX_AS_TX_ACTIVE_MODES.join(", ")}`,
+  );
 }
 
 function boundedInteger(
@@ -116,20 +128,25 @@ export function validateFirmwareOptions(input: {
     receiverInvertTx: options.receiverInvertTx === true,
     lockOnFirstConnection: options.lockOnFirstConnection === true,
     r9mmMiniSbus: options.r9mmMiniSbus === true,
-    receiverAsTransmitter: options.receiverAsTransmitter === true,
+    rxAsTxMode: validatedRxAsTxMode(options.rxAsTxMode),
+    // Deliberately read from its own field. AirPort and RX-as-TX are separate
+    // upstream features; deriving one from the other is the defect this
+    // replaced.
+    airportEnabled: options.airportEnabled === true,
   });
 
-  if (validated.receiverAsTransmitter) {
-    // Whether a device can run as a transmitter follows from where the
-    // `is-airport` option lands in its firmware, not from the project's phase.
+  if (validated.rxAsTxMode !== "off") {
+    // Whether a receiver can be flashed with transmitter firmware follows from
+    // upstream's platform gate and from whether a `_TX` artifact exists for it
+    // — never from the project's build stage.
     const support = evaluateRxAsTxSupport({
       target: input.target,
-      release: input.release ?? null,
+      mode: validated.rxAsTxMode,
     });
     if (!support.supported) {
       throw new FirmwareOptionsError(
-        "receiverAsTransmitter",
-        `UNSUPPORTED_BY_TARGET (${support.reason}): ${support.targetName === "" ? "no target" : support.targetName} on platform ${support.platform === "" ? "unknown" : support.platform} cannot carry the AirPort option`,
+        "rxAsTxMode",
+        `UNSUPPORTED_BY_TARGET (${support.reason}): ${support.targetName === "" ? "no target" : support.targetName} on platform ${support.platform === "" ? "unknown" : support.platform} cannot be flashed as a transmitter in ${validated.rxAsTxMode} mode${support.availableModes.length === 0 ? "" : ` (it accepts: ${support.availableModes.join(", ")})`}`,
       );
     }
   }

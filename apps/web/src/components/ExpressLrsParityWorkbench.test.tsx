@@ -151,6 +151,8 @@ const preparedPackage: PreparedFirmwarePackage = {
     domain: 0,
     bindingConfigured: false,
     wifiConfigured: false,
+    rxAsTxMode: "off" as const,
+    airportEnabled: false,
   },
   segments: [
     {

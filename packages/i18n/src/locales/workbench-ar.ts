@@ -33,17 +33,24 @@ export const workbenchAr = {
   "wb.method.stlink": "STM32 DFU",
   "wb.method.download": "تنزيل فقط",
 
-  "workbench.options.rxAsTx": "تشغيل هذا المستقبل كمرسل (AirPort)",
+  // --- receiver as transmitter (upstream `--rx-as-tx`) --------------------
+  "workbench.options.rxAsTx": "تفليش هذا المستقبل بـ Firmware المرسل",
+  "workbench.options.rxAsTx.off": "معطّل — يبقى مستقبلًا",
+  "workbench.options.rxAsTx.internal": "داخلي (Full-duplex)",
+  "workbench.options.rxAsTx.external": "خارجي (Half-duplex)",
+  "workbench.options.airport": "AirPort — جسر تسلسلي شفاف (لا يغيّر دور RX/TX)",
   "workbench.rxAsTx.NO_TARGET_SELECTED":
-    "اختر Target رسميًا أولًا؛ إمكانية تشغيله كمرسل تتبع الجهاز نفسه.",
+    "اختر Target رسميًا أولًا؛ إمكانية تشغيل Firmware المرسل تعتمد على الجهاز نفسه.",
   "workbench.rxAsTx.TARGET_IS_TRANSMITTER":
-    "{target} جهاز إرسال، فلا يوجد مستقبل لتحويله.",
-  "workbench.rxAsTx.PLATFORM_HAS_NO_AIRPORT_FIELD":
-    "UNSUPPORTED_BY_TARGET: يعمل {target} على منصة {platform}، وكتلة إعداداته المحزومة تحمل ثلاث رايات للمستقبل بلا حقل AirPort، فلا يمكن كتابة الخيار إليه.",
-  "workbench.rxAsTx.PLATFORM_UNKNOWN":
-    "UNSUPPORTED_BY_TARGET: هذا التطبيق لا يستطيع إعداد منصة {platform} التي يعلنها {target}.",
-  "workbench.rxAsTx.RELEASE_TOO_OLD":
-    "UNSUPPORTED_BY_TARGET: إصدار ExpressLRS المختار أقدم من AirPort. اختر 3.0.0 أو أحدث.",
+    "{target} مرسل بالفعل، فلا يوجد دور لتغييره.",
+  "workbench.rxAsTx.PLATFORM_UNSUPPORTED":
+    "UNSUPPORTED_BY_TARGET: يعمل {target} على {platform}. ExpressLRS يبني Firmware «المستقبل كمرسل» لمستقبلات ESP32 وESP8285 فقط، لذا لا يقبله هذا الجهاز.",
+  "workbench.rxAsTx.MODE_UNSUPPORTED_BY_PLATFORM":
+    "UNSUPPORTED_BY_TARGET: يعمل {target} على {platform}، وهي تدعم وضع {modes} فقط. مستقبلات ESP8285 لا تملك UART ثانيًا، لذا الوضع الخارجي Half-duplex غير متاح.",
+  "workbench.rxAsTx.NO_TX_ARTIFACT":
+    "UNSUPPORTED_BY_TARGET: مدخل الكتالوج الرسمي لـ {target} لا يسمّي ملف مستقبل يمكن اشتقاق بناء مرسل منه، فلا يوجد Firmware مرسل له.",
+  "workbench.rxAsTx.LAYOUT_HAS_NO_SERIAL_PINS":
+    "UNSUPPORTED_BY_TARGET: مخطط العتاد الرسمي لـ {target} لا يعلن زوج serial_rx/serial_tx، فلا يجد Firmware المرسل منفذًا تسلسليًا يقوده.",
 
   "wb.status.idle":
     "يمكنك تعريف الجهاز مباشرة؛ حمّل الكتالوج فقط عند تجهيز Firmware رسمي.",

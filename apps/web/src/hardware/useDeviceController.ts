@@ -62,7 +62,19 @@ import {
   regulatoryRegionByKey,
   regulatoryRegionsForRadioKey,
 } from "./regulatory-domain";
-import { evaluateRxAsTxSupport, type RxAsTxSupport } from "./rx-as-tx";
+import {
+  evaluateRxAsTxSupport,
+  RX_AS_TX_ACTIVE_MODES,
+  type RxAsTxActiveMode,
+  type RxAsTxMode,
+  type RxAsTxSupport,
+} from "./rx-as-tx";
+
+/** One mode's answer, so the UI can explain each independently. */
+export interface RxAsTxModeSupport {
+  readonly mode: RxAsTxActiveMode;
+  readonly support: RxAsTxSupport;
+}
 import {
   clearRecoveryCheckpoint,
   loadRecoveryCheckpoint,
@@ -131,7 +143,8 @@ const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
   receiverInvertTx: false,
   lockOnFirstConnection: true,
   r9mmMiniSbus: false,
-  receiverAsTransmitter: false,
+  rxAsTxMode: "off",
+  airportEnabled: false,
 });
 
 export const METHOD_LABEL_KEYS: Readonly<
@@ -551,8 +564,19 @@ export function useDeviceController({
   // device rather than with the build.
   const rxAsTxSupport: RxAsTxSupport = evaluateRxAsTxSupport({
     target: selectedTarget,
-    release: selectedRelease,
+    ...(options.rxAsTxMode === "off" ? {} : { mode: options.rxAsTxMode }),
   });
+
+  // Each mode is answered separately, so the UI can keep every mode visible and
+  // say precisely why a particular one is closed for this Target rather than
+  // hiding the control or blaming the build.
+  const rxAsTxModeSupport: readonly RxAsTxModeSupport[] =
+    RX_AS_TX_ACTIVE_MODES.map((mode) =>
+      Object.freeze({
+        mode,
+        support: evaluateRxAsTxSupport({ target: selectedTarget, mode }),
+      }),
+    );
 
   const exactHardwareTarget =
     selectedTarget !== null &&
@@ -1450,6 +1474,11 @@ export function useDeviceController({
     readonly manualTargetWasConfirmed: boolean;
     readonly totalBytes: number;
     readonly signal: AbortSignal;
+    /**
+     * `"off"` for an ordinary write. Anything else means the device must come
+     * back reporting a transmitter role, or the operation failed.
+     */
+    readonly rxAsTxMode: RxAsTxMode;
   }): Promise<void> {
     setFlashProgress({
       stage: "RECONNECT",
@@ -1506,6 +1535,7 @@ export function useDeviceController({
       afterIdentity: outcome.identity,
       match,
       manualTargetConfirmed: input.manualTargetWasConfirmed,
+      rxAsTxMode: input.rxAsTxMode,
     });
     if (!targetVerification.verified) {
       await closeSessionOrLatch(
@@ -1887,6 +1917,7 @@ export function useDeviceController({
         manualTargetWasConfirmed: manualConfirmationSnapshot,
         totalBytes,
         signal: controller.signal,
+        rxAsTxMode: prepared.optionsSummary.rxAsTxMode,
       });
       const reported = message("wb.flash.complete");
       setStatus(reported);
@@ -2057,6 +2088,9 @@ export function useDeviceController({
         manualTargetWasConfirmed: manualTargetConfirmed,
         totalBytes,
         signal: controller.signal,
+        // Recovery restores the original receiver image, so the device must
+        // come back in its original role.
+        rxAsTxMode: "off",
       });
       const reported = message("wb.recovery.complete");
       setStatus(reported);
@@ -2360,6 +2394,7 @@ export function useDeviceController({
     subscribeFrames,
     canObserveFrames,
     rxAsTxSupport,
+    rxAsTxModeSupport,
     wipeSecretOptions,
     captureDiagnostics,
     captureDiagnosticsWithGrants,

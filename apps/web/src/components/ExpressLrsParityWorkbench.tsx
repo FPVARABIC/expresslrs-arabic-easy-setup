@@ -4,6 +4,7 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
+import type { RxAsTxMode } from "../hardware/rx-as-tx";
 import {
   MAX_BIND_PHRASE_LENGTH,
   bindPhraseIssue,
@@ -72,7 +73,7 @@ export function ExpressLrsParityWorkbenchView({
     cancelCurrentOperation,
     cancellable,
     captureDiagnostics,
-    rxAsTxSupport,
+    rxAsTxModeSupport,
     captureDiagnosticsWithGrants,
     catalog,
     catalogState,
@@ -895,31 +896,63 @@ export function ExpressLrsParityWorkbenchView({
                 />
                 <span>R9MM Mini SBUS</span>
               </label>
+              <label className="select-field">
+                <span>{t("workbench.options.rxAsTx")}</span>
+                <select
+                  value={options.rxAsTxMode}
+                  disabled={busy}
+                  data-testid="rx-as-tx-mode"
+                  onChange={(event) =>
+                    updateOption(
+                      "rxAsTxMode",
+                      event.currentTarget.value as RxAsTxMode,
+                    )
+                  }
+                >
+                  <option value="off">
+                    {t("workbench.options.rxAsTx.off")}
+                  </option>
+                  {rxAsTxModeSupport.map(({ mode, support }) => (
+                    <option
+                      key={mode}
+                      value={mode}
+                      disabled={!support.supported}
+                    >
+                      {t(`workbench.options.rxAsTx.${mode}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {rxAsTxModeSupport
+                .filter(({ support }) => !support.supported)
+                .map(({ mode, support }) =>
+                  support.supported ? null : (
+                    <p
+                      key={mode}
+                      className="parity-note"
+                      data-rx-as-tx-mode={mode}
+                      data-rx-as-tx-reason={support.reason}
+                    >
+                      {t(`workbench.rxAsTx.${support.reason}`, {
+                        target: support.targetName,
+                        platform: support.platform,
+                        modes: support.availableModes.join(", "),
+                      })}
+                    </p>
+                  ),
+                )}
               <label className="check-field">
                 <input
                   type="checkbox"
-                  checked={options.receiverAsTransmitter}
-                  disabled={busy || !rxAsTxSupport.supported}
+                  checked={options.airportEnabled}
+                  disabled={busy}
+                  data-testid="airport-enabled"
                   onChange={(event) =>
-                    updateOption(
-                      "receiverAsTransmitter",
-                      event.currentTarget.checked,
-                    )
+                    updateOption("airportEnabled", event.currentTarget.checked)
                   }
                 />
-                <span>{t("workbench.options.rxAsTx")}</span>
+                <span>{t("workbench.options.airport")}</span>
               </label>
-              {rxAsTxSupport.supported ? null : (
-                <p
-                  className="parity-note"
-                  data-rx-as-tx-reason={rxAsTxSupport.reason}
-                >
-                  {t(`workbench.rxAsTx.${rxAsTxSupport.reason}`, {
-                    target: rxAsTxSupport.targetName,
-                    platform: rxAsTxSupport.platform,
-                  })}
-                </p>
-              )}
             </>
           )}
         </div>

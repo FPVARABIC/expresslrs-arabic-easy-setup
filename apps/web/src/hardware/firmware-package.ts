@@ -4,6 +4,12 @@ import { copyToArrayBuffer } from "./byte-utils";
 import { expressLrsBindingUid, md5Bytes } from "./bind-phrase";
 import { validateFirmwareOptions } from "./firmware-options";
 import {
+  applyRxAsTxLayout,
+  rxAsTxFirmwareArtifact,
+  RxAsTxLayoutError,
+} from "./rx-as-tx";
+import type { RxAsTxMode } from "./rx-as-tx";
+import {
   EXPRESSLRS_WEB_FLASHER_ASSET_BASE,
   OfficialCatalogError,
   readBoundedResponse,
@@ -724,7 +730,19 @@ function buildFirmwareOptionObject(
     value["rcvr-invert-tx"] = options.receiverInvertTx;
     value["lock-on-first-connection"] = options.lockOnFirstConnection;
     value["r9mm-mini-sbus"] = options.r9mmMiniSbus;
-    value["is-airport"] = options.receiverAsTransmitter;
+  }
+  // AirPort, and only AirPort, writes `is-airport`. Upstream sets it from
+  // `--airport-baud` alone (`binary_configurator.py:89-94`) and omits the key
+  // entirely when the feature is off; `--rx-as-tx` never touches it. The
+  // receiver keeps `rcvr-uart-baud` as its airport baud, a transmitter gets
+  // `airport-uart-baud`.
+  if (options.airportEnabled) {
+    value["is-airport"] = true;
+    if (target.role === "tx") {
+      value["airport-uart-baud"] = options.receiverUartBaud;
+    } else {
+      value["rcvr-uart-baud"] = options.receiverUartBaud;
+    }
   }
   return Object.freeze(value);
 }
@@ -935,6 +953,7 @@ async function createSegments(
 function targetLayout(
   target: OfficialTarget,
   layoutBytes: Uint8Array | null,
+  rxAsTxMode: RxAsTxMode,
 ): Readonly<Record<string, unknown>> {
   let layout: Readonly<Record<string, unknown>> =
     target.config.customLayout ?? Object.freeze({});
@@ -949,6 +968,17 @@ function targetLayout(
   }
   if (target.config.overlay !== null) {
     layout = applyLayoutOverlay(layout, target.config.overlay);
+  }
+  if (rxAsTxMode !== "off") {
+    // Applied after the overlay, matching `UnifiedConfiguration.py:57-67`.
+    try {
+      layout = applyRxAsTxLayout(layout, rxAsTxMode);
+    } catch (error) {
+      if (error instanceof RxAsTxLayoutError) {
+        throw new FirmwarePackageError("TARGET_NOT_FOUND", error.message);
+      }
+      throw error;
+    }
   }
   return layout;
 }
@@ -1037,8 +1067,15 @@ export async function prepareOfficialFirmwarePackage(input: {
     family === "stm32" ? validatedStm32SegmentAddress(input.target) : null;
   const revision = encodePathPart(input.release.revision, "release revision");
   const region = encodePathPart(validatedOptions.region, "regulatory region");
+  // `--rx-as-tx` selects a different artifact: upstream rewrites the catalog's
+  // firmware name `_RX` -> `_TX` (`binary_configurator.py:239`) and fetches the
+  // transmitter build, bootloader and partitions from there. Patching the
+  // receiver build would leave the device a receiver.
+  const rxAsTxMode = validatedOptions.rxAsTxMode;
   const firmware = encodePathPart(
-    input.target.config.firmware,
+    rxAsTxMode === "off"
+      ? input.target.config.firmware
+      : rxAsTxFirmwareArtifact(input.target.config.firmware),
     "firmware target",
   );
   const firmwareRoot = `${EXPRESSLRS_WEB_FLASHER_ASSET_BASE}/${revision}/${region}/${firmware}`;
@@ -1094,6 +1131,9 @@ export async function prepareOfficialFirmwarePackage(input: {
   let layoutBytes: Uint8Array | null = null;
   let logoBytes: Uint8Array | null = null;
   if (family !== "stm32" && input.target.config.layoutFile !== null) {
+    // Even under RX-as-TX this stays the receiver's layout directory: upstream
+    // picks it from the unmutated catalog entry, which still names an `_RX`
+    // artifact (`UnifiedConfiguration.py:229`).
     const role = input.target.role === "tx" ? "TX" : "RX";
     const layoutPath = encodeArtifactPath(
       input.target.config.layoutFile,
@@ -1146,7 +1186,7 @@ export async function prepareOfficialFirmwarePackage(input: {
           family,
           target: input.target,
           options: validatedOptions,
-          layout: targetLayout(input.target, layoutBytes),
+          layout: targetLayout(input.target, layoutBytes, rxAsTxMode),
           logo: logoBytes,
         });
   if (
@@ -1248,6 +1288,10 @@ export async function prepareOfficialFirmwarePackage(input: {
       wifiConfigured:
         validatedOptions.wifiSsid.length > 0 ||
         validatedOptions.wifiPassword.length > 0,
+      // Carried so post-flash verification checks the role this package was
+      // actually built for, not whatever the form happens to show later.
+      rxAsTxMode: validatedOptions.rxAsTxMode,
+      airportEnabled: validatedOptions.airportEnabled,
     }),
     segments,
     primaryFileName,

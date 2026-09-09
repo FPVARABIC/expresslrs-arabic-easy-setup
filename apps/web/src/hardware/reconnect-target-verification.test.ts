@@ -112,3 +112,115 @@ describe("reconnect Target verification", () => {
     });
   });
 });
+
+describe("rx-as-tx role verification after reboot", () => {
+  const rxTarget: OfficialTarget = {
+    ...target,
+    id: "vendor/rx_2400/module",
+    role: "rx",
+    radioKey: "rx_2400",
+    config: { ...target.config, firmware: "MODULE_RX" },
+  };
+  const beforeRx: ExpressLrsIdentity = { ...identity, role: "rx" };
+  const afterTx: ExpressLrsIdentity = {
+    ...identity,
+    role: "tx",
+    firmwareVersion: "4.1.0",
+  };
+
+  it("fails when the device comes back still a receiver", () => {
+    // The bytes may have been written and the device may have rebooted and
+    // reconnected — none of that is proof the role changed.
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: beforeRx,
+        afterIdentity: beforeRx,
+        match: noMatch,
+        manualTargetConfirmed: true,
+        rxAsTxMode: "internal",
+      }),
+    ).toEqual({ verified: false, reason: "RX_AS_TX_ROLE_NOT_APPLIED" });
+  });
+
+  it("confirms only when the same unit reports a transmitter role", () => {
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: beforeRx,
+        afterIdentity: afterTx,
+        match: noMatch,
+        manualTargetConfirmed: true,
+        rxAsTxMode: "internal",
+      }),
+    ).toEqual({ verified: true, reason: "RX_AS_TX_ROLE_CONFIRMED" });
+  });
+
+  it("refuses when there is no before-identity to compare the unit against", () => {
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: null,
+        afterIdentity: afterTx,
+        match: noMatch,
+        manualTargetConfirmed: true,
+        rxAsTxMode: "internal",
+      }),
+    ).toEqual({ verified: false, reason: "TARGET_EVIDENCE_MISSING" });
+  });
+
+  it("refuses when a different physical unit answers", () => {
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: beforeRx,
+        afterIdentity: { ...afterTx, hardwareVersion: 99 },
+        match: noMatch,
+        manualTargetConfirmed: true,
+        rxAsTxMode: "internal",
+      }),
+    ).toEqual({ verified: false, reason: "PHYSICAL_IDENTITY_MISMATCH" });
+  });
+
+  it("refuses without an operator Target confirmation", () => {
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: beforeRx,
+        afterIdentity: afterTx,
+        match: noMatch,
+        manualTargetConfirmed: false,
+        rxAsTxMode: "internal",
+      }),
+    ).toEqual({ verified: false, reason: "TARGET_EVIDENCE_MISSING" });
+  });
+
+  it("still expects the receiver role for an ordinary write", () => {
+    // Without rx-as-tx a device that suddenly reports TX is a mismatch, not a
+    // success.
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: beforeRx,
+        afterIdentity: afterTx,
+        match: noMatch,
+        manualTargetConfirmed: true,
+        rxAsTxMode: "off",
+      }),
+    ).toEqual({ verified: false, reason: "ROLE_MISMATCH" });
+  });
+
+  it("expects the receiver role back after a recovery restore", () => {
+    // Recovery replays the original receiver image, so `rxAsTxMode` is absent
+    // and the device must return to being a receiver.
+    expect(
+      verifyReconnectTarget({
+        expectedTarget: rxTarget,
+        beforeIdentity: beforeRx,
+        afterIdentity: beforeRx,
+        match: noMatch,
+        manualTargetConfirmed: true,
+      }),
+    ).toMatchObject({ verified: true });
+  });
+});

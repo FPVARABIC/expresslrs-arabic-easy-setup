@@ -40,7 +40,8 @@ const options: ExpressLrsFirmwareOptions = {
   receiverInvertTx: false,
   lockOnFirstConnection: true,
   r9mmMiniSbus: false,
-  receiverAsTransmitter: false,
+  rxAsTxMode: "off",
+  airportEnabled: false,
 };
 
 describe("firmware option validation", () => {
@@ -90,98 +91,80 @@ describe("firmware option validation", () => {
   // an ESP receiver is configured through a JSON options block that carries
   // arbitrary keys, while an STM32 receiver is configured through a packed
   // block whose receiver flags are three fixed bits with no AirPort field.
-  it("accepts receiver-as-transmitter on an ESP receiver", () => {
+  const rxOn = (
+    platform: string,
+    firmware = "MODULE_RX",
+    productName = "Reference RX",
+  ) => ({
+    ...target,
+    role: "rx" as const,
+    radioKey: "rx_2400",
+    config: { ...target.config, platform, firmware, productName },
+  });
+
+  it.each(["internal", "external"] as const)(
+    "accepts %s mode on an ESP32 receiver",
+    (mode) => {
+      expect(() =>
+        validateFirmwareOptions({
+          target: rxOn("esp32"),
+          options: { ...options, rxAsTxMode: mode },
+        }),
+      ).not.toThrow();
+    },
+  );
+
+  it("accepts internal mode on an ESP8285 receiver", () => {
     expect(() =>
       validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          radioKey: "rx_2400",
-          config: {
-            ...target.config,
-            platform: "esp32",
-            firmware: "MODULE_RX",
-          },
-        },
-        options: { ...options, receiverAsTransmitter: true },
+        target: rxOn("esp8285"),
+        options: { ...options, rxAsTxMode: "internal" },
       }),
     ).not.toThrow();
   });
 
-  it("accepts it on an ESP8285 receiver too", () => {
+  it("refuses external mode on an ESP8285 receiver, which has one UART", () => {
     expect(() =>
       validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          radioKey: "rx_900",
-          config: {
-            ...target.config,
-            platform: "esp8285",
-            firmware: "MODULE_RX",
-          },
-        },
-        options: { ...options, receiverAsTransmitter: true },
-      }),
-    ).not.toThrow();
-  });
-
-  it("refuses it on an STM32 receiver and names the missing field", () => {
-    expect(() =>
-      validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          radioKey: "rx_900",
-          config: {
-            ...target.config,
-            productName: "R9 Mini",
-            platform: "stm32",
-            firmware: "R9MINI",
-          },
-        },
-        options: { ...options, receiverAsTransmitter: true },
+        target: rxOn("esp8285", "MODULE_RX", "EP1 RX"),
+        options: { ...options, rxAsTxMode: "external" },
       }),
     ).toThrow(
       expect.objectContaining({
-        field: "receiverAsTransmitter",
+        field: "rxAsTxMode",
         message: expect.stringContaining(
-          "UNSUPPORTED_BY_TARGET (PLATFORM_HAS_NO_AIRPORT_FIELD)",
+          "UNSUPPORTED_BY_TARGET (MODE_UNSUPPORTED_BY_PLATFORM)",
         ),
       }),
     );
   });
 
-  it("names the Target and platform in the refusal", () => {
-    let thrown: unknown;
-    try {
-      validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          config: {
-            ...target.config,
-            productName: "R9 Mini",
-            platform: "stm32",
-          },
-        },
-        options: { ...options, receiverAsTransmitter: true },
-      });
-    } catch (error: unknown) {
-      thrown = error;
-    }
-    const message = (thrown as Error).message;
-    expect(message).toContain("R9 Mini");
-    expect(message).toContain("stm32");
-    // Never a build-phase excuse.
-    expect(message).not.toMatch(/locked|not implemented|until/iu);
-  });
+  it.each(["internal", "external"] as const)(
+    "refuses %s mode on an STM32 receiver, naming the Target and platform",
+    (mode) => {
+      let thrown: unknown;
+      try {
+        validateFirmwareOptions({
+          target: rxOn("stm32", "R9MINI_RX", "R9 Mini"),
+          options: { ...options, rxAsTxMode: mode },
+        });
+      } catch (error: unknown) {
+        thrown = error;
+      }
+      const message = (thrown as Error).message;
+      expect(message).toContain("UNSUPPORTED_BY_TARGET (PLATFORM_UNSUPPORTED)");
+      expect(message).toContain("R9 Mini");
+      expect(message).toContain("stm32");
+      // Never a build-phase excuse.
+      expect(message).not.toMatch(/locked|not implemented|until|later|stage/iu);
+    },
+  );
 
-  it("refuses it on a transmitter Target, which has no receiver to repurpose", () => {
+  it("refuses it on a transmitter Target, which has no role to change", () => {
     expect(() =>
       validateFirmwareOptions({
         target,
-        options: { ...options, receiverAsTransmitter: true },
+        options: { ...options, rxAsTxMode: "internal" },
       }),
     ).toThrow(
       expect.objectContaining({
@@ -190,51 +173,55 @@ describe("firmware option validation", () => {
     );
   });
 
-  it("refuses it on a platform this application cannot configure", () => {
+  it("refuses a receiver whose artifact names no transmitter build", () => {
     expect(() =>
       validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          config: { ...target.config, platform: "nrf52840" },
-        },
-        options: { ...options, receiverAsTransmitter: true },
+        target: rxOn("esp32", "MODULE"),
+        options: { ...options, rxAsTxMode: "internal" },
       }),
     ).toThrow(
       expect.objectContaining({
-        message: expect.stringContaining("PLATFORM_UNKNOWN"),
+        message: expect.stringContaining("NO_TX_ARTIFACT"),
       }),
     );
   });
 
-  it("refuses it for a release that predates AirPort", () => {
+  it("rejects a mode outside upstream's TXType enum", () => {
     expect(() =>
       validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          config: { ...target.config, platform: "esp32" },
+        target: rxOn("esp32"),
+        options: {
+          ...options,
+          rxAsTxMode: "sideways" as unknown as "internal",
         },
-        options: { ...options, receiverAsTransmitter: true },
-        release: { label: "2.5.2", revision: "r252", channel: "release" },
       }),
-    ).toThrow(
-      expect.objectContaining({
-        message: expect.stringContaining("RELEASE_TOO_OLD"),
-      }),
-    );
+    ).toThrow(expect.objectContaining({ field: "rxAsTxMode" }));
   });
 
-  it("leaves the option alone when it is not requested", () => {
+  it("leaves an unsupported Target alone when the option is off", () => {
     expect(
       validateFirmwareOptions({
-        target: {
-          ...target,
-          role: "rx",
-          config: { ...target.config, platform: "stm32" },
-        },
-        options: { ...options, receiverAsTransmitter: false },
-      }).receiverAsTransmitter,
-    ).toBe(false);
+        target: rxOn("stm32"),
+        options: { ...options, rxAsTxMode: "off" },
+      }).rxAsTxMode,
+    ).toBe("off");
+  });
+
+  it("keeps AirPort independent of rx-as-tx in both directions", () => {
+    // AirPort on an STM32 receiver is fine: it is a different feature and is
+    // not gated by the rx-as-tx platform rule.
+    expect(
+      validateFirmwareOptions({
+        target: rxOn("stm32"),
+        options: { ...options, rxAsTxMode: "off", airportEnabled: true },
+      }),
+    ).toMatchObject({ rxAsTxMode: "off", airportEnabled: true });
+    // And enabling rx-as-tx must not turn AirPort on.
+    expect(
+      validateFirmwareOptions({
+        target: rxOn("esp32"),
+        options: { ...options, rxAsTxMode: "internal", airportEnabled: false },
+      }),
+    ).toMatchObject({ rxAsTxMode: "internal", airportEnabled: false });
   });
 });
