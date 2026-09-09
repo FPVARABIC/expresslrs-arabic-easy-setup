@@ -309,12 +309,6 @@ export const en = {
   "easy.disconnected":
     "The device was disconnected. Reconnect it and identify again.",
   "easy.disconnect": "Close the connection",
-  "easy.lockedHeading": "Not available yet",
-  "easy.lockedBinding": "Binding",
-  "easy.lockedSettings": "Changing settings",
-  "easy.lockedUpdate": "Firmware update",
-  "easy.lockedWhy":
-    "These stay locked in this preview until they are validated on real hardware. No build option unlocks them.",
   "easy.noHardwareClaim":
     "Nothing here is proof that a device was bound, configured, or flashed.",
   "easy.advancedCta": "Open advanced mode",

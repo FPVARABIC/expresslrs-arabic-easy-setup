@@ -300,12 +300,6 @@ export const ar = {
     "الجهاز الذي أجاب ليس الجهاز الذي جرى تعريفه سابقًا. أُغلقت الجلسة للسلامة.",
   "easy.disconnected": "فُصل الجهاز. أعد توصيله ثم أعد التعريف.",
   "easy.disconnect": "إغلاق الاتصال",
-  "easy.lockedHeading": "غير متاح بعد",
-  "easy.lockedBinding": "الربط",
-  "easy.lockedSettings": "تغيير الإعدادات",
-  "easy.lockedUpdate": "تحديث Firmware",
-  "easy.lockedWhy":
-    "تبقى هذه العمليات مقفلة في هذه المعاينة حتى تُختبر على عتاد حقيقي. لا يوجد خيار بناء يفتحها.",
   "easy.noHardwareClaim":
     "لا شيء هنا دليل على أن جهازًا جرى ربطه أو إعداده أو تحديثه.",
   "easy.advancedCta": "افتح الوضع المتقدم",
