@@ -46,9 +46,6 @@ class UsbSerialBridge private constructor(
 
     private var detachReceiver: BroadcastReceiver? = null
 
-    /** Exposed for tests and diagnostics. */
-    val bridgeCore: BridgeCore get() = core
-
     private fun listenForDetach() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
