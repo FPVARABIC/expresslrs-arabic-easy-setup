@@ -21,7 +21,14 @@ pnpm qa:browser
 
 The server reads `apps/web/dist/_headers` and applies its `/*` block, because
 `vite preview` ignores that file and would prove nothing about the shipped
-policy. Where a Chromium is already installed, point at it instead of
+policy. It also detects the base path the build was compiled for — a Pages
+build rewrites every asset URL to `/<repo>/assets/...` — so the suite runs
+against the exact artifact that ships rather than a second build made only for
+testing. Serving a Pages build from the root instead returns `index.html` for
+every asset and the browser rejects them on MIME type; the "no console errors"
+check is what catches that.
+
+Where a Chromium is already installed, point at it instead of
 downloading another:
 
 ```bash

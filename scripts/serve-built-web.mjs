@@ -58,8 +58,31 @@ async function readGlobalHeaders() {
 
 const globalHeaders = await readGlobalHeaders();
 
+/**
+ * The base path this build was compiled for.
+ *
+ * A Pages build rewrites every asset URL to `/<repo>/assets/...`, so serving
+ * it from the root returns `index.html` for each asset and the browser rejects
+ * them on MIME type. Detecting the prefix from the build's own markup lets the
+ * browser QA run against the exact artifact that ships, base path and all,
+ * instead of against a second build made only for testing.
+ */
+async function readBasePath() {
+  try {
+    const html = await readFile(path.join(distRoot, "index.html"), "utf8");
+    return /(?:src|href)="(\/[^"]*\/)assets\//u.exec(html)?.[1] ?? "/";
+  } catch {
+    return "/";
+  }
+}
+
+const basePath = await readBasePath();
+
 function resolveWithinDist(urlPath) {
-  const decoded = decodeURIComponent(urlPath.split("?")[0] ?? "/");
+  let decoded = decodeURIComponent(urlPath.split("?")[0] ?? "/");
+  if (basePath !== "/" && decoded.startsWith(basePath)) {
+    decoded = `/${decoded.slice(basePath.length)}`;
+  }
   const candidate = path.resolve(distRoot, `.${decoded}`);
   // Never serve outside the build output, whatever the request path claims.
   return candidate === distRoot ||
@@ -101,6 +124,6 @@ const server = createServer((request, response) => {
 
 server.listen(port, "127.0.0.1", () => {
   console.log(
-    `Serving apps/web/dist with _headers on http://127.0.0.1:${port}`,
+    `Serving apps/web/dist with _headers on http://127.0.0.1:${port}${basePath}`,
   );
 });
