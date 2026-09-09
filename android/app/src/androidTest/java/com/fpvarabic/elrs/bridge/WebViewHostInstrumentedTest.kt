@@ -60,7 +60,7 @@ class WebViewHostInstrumentedTest {
     @Test
     fun installsTheBridgeInTheTrustedTopLevelDocument() {
         attach()
-        loadAt(ORIGIN, "<html><body>ready</body></html>")
+        loadOnOrigin("<html><body>ready</body></html>")
 
         assertEquals("\"object\"", evaluate("typeof window.elrsNativeHost"))
         // The shim runs at document start, so the page-facing bridge is present
@@ -76,7 +76,7 @@ class WebViewHostInstrumentedTest {
     @Test
     fun doesNotInstallTheBridgeInADocumentFromAnotherOrigin() {
         attach()
-        loadAt("https://evil.example", "<html><body>hostile</body></html>")
+        loadForeignOrigin("<html><body>hostile</body></html>")
 
         assertEquals("\"undefined\"", evaluate("typeof window.elrsNativeHost"))
         assertEquals("\"undefined\"", evaluate("typeof window.elrsNativeBridge"))
@@ -85,40 +85,47 @@ class WebViewHostInstrumentedTest {
     @Test
     fun refusesAnythingASameOriginSubframeSends() {
         attach()
-        loadAt(
-            ORIGIN,
-            """
-            <html><body>
-            <iframe id="child" srcdoc="&lt;script&gt;
+        // A genuine same-origin subframe, served from the same loader as the
+        // parent, rather than a `srcdoc` frame whose origin inheritance would
+        // itself be an assumption. This is the shape a remote page would use to
+        // reach a bridge it should not have.
+        served["child.html"] = """
+            <html><body><script>
               if (window.elrsNativeHost) {
                 window.elrsNativeHost.onmessage = function (event) {
-                  parent.postMessage(event.data, '*');
+                  parent.postMessage(
+                    typeof event === 'string' ? event : event.data, '*');
                 };
                 window.elrsNativeHost.postMessage(
                   JSON.stringify({ callId: 'frame', operation: 'list' }));
               } else {
                 parent.postMessage(JSON.stringify({ absent: true }), '*');
               }
-            &lt;/script&gt;"></iframe>
+            </script></body></html>
+        """.trimIndent()
+        loadOnOrigin(
+            """
+            <html><body>
             <script>
               window.fromFrame = null;
               window.addEventListener('message', function (event) {
                 window.fromFrame = event.data;
               });
             </script>
+            <iframe id="child" src="./child.html"></iframe>
             </body></html>
             """.trimIndent(),
+            path = "parent.html",
         )
 
-        val seen = awaitScript("window.fromFrame")
-        val payload = JSONObject(seen)
+        val payload = JSONObject(awaitScript("window.fromFrame"))
         // Either the listener was never injected into the subframe, or it was
         // and the host refused it by name. Both are acceptable; a subframe
         // getting a device list is not.
         if (payload.has("absent")) {
             assertTrue(payload.getBoolean("absent"))
         } else {
-            assertFalse(payload.getBoolean("ok"))
+            assertFalse(payload.toString(), payload.getBoolean("ok"))
             assertEquals(BridgeCore.Reason.NOT_MAIN_FRAME, payload.getString("reason"))
         }
         assertEquals("no device was ever opened", 0, backend.openCount.get())
@@ -130,7 +137,7 @@ class WebViewHostInstrumentedTest {
     fun resolvesAndRejectsTheSamePromisesTheApplicationAwaits() {
         backend.permissions[FakeUsbBackend.DEFAULT_DEVICE] = UsbDeviceGate.Permission.GRANTED
         attach()
-        loadAt(ORIGIN, "<html><body>ready</body></html>")
+        loadOnOrigin("<html><body>ready</body></html>")
 
         // A resolved promise: requestPort hands back a Web Serial-shaped port.
         evaluate(
@@ -185,8 +192,12 @@ class WebViewHostInstrumentedTest {
 
     @Test
     fun carriesTheBuildIdentityIntoThePage() {
-        attach(identity = JSONObject().put("webBuildSha256", "abc123").put("bridge", "AVAILABLE"))
-        loadAt(ORIGIN, "<html><body>ready</body></html>")
+        attach(
+            identity = JSONObject()
+                .put("webBuildSha256", "abc123")
+                .put("bridge", "AVAILABLE"),
+        )
+        loadOnOrigin("<html><body>ready</body></html>")
 
         assertEquals("\"abc123\"", evaluate("window.elrsNativeBridge.host.webBuildSha256"))
         assertEquals("\"AVAILABLE\"", evaluate("window.elrsNativeBridge.host.bridge"))
@@ -363,15 +374,73 @@ class WebViewHostInstrumentedTest {
             override fun getRequestHeaders(): MutableMap<String, String> = mutableMapOf()
         }
 
-    private fun loadAt(origin: String, html: String) {
+    /**
+     * Documents this test serves from the packaged origin, by path.
+     *
+     * Concurrent because `PathHandler.handle` is `@WorkerThread` — the WebView
+     * asks for these from a background thread while the test writes them from
+     * its own.
+     */
+    private val served = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Loads [html] as a real document on the packaged origin.
+     *
+     * It goes through a `WebViewAssetLoader` path handler rather than
+     * `loadDataWithBaseURL`, so the document's origin is established the same
+     * way the shipped host establishes it. Whether a base URL yields the origin
+     * the message listener matches on is exactly the thing under test here, and
+     * it must not also be the assumption the test rests on.
+     */
+    private fun loadOnOrigin(html: String, path: String = "page.html") {
+        served[path] = html
+        val loader = testLoader()
+        val latch = CountDownLatch(1)
+        onMainThread {
+            webView.webViewClient = object : android.webkit.WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? = loader.shouldInterceptRequest(request.url)
+
+                override fun onPageFinished(view: WebView, url: String) = latch.countDown()
+            }
+            webView.loadUrl("$ORIGIN/test/$path")
+        }
+        assertTrue(
+            "the page never finished loading",
+            latch.await(AWAIT_SECONDS, TimeUnit.SECONDS),
+        )
+    }
+
+    private fun testLoader() = androidx.webkit.WebViewAssetLoader.Builder()
+        .setDomain(MainActivity.APPLICATION_HOST)
+        .addPathHandler("/test/") { path ->
+            served[path]?.let {
+                WebResourceResponse("text/html", "utf-8", it.byteInputStream())
+            }
+        }
+        .build()
+
+    /** A document from somewhere else entirely. */
+    private fun loadForeignOrigin(html: String) {
         val latch = CountDownLatch(1)
         onMainThread {
             webView.webViewClient = object : android.webkit.WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) = latch.countDown()
             }
-            webView.loadDataWithBaseURL(origin, html, "text/html", "utf-8", null)
+            webView.loadDataWithBaseURL(
+                "https://evil.example",
+                html,
+                "text/html",
+                "utf-8",
+                null,
+            )
         }
-        assertTrue("the page never finished loading", latch.await(AWAIT_SECONDS, TimeUnit.SECONDS))
+        assertTrue(
+            "the page never finished loading",
+            latch.await(AWAIT_SECONDS, TimeUnit.SECONDS),
+        )
     }
 
     private fun evaluate(script: String): String {
