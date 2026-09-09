@@ -71,6 +71,15 @@ jobs:
           pnpm test
           pnpm build
 
+      # The Pages workflow sets VITE_BUILD_SHA for the whole job, so the test
+      # suite runs there against a pinned build. Running it unpinned only would
+      # let a pinned-build failure reach the deploy, which is exactly what
+      # happened once. This runs the suite the way the deploy runs it.
+      - name: Run the test suite against a pinned build identity
+        env:
+          VITE_BUILD_SHA: ${{ github.sha }}
+        run: pnpm test
+
       - name: Build and verify the GitHub Pages artifact
         env:
           GITHUB_PAGES: "true"

@@ -701,8 +701,27 @@ describe("public product shell", () => {
     expect(
       screen.getByText("نسخة تجريبية للتحقق على العتاد"),
     ).toBeInTheDocument();
-    // An unpinned development build says so rather than showing a fake SHA.
-    expect(screen.getByText("unpinned-development-build")).toBeInTheDocument();
+    // The banner shows the commit this bundle was actually built from. A build
+    // with no pinned commit says so rather than showing a plausible fake, and
+    // a pinned one shows its short form — the expectation is read from the
+    // same environment value the component reads, so the test does not assume
+    // which kind of build it is running against.
+    const declared = document
+      .querySelector(".build-banner")
+      ?.getAttribute("data-build");
+    const pinned = import.meta.env.VITE_BUILD_SHA;
+    const expected =
+      typeof pinned === "string" && /^[0-9a-f]{40}$/u.test(pinned)
+        ? pinned
+        : "unpinned-development-build";
+    expect(declared).toBe(expected);
+    expect(
+      screen.getByText(
+        expected === "unpinned-development-build"
+          ? expected
+          : expected.slice(0, 7),
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "انسخ رقم الإصدار الكامل" }),
     ).toBeEnabled();
