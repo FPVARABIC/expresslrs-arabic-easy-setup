@@ -920,24 +920,37 @@ export function ExpressLrsParityWorkbenchView({
                   ))}
                 </select>
               </label>
-              {rxAsTxModeSupport
-                .filter(({ support }) => !support.supported)
-                .map(({ mode, support }) =>
-                  support.supported ? null : (
-                    <p
-                      key={mode}
-                      className="parity-note"
-                      data-rx-as-tx-mode={mode}
-                      data-rx-as-tx-reason={support.reason}
-                    >
-                      {t(`workbench.rxAsTx.${support.reason}`, {
-                        target: support.targetName,
-                        platform: support.platform,
-                        modes: support.availableModes.join(", "),
-                      })}
-                    </p>
-                  ),
-                )}
+              {/*
+                One note per distinct reason. When every mode is closed for the
+                same reason — no Target chosen yet, or an STM32 that has no
+                transmitter build at all — repeating it once per mode would say
+                the same thing twice.
+              */}
+              {[
+                ...new Map(
+                  rxAsTxModeSupport
+                    .filter(({ support }) => !support.supported)
+                    .map((entry) => [
+                      entry.support.supported ? "" : entry.support.reason,
+                      entry,
+                    ]),
+                ).values(),
+              ].map(({ mode, support }) =>
+                support.supported ? null : (
+                  <p
+                    key={support.reason}
+                    className="parity-note rx-as-tx-note"
+                    data-rx-as-tx-mode={mode}
+                    data-rx-as-tx-reason={support.reason}
+                  >
+                    {t(`workbench.rxAsTx.${support.reason}`, {
+                      target: support.targetName,
+                      platform: support.platform,
+                      modes: support.availableModes.join(", "),
+                    })}
+                  </p>
+                ),
+              )}
               <label className="check-field">
                 <input
                   type="checkbox"

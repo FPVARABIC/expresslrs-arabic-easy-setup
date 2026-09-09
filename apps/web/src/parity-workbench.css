@@ -415,3 +415,12 @@ button:disabled,
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * The receiver-as-transmitter explanation belongs under its selector, across
+ * the whole options grid, rather than being laid out as another grid cell.
+ */
+.rx-as-tx-note {
+  grid-column: 1 / -1;
+  margin-block-start: 0;
+}

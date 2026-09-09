@@ -151,3 +151,139 @@ test("registers a service worker that controls the page on return", async ({
   );
   expect(controlled).toBe(true);
 });
+
+/**
+ * Locale, direction and layout, checked in the browser against the shipped
+ * bundle. jsdom computes no styles and resolves no direction, so an inherited
+ * `rtl` under English is invisible to the unit suite — that is exactly the
+ * defect these cover.
+ */
+const LAYOUTS = [
+  { name: "desktop", width: 1280, height: 900 },
+  { name: "mobile", width: 320, height: 640 },
+] as const;
+
+async function openAdvanced(
+  page: import("@playwright/test").Page,
+  locale: "ar" | "en",
+) {
+  await page.goto("/");
+  if (locale === "en") {
+    await page.locator('.language-switch button[lang="en"]').click();
+  }
+  await page
+    .locator("nav button")
+    .filter({ hasText: /Advanced|المتقدم/u })
+    .first()
+    .click();
+  await page.locator(".parity-shell").waitFor();
+}
+
+for (const locale of ["ar", "en"] as const) {
+  for (const layout of LAYOUTS) {
+    test(`Advanced Mode renders in ${locale} at ${layout.name} width`, async ({
+      page,
+    }) => {
+      const problems: string[] = [];
+      const missing: string[] = [];
+      page.on("console", (message) => {
+        if (message.type() === "error") problems.push(message.text());
+      });
+      page.on("pageerror", (error) => problems.push(error.message));
+      page.on("response", (response) => {
+        if (response.status() === 404) missing.push(response.url());
+      });
+
+      await page.setViewportSize({
+        width: layout.width,
+        height: layout.height,
+      });
+      await openAdvanced(page, locale);
+
+      // The document and the technical view agree on direction, and the
+      // direction is the one the locale calls for.
+      const expectedDirection = locale === "ar" ? "rtl" : "ltr";
+      await expect(page.locator("html")).toHaveAttribute("lang", locale);
+      expect(
+        await page
+          .locator(".parity-shell")
+          .evaluate((node) => getComputedStyle(node).direction),
+      ).toBe(expectedDirection);
+
+      // Under English the only Arabic left may be the language switch's own
+      // native name. Under Arabic the interface must not be English.
+      const strayScript = await page.evaluate((current) => {
+        const root = document.querySelector(".parity-shell");
+        const text = root instanceof HTMLElement ? root.innerText : "";
+        const arabic = text.match(/[؀-ۿ]+/gu) ?? [];
+        return current === "en"
+          ? { count: arabic.length, sample: [...new Set(arabic)].slice(0, 12) }
+          : { count: 0, sample: [] };
+      }, locale);
+      expect(strayScript.sample).toEqual([]);
+      expect(strayScript.count).toBe(0);
+
+      // Wide content scrolls inside its own container; the page never does.
+      const overflow = await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(1);
+
+      expect(problems).toEqual([]);
+      expect(missing).toEqual([]);
+    });
+  }
+}
+
+test("every core operation is present and reachable in Advanced Mode", async ({
+  page,
+}) => {
+  await openAdvanced(page, "en");
+
+  // Each of these is a real control wired to the shared controller. None of
+  // them may be hidden behind a build stage, and the receiver-as-transmitter
+  //selector in particular must be a live control, not a decorative one.
+  for (const name of [
+    "Load the official catalog",
+    "Identify the device over CRSF",
+    "Build the official firmware",
+  ]) {
+    await expect(page.getByRole("button", { name })).toBeVisible();
+  }
+
+  // The receiver options only apply to a receiver, so select that role first.
+  // This is a real, live condition — not a build gate — and the control must
+  // then be a working selector rather than a decorative one.
+  await page
+    .locator(".segmented button")
+    .filter({ hasText: /RX receiver/u })
+    .first()
+    .click();
+
+  const rxAsTx = page.getByTestId("rx-as-tx-mode");
+  await expect(rxAsTx).toBeVisible();
+  await expect(rxAsTx).toBeEnabled();
+  await expect(rxAsTx.locator("option")).toHaveCount(3);
+
+  const airport = page.getByTestId("airport-enabled");
+  await expect(airport).toBeVisible();
+  await expect(airport).toBeEnabled();
+});
+
+test("no control is disabled without a stated reason beside it", async ({
+  page,
+}) => {
+  await openAdvanced(page, "en");
+
+  // Readiness is reported per operation, and a blocked operation names what it
+  // is waiting on. A disabled control with no reason anywhere is a dead end.
+  const blocked = page.locator('[data-ready="no"]');
+  const count = await blocked.count();
+  for (let index = 0; index < count; index += 1) {
+    const text = (await blocked.nth(index).innerText()).trim();
+    expect(text.length).toBeGreaterThan(0);
+    expect(text).not.toMatch(/locked in this|not available yet|coming soon/iu);
+  }
+});

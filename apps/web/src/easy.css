@@ -6,10 +6,21 @@
   color: var(--text);
 }
 
+/*
+ * Hidden by clipping rather than by a large negative inline offset. In a
+ * right-to-left document `inset-inline-start` resolves to `right`, so
+ * `-9999px` pushes the link past the scrollable edge and gives the whole page
+ * a horizontal scrollbar — which is what it did at narrow widths.
+ */
 .skip-link {
   position: absolute;
-  inset-inline-start: -9999px;
+  inset-inline-start: 0;
   top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   padding: 0.5rem 1rem;
   background: var(--surface-strong);
   color: var(--text);
@@ -17,7 +28,10 @@
 }
 
 .skip-link:focus {
-  inset-inline-start: 0;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
 }
 
 .product-header {

@@ -339,7 +339,12 @@
     flex-direction: column;
   }
 
-  .acceptance-toolbar > *,
+  /*
+   * The import control is a visually hidden file input that lives in this
+   * toolbar. Stretching it to the full width gave the page a horizontal
+   * scrollbar at narrow widths, so it is excluded rather than un-hidden.
+   */
+  .acceptance-toolbar > *:not(.acceptance-file-input),
   .acceptance-step-controls > *,
   .acceptance-step-controls label {
     width: 100%;
