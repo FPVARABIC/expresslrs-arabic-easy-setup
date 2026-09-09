@@ -83,6 +83,17 @@ if (!existsSync(canonicalCiPath)) {
     fail("ci.yml does not enforce interface honesty");
   }
 
+  // The Pages deploy runs the tests with VITE_BUILD_SHA set for the whole job.
+  // CI must exercise that same shape, or a pinned-build failure first appears
+  // during a deploy rather than on the pull request.
+  if (
+    !/VITE_BUILD_SHA: \$\{\{ github\.sha \}\}[\s\S]*?run: pnpm test/u.test(
+      canonicalCi,
+    )
+  ) {
+    fail("ci.yml does not run the test suite against a pinned build identity");
+  }
+
   // Browser QA is the only thing that can make a BROWSER_VERIFIED claim. If it
   // stops running, every such claim in the matrix becomes unsupported.
   if (!canonicalCi.includes("pnpm qa:browser")) {
