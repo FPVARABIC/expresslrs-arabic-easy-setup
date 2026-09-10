@@ -37,6 +37,11 @@ const requiredOperations = new Set([
   "bindingPrerequisites",
   "firmwareWrite",
   "recovery",
+  // The imported-package path is its own operation, not a variant of
+  // `recovery`: it is the one that works with no application state at all,
+  // and it went a round with no control in either surface. A row is what
+  // makes that impossible to lose again quietly.
+  "recoveryImport",
   "rxAsTx",
   "airport",
 ]);

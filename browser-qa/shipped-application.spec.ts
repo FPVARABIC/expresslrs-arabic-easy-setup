@@ -281,9 +281,129 @@ test("no control is disabled without a stated reason beside it", async ({
   // is waiting on. A disabled control with no reason anywhere is a dead end.
   const blocked = page.locator('[data-ready="no"]');
   const count = await blocked.count();
+  // Asserted, because a loop over nothing passes while proving nothing — and
+  // this selector was written against a renderer that has since changed shape
+  // once already.
+  expect(count).toBeGreaterThan(0);
   for (let index = 0; index < count; index += 1) {
     const text = (await blocked.nth(index).innerText()).trim();
     expect(text.length).toBeGreaterThan(0);
     expect(text).not.toMatch(/locked in this|not available yet|coming soon/iu);
+  }
+});
+
+/**
+ * Reads every operation's live readiness state out of the shipped DOM.
+ *
+ * `data-ready` is written by the controller from live state, so this is the
+ * application's own account of what it will and will not do right now — not a
+ * string a test invented. The row carries the operation in `data-operation`
+ * and its outstanding prerequisites as one sentence in a `span`; read from the
+ * shipped markup rather than assumed, because the first version of this helper
+ * was written against a different renderer in the same file and silently
+ * matched nothing.
+ */
+async function readiness(
+  page: import("@playwright/test").Page,
+): Promise<{ operation: string; ready: string; reasons: string }[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll("[data-ready]")].map((element) => ({
+      operation: element.getAttribute("data-operation") ?? "",
+      ready: element.getAttribute("data-ready") ?? "",
+      reasons: (element.querySelector("span")?.textContent ?? "").trim(),
+    })),
+  );
+}
+
+test("the import path is reachable with nothing prepared, which is the reinstall case", async ({
+  page,
+}) => {
+  await openAdvanced(page, "en");
+
+  // This is the structural fix, asserted in a real browser. These controls
+  // used to live inside the "a firmware package has been prepared" block,
+  // which meant an operator who had uninstalled and reinstalled — the exact
+  // situation the durable export exists for — had to re-select a Target and
+  // rebuild a package over the network before they could so much as open the
+  // recovery file they had kept. Exporting needs a prepared package;
+  // importing needs only the file.
+  const pick = page.getByRole("button", {
+    name: "Choose a saved recovery file",
+  });
+  await expect(pick).toBeVisible();
+  await expect(pick).toBeEnabled();
+
+  // And nothing has been imported, so the control that would write an imported
+  // package to a device is not on screen at all. It appears only once there is
+  // something to write.
+  await expect(
+    page.getByRole("button", {
+      name: "Restore the device from the imported package",
+    }),
+  ).toHaveCount(0);
+});
+
+test("readiness is live state: it survives a locale change identically", async ({
+  page,
+}) => {
+  await openAdvanced(page, "en");
+  const english = await readiness(page);
+  expect(english.length).toBeGreaterThan(0);
+  // Guards the helper against matching a row with no reasons in it, which is
+  // how a comparison like this passes while proving nothing.
+  expect(english.every((row) => row.reasons.length > 0)).toBe(true);
+
+  // A real transition through the shipped bundle: the whole shell re-renders
+  // in the other language and direction. A locale must not be able to
+  // withhold a feature or change what an operation is waiting on, so the set
+  // of operations and their verdicts have to come out identical — and the
+  // reasons have to come out *different*, because they are translated.
+  await page.locator('.language-switch button[lang="ar"]').click();
+  await expect(page.locator(".parity-shell[dir='rtl']")).toBeVisible();
+  const arabic = await readiness(page);
+
+  expect(arabic.map((row) => row.operation)).toEqual(
+    english.map((row) => row.operation),
+  );
+  expect(arabic.map((row) => row.ready)).toEqual(
+    english.map((row) => row.ready),
+  );
+  expect(arabic.every((row) => row.reasons.length > 0)).toBe(true);
+  // Same capabilities, different words. If these matched, one locale would be
+  // rendering the other's catalogue and the parity claim would be empty.
+  expect(arabic.map((row) => row.reasons)).not.toEqual(
+    english.map((row) => row.reasons),
+  );
+});
+
+test("no operation is blocked by a permanent condition", async ({ page }) => {
+  await openAdvanced(page, "en");
+
+  // Every refused operation must be waiting on something an operator can go
+  // and do. A reason that names no action is a lock wearing a condition's
+  // clothes, and the durable-recovery prerequisite in particular has to read
+  // as a step — it gates the two destructive operations, so if it ever reads
+  // as unavailability then firmware update and receiver-as-transmitter have
+  // been quietly withdrawn.
+  const rows = (await readiness(page)).filter((row) => row.ready === "no");
+  expect(rows.length).toBeGreaterThan(0);
+  for (const row of rows) {
+    expect(row.operation).not.toBe("");
+    expect(row.reasons.length).toBeGreaterThan(0);
+    expect(row.reasons).not.toMatch(
+      /not available|unavailable|coming soon|later phase|next release|locked/iu,
+    );
+    // Phrased as instructions, so each one ends in something to do rather
+    // than a statement about the build.
+    expect(row.reasons).toMatch(/first|then|retry|again/iu);
+  }
+
+  // The two destructive operations, and the prerequisite that gates them.
+  const gated = rows.filter((row) =>
+    ["firmwareWrite", "rxAsTx"].includes(row.operation),
+  );
+  expect(gated).toHaveLength(2);
+  for (const row of gated) {
+    expect(row.reasons).toMatch(/recovery package/iu);
   }
 });

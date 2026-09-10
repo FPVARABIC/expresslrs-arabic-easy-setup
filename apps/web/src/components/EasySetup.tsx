@@ -668,6 +668,86 @@ export function EasySetup({
                       {t("easy.fw.build")}
                     </button>
 
+                    {/*
+                      Outside the prepared-package block on purpose. It was
+                      inside it, which meant the one path that recovers a
+                      device after a reinstall required first building a
+                      firmware package over the network. Exporting needs a
+                      prepared package; importing needs only the file.
+                    */}
+                    <button
+                      type="button"
+                      onClick={() => void pickRecoveryFile()}
+                      disabled={busy}
+                    >
+                      {t("easy.fw.pickRecoveryFile")}
+                    </button>
+                    {pickedRecovery === null ? null : (
+                      <>
+                        <p className="easy-note">
+                          {t("easy.fw.pickedRecovery", {
+                            product:
+                              pickedRecovery.header.identity.target.productName,
+                            created: pickedRecovery.header.identity.createdAt,
+                          })}
+                        </p>
+                        <label className="easy-field">
+                          <span>{t("easy.fw.recoveryPassphrase")}</span>
+                          <input
+                            type="password"
+                            autoComplete="current-password"
+                            value={importPassphrase}
+                            onChange={(event) => {
+                              setImportPassphrase(event.target.value);
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void unlockRecoveryFile(importPassphrase)
+                          }
+                          disabled={busy}
+                        >
+                          {t("easy.fw.unlockRecoveryFile")}
+                        </button>
+                      </>
+                    )}
+                    {importedRecovery === null ? null : (
+                      <>
+                        <p className="easy-note">
+                          {t("easy.fw.importedIdentityHeading")}:{" "}
+                          {importedRecovery.productName} ·{" "}
+                          {importedRecovery.targetId} ·{" "}
+                          {importedRecovery.releaseLabel}
+                        </p>
+                        <label className="easy-check">
+                          <input
+                            type="checkbox"
+                            checked={importedIdentityConfirmed}
+                            onChange={(event) => {
+                              confirmImportedRecoveryIdentity(
+                                event.target.checked,
+                              );
+                            }}
+                          />
+                          <span>{t("easy.fw.importedIdentityConfirm")}</span>
+                        </label>
+                        {/*
+                              The control that actually restores from an
+                              imported package — the path that works after a
+                              reinstall, when the journal is gone. Refused by
+                              name until the identity above is confirmed.
+                            */}
+                        <button
+                          type="button"
+                          onClick={() => void recoverFromImportedPackage()}
+                          disabled={busy}
+                        >
+                          {t("easy.fw.restoreFromImported")}
+                        </button>
+                      </>
+                    )}
                     {prepared === null ? null : (
                       <>
                         <p className="easy-note">
@@ -721,83 +801,7 @@ export function EasySetup({
                             })}
                           </p>
                         ) : null}
-                        <button
-                          type="button"
-                          onClick={() => void pickRecoveryFile()}
-                          disabled={busy}
-                        >
-                          {t("easy.fw.pickRecoveryFile")}
-                        </button>
-                        {pickedRecovery === null ? null : (
-                          <>
-                            <p className="easy-note">
-                              {t("easy.fw.pickedRecovery", {
-                                product:
-                                  pickedRecovery.header.identity.target
-                                    .productName,
-                                created:
-                                  pickedRecovery.header.identity.createdAt,
-                              })}
-                            </p>
-                            <label className="easy-field">
-                              <span>{t("easy.fw.recoveryPassphrase")}</span>
-                              <input
-                                type="password"
-                                autoComplete="current-password"
-                                value={importPassphrase}
-                                onChange={(event) => {
-                                  setImportPassphrase(event.target.value);
-                                }}
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void unlockRecoveryFile(importPassphrase)
-                              }
-                              disabled={busy}
-                            >
-                              {t("easy.fw.unlockRecoveryFile")}
-                            </button>
-                          </>
-                        )}
-                        {importedRecovery === null ? null : (
-                          <>
-                            <p className="easy-note">
-                              {t("easy.fw.importedIdentityHeading")}:{" "}
-                              {importedRecovery.productName} ·{" "}
-                              {importedRecovery.targetId} ·{" "}
-                              {importedRecovery.releaseLabel}
-                            </p>
-                            <label className="easy-check">
-                              <input
-                                type="checkbox"
-                                checked={importedIdentityConfirmed}
-                                onChange={(event) => {
-                                  confirmImportedRecoveryIdentity(
-                                    event.target.checked,
-                                  );
-                                }}
-                              />
-                              <span>
-                                {t("easy.fw.importedIdentityConfirm")}
-                              </span>
-                            </label>
-                            {/*
-                              The control that actually restores from an
-                              imported package — the path that works after a
-                              reinstall, when the journal is gone. Refused by
-                              name until the identity above is confirmed.
-                            */}
-                            <button
-                              type="button"
-                              onClick={() => void recoverFromImportedPackage()}
-                              disabled={busy}
-                            >
-                              {t("easy.fw.restoreFromImported")}
-                            </button>
-                          </>
-                        )}
+
                         <button
                           type="button"
                           onClick={() => downloadRecovery()}

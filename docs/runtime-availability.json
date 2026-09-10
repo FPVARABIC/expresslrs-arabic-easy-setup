@@ -192,6 +192,31 @@
       "onFailure": "the checkpoint stands so recovery can be retried; it is never cleared by a failed attempt"
     },
     {
+      "operation": "recoveryImport",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Restore the device from the imported package",
+      "readinessInputs": [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "a recovery file picked from storage the operator owns",
+        "the file authenticated with the operator's passphrase",
+        "the recovered device identity confirmed by the operator",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the Target typed back"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.recoverFromImportedPackage",
+      "driver": "the same flashing driver a picked-file recovery uses; the source of the bytes differs and nothing else does",
+      "writeAuthority": "its own single-use capability for RECOVERY",
+      "recoveryCheckpoint": "reconstituted from the imported package's own digest, because an uninstall erased the journal — which is the case this path exists for",
+      "verification": "the same read-back and post-write identity verification as any recovery",
+      "onFailure": "the imported package is kept in state, so the restore can be retried without picking the file again"
+    },
+    {
       "operation": "rxAsTx",
       "surface": "advanced",
       "transport": "browser",

@@ -1021,6 +1021,93 @@ export function ExpressLrsParityWorkbenchView({
           </div>
         )}
 
+        {/*
+          Importing a saved recovery package is deliberately *outside* the
+          prepared-package block. It used to be inside it, which meant an
+          operator who had uninstalled and reinstalled — the exact situation
+          the durable export exists for — had to re-select a Target and build
+          a firmware package over the network before they could so much as
+          open the file they had kept. Exporting needs a prepared package
+          because there is nothing to export otherwise. Importing needs
+          nothing but the file.
+        */}
+        <div className="recovery-import">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy}
+            onClick={() => void pickRecoveryFile()}
+          >
+            {t("wb.ui.pickRecoveryFile")}
+          </button>
+          {pickedRecovery === null ? null : (
+            <>
+              <p className="hint">
+                {t("wb.durable.picked", {
+                  product: pickedRecovery.header.identity.target.productName,
+                  created: pickedRecovery.header.identity.createdAt,
+                })}
+              </p>
+              <label className="field">
+                <span>{t("wb.ui.recoveryPassphrase")}</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={importPassphrase}
+                  onChange={(event) => {
+                    setImportPassphrase(event.target.value);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => void unlockRecoveryFile(importPassphrase)}
+              >
+                {t("wb.ui.unlockRecoveryFile")}
+              </button>
+            </>
+          )}
+
+          {importedRecovery === null ? null : (
+            <>
+              <p className="hint">
+                {t("wb.ui.importedIdentityHeading")}:{" "}
+                {importedRecovery.productName} · {importedRecovery.targetId} ·{" "}
+                {importedRecovery.releaseLabel}
+              </p>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={importedIdentityConfirmed}
+                  onChange={(event) => {
+                    confirmImportedRecoveryIdentity(event.target.checked);
+                  }}
+                />
+                <span>{t("wb.ui.importedIdentityConfirm")}</span>
+              </label>
+              {/*
+                The control that actually restores from an imported package.
+                It went a whole round without existing: the handler was
+                correct and tested, and no view invoked it, so the one path
+                that recovers a device after a reinstall was unreachable.
+                Gated by the same evidence authority as every other
+                destructive operation and refused by name until the identity
+                above is confirmed — never hidden.
+              */}
+              <button
+                type="button"
+                className="danger-button"
+                disabled={busy}
+                onClick={() => void recoverFromImportedPackage()}
+              >
+                {t("wb.ui.restoreFromImported")}
+              </button>
+            </>
+          )}
+        </div>
+
         {prepared === null ? (
           <p className="empty-state">{t("wb.ui.noPackageYet")}</p>
         ) : (
@@ -1073,14 +1160,6 @@ export function ExpressLrsParityWorkbenchView({
               >
                 {t("wb.ui.exportDurableRecovery")}
               </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={busy}
-                onClick={() => void pickRecoveryFile()}
-              >
-                {t("wb.ui.pickRecoveryFile")}
-              </button>
               {selectedTarget?.role === "tx" ? (
                 <button
                   type="button"
@@ -1106,73 +1185,6 @@ export function ExpressLrsParityWorkbenchView({
             </label>
             <p className="hint">{t("wb.ui.recoveryPassphraseHint")}</p>
             <p className="hint">{t("wb.ui.recoveryPassphraseWhy")}</p>
-
-            {pickedRecovery === null ? null : (
-              <>
-                <p className="hint">
-                  {t("wb.durable.picked", {
-                    product: pickedRecovery.header.identity.target.productName,
-                    created: pickedRecovery.header.identity.createdAt,
-                  })}
-                </p>
-                <label className="field">
-                  <span>{t("wb.ui.recoveryPassphrase")}</span>
-                  <input
-                    type="password"
-                    autoComplete="current-password"
-                    value={importPassphrase}
-                    onChange={(event) => {
-                      setImportPassphrase(event.target.value);
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={busy}
-                  onClick={() => void unlockRecoveryFile(importPassphrase)}
-                >
-                  {t("wb.ui.unlockRecoveryFile")}
-                </button>
-              </>
-            )}
-
-            {importedRecovery === null ? null : (
-              <>
-                <p className="hint">
-                  {t("wb.ui.importedIdentityHeading")}:{" "}
-                  {importedRecovery.productName} · {importedRecovery.targetId} ·{" "}
-                  {importedRecovery.releaseLabel}
-                </p>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={importedIdentityConfirmed}
-                    onChange={(event) => {
-                      confirmImportedRecoveryIdentity(event.target.checked);
-                    }}
-                  />
-                  <span>{t("wb.ui.importedIdentityConfirm")}</span>
-                </label>
-                {/*
-                  The control that actually restores from an imported package.
-                  It went a whole round without existing: the handler was
-                  correct and tested, and no view invoked it, so the one path
-                  that recovers a device after a reinstall was unreachable.
-                  Gated by the same evidence authority as every other
-                  destructive operation and refused by name until the identity
-                  above is confirmed — never hidden.
-                */}
-                <button
-                  type="button"
-                  className="danger-button"
-                  disabled={busy}
-                  onClick={() => void recoverFromImportedPackage()}
-                >
-                  {t("wb.ui.restoreFromImported")}
-                </button>
-              </>
-            )}
 
             {durableRecovery !== null ? (
               <p className="success-note">

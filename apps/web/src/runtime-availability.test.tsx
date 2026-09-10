@@ -3,7 +3,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { installDurableStorageStub } from "./test/durable-storage";
 import path from "node:path";
 
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import {
   afterAll,
   afterEach,
@@ -13,6 +20,8 @@ import {
   it,
   vi,
 } from "vitest";
+
+import { createTranslator } from "@elrs-easy/i18n";
 
 import { CrsfAddress, type CrsfParameter } from "./hardware/crsf";
 import type {
@@ -356,13 +365,16 @@ async function settleUntil(pattern: RegExp, timeoutMs = 15_000): Promise<void> {
   // turns made this helper quietly dependent on the work factor.
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (screen.queryByText(pattern) !== null) return;
+    // `queryAllByText`, not `queryByText`: a message shown both in the status
+    // line and as a hint beside its control is two matches, and waiting for it
+    // must not turn that into a failure.
+    if (screen.queryAllByText(pattern).length > 0) return;
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     });
   }
   // Asserted rather than returned, so a failure names the text that is missing.
-  expect(screen.getByText(pattern)).toBeInTheDocument();
+  expect(screen.getAllByText(pattern).length).toBeGreaterThan(0);
 }
 
 function mountAdvanced(): void {
@@ -418,6 +430,9 @@ async function identify(): Promise<void> {
   );
   await settle();
 }
+
+/** The passphrase the export path is driven with throughout this suite. */
+const RECOVERY_PASSPHRASE = "bench-recovery-passphrase";
 
 describe("runtime availability, from the production entry point", () => {
   let durableStorage: ReturnType<typeof installDurableStorageStub>;
@@ -1205,5 +1220,221 @@ describe("runtime availability, from the production entry point", () => {
     expect(
       screen.getByText(/No verified durable copy yet/u),
     ).toBeInTheDocument();
+  });
+  it("recoveryImport: a package saved earlier restores after a reinstall, with no application state", async () => {
+    // ---- part one: produce a real sealed file ---------------------------
+    //
+    // Not a fixture. The bytes this test later imports are the bytes the
+    // shipped export path actually wrote, through the real envelope, so the
+    // round trip is the thing under test rather than a stand-in for it.
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+
+    const written = [...durableStorage.files.values()];
+    expect(written).toHaveLength(1);
+    const sealed = written[0];
+    if (sealed === undefined) throw new TypeError("nothing was written");
+    // What reached storage is an envelope, not the archive. If this is ever a
+    // zip again, the operator's Wi-Fi password is sitting in Downloads.
+    expect(new TextDecoder().decode(sealed.subarray(0, 8))).toBe("ELRSRCV1");
+
+    // ---- part two: the reinstall ----------------------------------------
+    //
+    // An uninstall takes the IndexedDB journal with it. The application comes
+    // back knowing nothing: no checkpoint, no prepared package, no identity.
+    // The file the operator kept is the only thing that survived.
+    cleanup();
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ importBytes: sealed });
+    mocks.loadCheckpoint.mockResolvedValue(null);
+    mocks.validateRecoveryPackage.mockResolvedValue({
+      targetId: espTransmitter.id,
+      productName: "Vendor TX Module",
+      platform: espTransmitter.config.platform,
+      firmware: espTransmitter.config.firmware,
+      releaseLabel: "4.1.0",
+      releaseRevision: "release410",
+      packageSha256: "c".repeat(64),
+      segments: [
+        {
+          name: "firmware.bin",
+          address: 0,
+          bytes: new Uint8Array(8),
+          sha256: "d".repeat(64),
+        },
+      ],
+      provenance: null,
+    });
+
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+
+    // Nothing has been imported, so the control that restores from an imported
+    // package is not on screen yet — and the one that would put it there is.
+    expect(
+      screen.queryByRole("button", {
+        name: "Restore the device from the imported package",
+      }),
+    ).toBeNull();
+    const pick = screen.getByRole("button", {
+      name: "Choose a saved recovery file",
+    });
+    expect(pick).toBeEnabled();
+
+    fireEvent.click(pick);
+    // The identity is read out of the file's authenticated header with no
+    // passphrase, which is what lets an operator tell three saved files apart
+    // before committing to typing anything.
+    await settleUntil(/Enter its recovery passphrase to open it/u);
+    expect(screen.getAllByText(/Vendor TX Module/u).length).toBeGreaterThan(0);
+
+    const passphraseFields = screen.getAllByLabelText("Recovery passphrase");
+    const importField = passphraseFields.at(-1);
+    if (importField === undefined) throw new TypeError("no passphrase field");
+    fireEvent.change(importField, { target: { value: RECOVERY_PASSPHRASE } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the recovery file" }),
+    );
+    await settleUntil(/imported and verified/u);
+
+    const control = screen.getByRole("button", {
+      name: "Restore the device from the imported package",
+    });
+    // Authenticated, validated, and still refused: the operator has proven
+    // they hold the passphrase, not that this is the right device.
+    fireEvent.click(control);
+    await settleUntil(/Check the device identity recovered from the file/u);
+    const disabledBefore = true;
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /This is the device in front of me/u,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Power stays stable throughout the recovery",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "The transmitter's antenna is fitted throughout the recovery",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText(/Confirm the Target for recovery/u),
+      { target: { value: espTransmitter.targetKey } },
+    );
+    await settle(6);
+
+    record({
+      operation: "recoveryImport",
+      surface: "advanced",
+      transport: "browser",
+      control: "Restore the device from the imported package",
+      readinessInputs: [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "a recovery file picked from storage the operator owns",
+        "the file authenticated with the operator's passphrase",
+        "the recovered device identity confirmed by the operator",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the Target typed back",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.recoverFromImportedPackage",
+      driver:
+        "the same flashing driver a picked-file recovery uses; the source of the bytes differs and nothing else does",
+      writeAuthority: "its own single-use capability for RECOVERY",
+      recoveryCheckpoint:
+        "reconstituted from the imported package's own digest, because an uninstall erased the journal — which is the case this path exists for",
+      verification:
+        "the same read-back and post-write identity verification as any recovery",
+      onFailure:
+        "the imported package is kept in state, so the restore can be retried without picking the file again",
+    });
+  });
+
+  it("both languages expose the same capabilities, not the same words", async () => {
+    // A locale must never be able to withhold a feature. Compared by counting
+    // *interactive elements*, not by comparing text: two catalogues can agree
+    // on every string and still render a different number of controls if a
+    // conditional is keyed on the locale. Each locale is driven through its
+    // own labels, taken from the shared catalogue, so the test is parametric
+    // rather than a translation of itself.
+    async function census(locale: "ar" | "en"): Promise<string[]> {
+      const translate = createTranslator(locale);
+      render(
+        <ProductShell
+          initialLocale={locale}
+          initialMode="advanced"
+          hardwareConnector={connector()}
+        />,
+      );
+      const stages: string[] = [];
+      const count = (label: string) => {
+        stages.push(
+          [
+            label,
+            `buttons=${String(screen.getAllByRole("button").length)}`,
+            `checkboxes=${String(screen.queryAllByRole("checkbox").length)}`,
+            `comboboxes=${String(screen.queryAllByRole("combobox").length)}`,
+            `textboxes=${String(screen.queryAllByRole("textbox").length)}`,
+          ].join(" "),
+        );
+      };
+
+      count("cold");
+      fireEvent.click(
+        screen.getByRole("button", { name: translate("wb.ui.loadCatalog") }),
+      );
+      await settle();
+      count("catalog");
+      fireEvent.click(
+        screen.getByRole("button", { name: translate("wb.ui.deviceTx") }),
+      );
+      await settle(4);
+      fireEvent.change(targetSelect(), {
+        target: { value: espTransmitter.id },
+      });
+      await settle(4);
+      count("target");
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: translate("wb.ui.identifyOverCrsf"),
+        }),
+      );
+      await settle(8);
+      count("identified");
+
+      cleanup();
+      return stages;
+    }
+
+    const arabic = await census("ar");
+    const english = await census("en");
+    // Same controls, same counts, at every stage of the same journey.
+    expect(arabic).toEqual(english);
   });
 });
