@@ -179,31 +179,53 @@ jobs:
         run: gradle --no-daemon assemblePhysicalTest
 
       - name: Prove the candidate carries no signature
+        id: candidate_apk
         working-directory: android
         run: |
           set -euo pipefail
-          apk="app/build/outputs/apk/physicalTest/app-physicalTest.apk"
-          test -f "$apk"
+          out="app/build/outputs/apk/physicalTest"
           build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
-          # An unsigned APK is the whole point of this channel here. If this
-          # ever verifies, something has wired a key into the candidate build
-          # and the isolation is gone, so it is an error rather than a note.
-          #
-          # The certificate is printed on failure because the first time this
-          # fired, knowing *which* key had signed the APK was the whole
-          # diagnosis — an inherited debug key means a build-type mistake,
-          # anything else means a secret reached the build — and finding out
-          # cost a second run.
+
+          # Resolved rather than assumed. The first version of this step hard
+          # coded `app-physicalTest.apk` and died on `test -f` under `set -e`,
+          # producing no output at all — which I misread twice as proof that
+          # the APK was signed. AGP appends `-unsigned` to the file name when a
+          # build type has no signing config, so the correct name here is
+          # exactly the one that was missing.
+          apks="$(find "$out" -maxdepth 1 -name '*.apk' | sort)"
+          count="$(printf '%s\n' "$apks" | grep -c . || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one APK in $out, found $count." \
+                 "Contents: $(ls -1 "$out" 2>/dev/null | tr '\n' ' ' || echo '<missing>')" >&2
+            exit 1
+          fi
+          apk="$apks"
+          echo "candidate: $apk"
+
+          # The file name is the first evidence and the cheapest: AGP drops the
+          # `-unsigned` suffix only when a signing config was applied.
+          if [ "$(basename "$apk")" != "app-physicalTest-unsigned.apk" ]; then
+            echo "::error::The candidate is named $(basename "$apk"), not" \
+                 "app-physicalTest-unsigned.apk. AGP drops that suffix only when a" \
+                 "signing config was applied, which means a key reached the" \
+                 "candidate build. See docs/ANDROID_SIGNING.md." >&2
+            echo "--- the certificate that signed it ---" >&2
+            "$apksigner" verify --verbose --print-certs "$apk" >&2 || true
+            exit 1
+          fi
+
+          # And the name is not taken on trust: apksigner is the authority.
           if "$apksigner" verify "$apk" >/dev/null 2>&1; then
-            echo "::error::The physical-test candidate is signed. This build" \
-                 "must produce an unsigned APK: a signature here means a key" \
-                 "was readable by pull-request code. See docs/ANDROID_SIGNING.md." >&2
+            echo "::error::The physical-test candidate carries a valid signature" \
+                 "despite its name. A signature here means a key was readable by" \
+                 "pull-request code. See docs/ANDROID_SIGNING.md." >&2
             echo "--- the certificate that signed it ---" >&2
             "$apksigner" verify --verbose --print-certs "$apk" >&2 || true
             exit 1
           fi
           echo "The candidate is unsigned, as required."
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
 
       - name: Write the candidate provenance manifest
         id: provenance
@@ -213,7 +235,8 @@ jobs:
           ARTIFACT_NAME: elrs-android-physicaltest-unsigned-${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          apk="app/build/outputs/apk/physicalTest/app-physicalTest.apk"
+          apk="${{ steps.candidate_apk.outputs.path }}"
+          test -f "$apk"
           build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
           badging="$("$aapt2" dump badging "$apk")"
@@ -262,7 +285,7 @@ jobs:
             "runNumber": "${{ github.run_number }}",
             "runAttempt": "${{ github.run_attempt }}",
             "artifactName": "$ARTIFACT_NAME",
-            "apkFileName": "app-physicalTest.apk",
+            "apkFileName": "app-physicalTest-unsigned.apk",
             "apkByteLength": $(stat -c%s "$apk"),
             "apkSha256": "$apk_sha",
             "applicationId": "$package_id",
@@ -285,7 +308,7 @@ jobs:
         with:
           name: ${{ steps.provenance.outputs.artifact-name }}
           path: |
-            android/app/build/outputs/apk/physicalTest/app-physicalTest.apk
+            android/app/build/outputs/apk/physicalTest/app-physicalTest-unsigned.apk
             android/app-physicalTest-unsigned.provenance.json
           if-no-files-found: error
           retention-days: 30

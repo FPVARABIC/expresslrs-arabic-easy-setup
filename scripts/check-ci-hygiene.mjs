@@ -406,9 +406,18 @@ const androidWorkflow = readFileSync(
 );
 for (const [pattern, complaint] of [
   [/assemblePhysicalTest/u, "does not build the physical-test candidate"],
+  // Keyed on the exact guard forms, not on the step's prose and not on a name
+  // that appears in several unrelated places. Two earlier versions of these
+  // rules were wrong in opposite directions: the first matched a sentence, so
+  // rewording the step broke it; the second matched a file name common to the
+  // manifest and the upload path, so deleting the assertion did not trip it.
   [
-    /must produce an unsigned APK/u,
-    "does not fail when the candidate turns out to be signed",
+    /!= "app-physicalTest-unsigned\.apk"/u,
+    "does not assert the candidate's file name, which is the cheapest evidence that no signing config was applied",
+  ],
+  [
+    /if "\$apksigner" verify "\$apk" >\/dev\/null 2>&1; then/u,
+    "does not ask apksigner whether the candidate carries a valid signature",
   ],
   [
     /app-physicalTest-unsigned\.provenance\.json/u,
