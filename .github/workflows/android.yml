@@ -189,10 +189,18 @@ jobs:
           # An unsigned APK is the whole point of this channel here. If this
           # ever verifies, something has wired a key into the candidate build
           # and the isolation is gone, so it is an error rather than a note.
+          #
+          # The certificate is printed on failure because the first time this
+          # fired, knowing *which* key had signed the APK was the whole
+          # diagnosis — an inherited debug key means a build-type mistake,
+          # anything else means a secret reached the build — and finding out
+          # cost a second run.
           if "$apksigner" verify "$apk" >/dev/null 2>&1; then
             echo "::error::The physical-test candidate is signed. This build" \
                  "must produce an unsigned APK: a signature here means a key" \
                  "was readable by pull-request code. See docs/ANDROID_SIGNING.md." >&2
+            echo "--- the certificate that signed it ---" >&2
+            "$apksigner" verify --verbose --print-certs "$apk" >&2 || true
             exit 1
           fi
           echo "The candidate is unsigned, as required."

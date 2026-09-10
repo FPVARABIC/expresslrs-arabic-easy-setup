@@ -149,13 +149,31 @@ android {
          * trace is worth less than the size it saves.
          */
         create("physicalTest") {
-            initWith(getByName("debug"))
+            // Deliberately **not** `initWith(getByName("debug"))`.
+            //
+            // It was, and the result was a signed candidate: `initWith` copies
+            // the debug build type's signing config, and assigning null over it
+            // did not clear it — AGP still packaged with the auto-generated
+            // debug keystore. CI caught that, which is the entire reason the
+            // "prove the candidate carries no signature" step exists. Nothing
+            // secret was at risk, since the key in question is the ephemeral
+            // one AGP invents per machine; what failed was the property this
+            // channel is built on, that its output is unsigned until a trusted
+            // workflow signs it.
+            //
+            // A build type created from scratch has no signing config, so the
+            // absence is the default rather than something that has to be
+            // successfully undone.
             isMinifyEnabled = false
             isDebuggable = false
             versionNameSuffix = "-physical-test"
-            // The disposable key when the update-persistence job supplied one,
-            // and otherwise nothing at all.
-            signingConfig = signingConfigs.findByName("disposableTest")
+            // Set only when the update-persistence job actually generated a
+            // disposable keystore. `findByName` is not used here: it returns
+            // null both when the config is absent and when the name is
+            // misspelled, and those deserve different outcomes.
+            if (disposableTestSigning != null) {
+                signingConfig = signingConfigs.getByName("disposableTest")
+            }
             matchingFallbacks += listOf("debug")
         }
     }
