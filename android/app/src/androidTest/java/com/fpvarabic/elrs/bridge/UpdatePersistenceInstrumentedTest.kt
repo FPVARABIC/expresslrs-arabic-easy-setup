@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,7 +55,7 @@ class UpdatePersistenceInstrumentedTest {
                 })();
                 """.trimIndent(),
             )
-            assertEquals("\"stored\"", written)
+            assertEquals("stored", written)
 
             // A simulated recovery checkpoint, in the shape and the place the
             // application's own journal uses. Written straight to IndexedDB
@@ -62,7 +63,7 @@ class UpdatePersistenceInstrumentedTest {
             scenario.evaluate(seedCheckpointScript())
             assertEquals(
                 "the checkpoint must be readable before the update",
-                "\"$CHECKPOINT_TARGET\"",
+                CHECKPOINT_TARGET,
                 scenario.awaitValue("window.__checkpointTargetId"),
             )
         }
@@ -76,17 +77,17 @@ class UpdatePersistenceInstrumentedTest {
 
             assertEquals(
                 "the acceptance record must survive the update",
-                "\"$ACCEPTANCE_VALUE\"",
+                ACCEPTANCE_VALUE,
                 scenario.awaitValue("localStorage.getItem('$ACCEPTANCE_KEY')"),
             )
             assertEquals(
                 "the persistent marker must survive the update",
-                "\"$MARKER_VALUE\"",
+                MARKER_VALUE,
                 scenario.awaitValue("localStorage.getItem('$MARKER_KEY')"),
             )
             assertEquals(
                 "the chosen language must survive the update",
-                "\"en\"",
+                "en",
                 scenario.awaitValue("localStorage.getItem('$LOCALE_KEY')"),
             )
             // And it must have taken effect, not merely still be stored: the
@@ -94,19 +95,19 @@ class UpdatePersistenceInstrumentedTest {
             // update, without them choosing it again.
             assertEquals(
                 "the application must open in the remembered language",
-                "\"en\"",
+                "en",
                 scenario.awaitValue("document.documentElement.lang"),
             )
 
             scenario.evaluate(readCheckpointScript())
             assertEquals(
                 "the recovery checkpoint must survive the update",
-                "\"$CHECKPOINT_TARGET\"",
+                CHECKPOINT_TARGET,
                 scenario.awaitValue("window.__checkpointTargetId"),
             )
             assertEquals(
                 "the checkpoint's stage must be intact, not merely present",
-                "\"RECOVERY_REQUIRED\"",
+                "RECOVERY_REQUIRED",
                 scenario.awaitValue("window.__checkpointStage"),
             )
         }
@@ -202,13 +203,21 @@ class UpdatePersistenceInstrumentedTest {
         )
     }
 
-    /** Polls an expression until it stops being null, then returns it. */
+    /**
+     * Polls an expression until it stops being null, then returns its *value*.
+     *
+     * `evaluateJavascript` hands back a JSON-encoded result, so a string arrives
+     * quoted and with its own quotes escaped. Decoding it here is what makes an
+     * assertion about a stored value an assertion about the value rather than
+     * about the encoding: the first run of this test compared the two forms and
+     * reported a failure while the data had in fact survived the update intact.
+     */
     private fun ActivityScenario<MainActivity>.awaitValue(expression: String): String {
         val deadline = System.currentTimeMillis() + AWAIT_SECONDS * 1_000
         var last = "null"
         while (System.currentTimeMillis() < deadline) {
             last = evaluate(expression)
-            if (last != "null") return last
+            if (last != "null") return decodeJsResult(last)
             Thread.sleep(POLL_MILLIS)
         }
         throw AssertionError(
@@ -217,6 +226,10 @@ class UpdatePersistenceInstrumentedTest {
                 " | keys=${evaluate("Object.keys(localStorage).join(',')")}",
         )
     }
+
+    /** Unwraps `evaluateJavascript`'s JSON encoding. Numbers pass through. */
+    private fun decodeJsResult(raw: String): String =
+        if (raw.startsWith("\"")) JSONObject("{\"v\":$raw}").getString("v") else raw
 
     private fun ActivityScenario<MainActivity>.evaluate(script: String): String {
         val latch = CountDownLatch(1)
