@@ -93,8 +93,12 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       # Everything an installed APK can be traced back to. Recomputed on every
-      # head: a workflow-only change still produces a different APK, so reusing
-      # a digest from a previous head would be a claim about bytes nobody hashed.
+      # head, and never carried over: reusing a digest from a previous head
+      # would be a claim about bytes nobody hashed. Note that the APK digest
+      # identifies this *build*, not this commit — no debug keystore is
+      # configured, so AGP generates one per runner and two builds of the same
+      # tree are signed by different keys. The two embedded source digests are
+      # the part that is stable across builds; see docs/ANDROID.md.
       - name: Record the APK identity
         working-directory: android
         run: |
@@ -135,6 +139,24 @@ jobs:
             unzip -p "$apk" assets/source-identity.json
             echo
           } | tee "$identity"
+
+          # The two embedded digests are what make an installed APK traceable
+          # back to a tree, and `writeSourceIdentity` writes the literal
+          # "absent" rather than failing when a digest has nothing to hash. An
+          # APK published with provenance that says nothing is worse than no
+          # APK: a bench result against it could not be tied to any source.
+          for field in webBuildSha256 nativeSourceSha256; do
+            value="$(
+              unzip -p "$apk" assets/source-identity.json \
+                | sed -n "s/.*\"$field\":\"\([^\"]*\)\".*/\1/p"
+            )"
+            printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::assets/source-identity.json carries no usable" \
+                   "$field (got '$value'). This APK cannot be traced back to a" \
+                   "source tree, so it is not publishable." >&2
+              exit 1
+            }
+          done
 
           sha256sum "$apk" > app-debug.apk.sha256
 

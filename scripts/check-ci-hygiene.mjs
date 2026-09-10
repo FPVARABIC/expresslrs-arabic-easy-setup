@@ -237,6 +237,16 @@ if (!existsSync(androidWorkflowPath)) {
   if (!/source-identity\.json/u.test(androidWorkflow)) {
     fail("android.yml does not record the embedded web and native source SHAs");
   }
+  // Recording the embedded digests is not the same as checking them. The
+  // Gradle task writes the literal "absent" rather than failing when a digest
+  // has nothing to hash, so without this assertion an APK can be published
+  // whose provenance names nothing — and the whole point of the record is that
+  // a result from a phone can be traced back to a tree.
+  if (!/\^\[0-9a-f\]\{64\}\$/u.test(androidWorkflow)) {
+    fail(
+      'android.yml does not assert the embedded source digests are real; an APK whose provenance reads "absent" would publish',
+    );
+  }
 }
 
 const androidSourceRoot = "android/app/src/main/java/com/fpvarabic/elrs/bridge";

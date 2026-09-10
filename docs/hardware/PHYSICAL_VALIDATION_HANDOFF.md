@@ -50,36 +50,52 @@ artifact. Take the artifact named for the commit you are testing:
 3. It contains `app-debug.apk`, `app-debug.apk.sha256`, and
    `app-debug.apk.identity.txt`.
 
-The exact identity of the current candidate is recorded in
-[ANDROID.md](../ANDROID.md#apk-identity). **Verify the APK you downloaded
-before installing it:**
+**Verify the APK you downloaded before installing it:**
 
 ```sh
 sha256sum app-debug.apk
-# must equal the value in app-debug.apk.sha256 and in ANDROID.md
+# must equal the value in app-debug.apk.sha256 from the same artifact
 ```
 
-If it does not match, do not install it, and say so — a mismatch is either a
-corrupted download or an artifact that is not what the log says it is.
+If it does not match, do not install it, and say so — a mismatch there is
+either a corrupted download or an artifact that is not what the log says it is.
+
+Compare against the digest in [ANDROID.md](../ANDROID.md#apk-identity) **only
+when the artifact ID matches the one recorded there.** For any other build it
+will differ legitimately, and it is not a fault: no debug keystore is
+configured, so every CI run signs with a freshly generated debug key and
+produces different APK bytes from identical sources. The digests that *are*
+stable across builds of the same tree are the two embedded source digests in
+`app-debug.apk.identity.txt`, and those are what step 6 below checks.
 
 #### Installing it
 
-This is a **debug** build, signed with the Android debug key. It is not from a
-store and Play Protect will warn about it; that is expected for a debug APK and
-is not a fault to work around silently.
+This is a **debug** build, signed with a generated Android debug key. It is not
+from a store and Play Protect will warn about it; that is expected for a debug
+APK and is not a fault to work around silently.
 
 1. Enable installing from your file manager or browser: **Settings → Apps →
    Special app access → Install unknown apps**, and allow the app you will open
    the APK from.
-2. Open `app-debug.apk` and install it.
-3. Or, over ADB: `adb install -r app-debug.apk`.
-4. Attach the ELRS device with a USB OTG adapter, open the app, and grant the
+2. **If any earlier build of this app is installed, uninstall it first** —
+   `adb uninstall com.fpvarabic.elrs.bridge`, or **Settings → Apps →
+   ExpressLRS Easy Setup → Uninstall**. Each CI run signs with a different debug key, so
+   Android refuses to install one build over another
+   (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, or "app not installed" in the UI).
+   That refusal is Android working correctly, not a broken APK. Uninstalling
+   also clears any state left by the previous build, which is what you want
+   between candidates.
+3. Open `app-debug.apk` and install it.
+4. Or, over ADB: `adb install app-debug.apk` (after step 2; `-r` cannot help
+   here, because the obstacle is the signature, not the presence of the app).
+5. Attach the ELRS device with a USB OTG adapter, open the app, and grant the
    USB permission when Android asks. The permission dialog names the device;
    check it is the one you attached.
-5. Open **Diagnostics → Show the report** and confirm the *Native host web
+6. Open **Diagnostics → Show the report** and confirm the *Native host web
    build* and *Native host native source* digests match
    `app-debug.apk.identity.txt`. That is how a result from a phone is traced
-   back to a source tree.
+   back to a source tree, and unlike the APK digest it does not change when the
+   same tree is built again.
 
 If the app reports that its USB bridge could not be installed, record the exact
 reason it gives. It means this device's Android System WebView is too old to

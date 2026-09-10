@@ -233,8 +233,14 @@ weaker one — and the page is told the exact reason, which the build banner sho
 | The bundled application renders in both locales, in the real Activity | `EMULATOR_VERIFIED` | `PackagedApplicationInstrumentedTest` |
 
 All three suites: **42 tests, 0 skipped, 0 failed**, on an API 34 `google_apis`
-x86_64 emulator, in run
-[34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483).
+x86_64 emulator, first in run
+[34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483)
+and again in run
+[34421520061](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34421520061)
+on the current head. The suite is byte-identical between those two commits —
+they differ in Markdown only — so the second run is a repeat rather than new
+coverage; it is recorded because a green result on the head under review is
+worth more than a green result on its parent.
 
 Reaching that took four defects in the job itself and two real defects the
 tests then found, all recorded here because each was a genuine fault rather
@@ -254,20 +260,20 @@ than a flake:
 
 ### APK identity
 
-Recomputed on every head. A workflow-only change still produces different APK
-bytes, so a digest is never carried over from a previous commit. CI writes this
-record beside the APK as `app-debug.apk.identity.txt`.
+Recomputed on every head and never carried over from a previous commit. CI
+writes this record beside the APK as `app-debug.apk.identity.txt`, and refuses
+to publish an APK whose two embedded source digests are missing or `absent`.
 
 | Field | Value |
 | --- | --- |
-| Commit | `73f2e7fc845fb653ad9a3741f4a6ca208487bdd0` |
-| Workflow run | [34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483), attempt 1 |
-| Artifact | `elrs-android-host-debug-73f2e7fc845fb653ad9a3741f4a6ca208487bdd0`, ID `10130851102` |
-| Artifact ZIP SHA-256 | `94ce68c8d6ce10a5779c6e61180b57d6510b8bdc2a56b949d00d07db8689f5de` |
-| Artifact ZIP bytes | 3,453,314 |
+| Commit | `0861c7be0a2483e408453377b2c1903b909108c1` |
+| Workflow run | [34421520061](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34421520061), attempt 1 |
+| Artifact | `elrs-android-host-debug-0861c7be0a2483e408453377b2c1903b909108c1`, ID `10131151852` |
+| Artifact ZIP SHA-256 | `4e2ea8a5fc99981d37ddd180946b479c53286228cf3c6c7267088b8445fe8402` |
+| Artifact ZIP bytes | 3,453,312 |
 | APK filename | `app-debug.apk` |
 | APK bytes | 3,760,222 |
-| APK SHA-256 | `e15fe08615f1bf09f653e0fe6dcaeb9174d4a0f4ed54b15583eb3080312b89ab` |
+| APK SHA-256 | `5f011ce3a3c677af12a018d5278bf815a6dd6a95b8b266ddf786d168afd6e9e0` |
 | Package id | `com.fpvarabic.elrs.bridge` |
 | `versionCode` | 1 |
 | `versionName` | `0.1.0-unverified-debug` |
@@ -275,7 +281,7 @@ record beside the APK as `app-debug.apk.identity.txt`.
 | `targetSdk` | 35 |
 | `compileSdk` | 35 |
 | Build tools | 37.0.0 |
-| Signing certificate SHA-256 | `be2a7d3eda700563efd1233226cd67b678c63e9f8d9a085e447c07c293a40252` |
+| Signing certificate SHA-256 | `ea89565c2bb19dee2aa0ab67dcc9ed34d1dc28cc412a24b4c4a70ef6614cba08` |
 | Embedded web build SHA-256 | `d7fbc61563324ab10112501431245d4bc5e4bd2407e89ec2a45b11c73f61ba7f` |
 | Embedded native source SHA-256 | `a9c4b14ac2395c7428bc75a99f00c80f3599bb93ac363cb1b390e0c0c797e4f9` |
 
@@ -289,12 +295,59 @@ shown in the build banner inside an installed host, and exported in
 diagnostics — so a result reported from a phone names the exact sources behind
 it.
 
-**This record is for the commit named above.** Any later commit produces a
-different APK; CI records its identity the same way, and the artifact for a
-given commit is named after that commit.
+#### What the APK digest does and does not identify
 
-This is a **debug** build signed with the Android debug key. It is not a release
-artifact and must not be treated as one.
+Comparing three consecutive heads makes the distinction concrete, and it is not
+the one you would assume:
+
+| Commit | APK bytes | APK SHA-256 | Signing certificate | Web build | Native source |
+| --- | --- | --- | --- | --- | --- |
+| `6a225f3` | 3,760,158 | `bcfde79c…` | `8bb0af82…` | `d7fbc615…` | `abf487f0…` |
+| `73f2e7f` | 3,760,222 | `e15fe086…` | `be2a7d3e…` | `d7fbc615…` | `a9c4b14a…` |
+| `0861c7b` | 3,760,222 | `5f011ce3…` | `ea89565c…` | `d7fbc615…` | `a9c4b14a…` |
+
+`73f2e7f` and `0861c7b` differ in Markdown only. Every input to the APK is
+identical between them — both source digests match, as do the byte count, the
+version fields and the SDK levels — and the APK digest still differs, because
+the **signing certificate differs too**. No debug keystore is configured, so
+AGP generates one per runner: three runs, three keys. The APK digest therefore
+identifies **one build**, not one commit; building the same tree again yields a
+different digest.
+
+So the digest is a download-integrity check against `app-debug.apk.sha256` in
+the same artifact, and nothing more. The claim R4 actually asks for — that an
+installed APK can be traced back to its source — rests on the two embedded
+source digests, and those are stable across builds of the same tree, which the
+table above demonstrates rather than asserts.
+
+Two consequences worth knowing before the bench:
+
+- **Builds cannot be installed over one another.** Android rejects an update
+  signed by a different key, so a tester moving between candidates must
+  uninstall first. `docs/hardware/PHYSICAL_VALIDATION_HANDOFF.md` says so, and
+  says what the refusal looks like, because the error text
+  (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) reads like a broken APK and is not.
+- **A stable identity is a release-signing decision, deliberately not taken
+  here.** It would need either a keystore committed to the repository or one
+  generated in CI from a secret. The first is rejected: a private key in a
+  public repository lets anyone build an APK that Android accepts as an update
+  to this one, and for an application with USB write authority over flight
+  hardware, throwing away that protection costs more than the one uninstall
+  step it saves. The second is the right answer for a published build and needs
+  a repository secret that does not exist yet; it is out of scope for bench
+  validation, where every candidate is downloaded from a named CI run anyway.
+
+**This record is for the commit and run named above.** A later commit — or a
+re-run of this one — produces a different APK; CI records its identity the same
+way, and the artifact for a given commit is named after that commit.
+
+This is a **debug** build signed with a generated Android debug key. It is not a
+release artifact and must not be treated as one.
+
+The published APK is also not the same binary the instrumentation suite ran
+against: the two jobs build independently on separate runners. They are builds
+of the same sources, which the identity record is what proves — not the same
+file.
 
 An emulator cannot close this gap: it has no USB host, so no emulator run can
 exercise an OTG path. Only a physical phone or tablet with an OTG cable can.
