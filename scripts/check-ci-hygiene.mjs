@@ -11,6 +11,7 @@ const allowedWorkflows = new Set([
   "deploy-pages.yml",
   "upstream-live.yml",
   "android.yml",
+  "android-release-candidate.yml",
 ]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
@@ -282,6 +283,95 @@ for (const [path, pattern, complaint] of durableRules) {
     continue;
   }
   if (!pattern.test(readFileSync(path, "utf8"))) fail(`${path}: ${complaint}`);
+}
+
+// ---------------------------------------------------------------------------
+// The signing boundary.
+//
+// A workflow that runs pull-request code and can read a release signing secret
+// hands that key to anyone who can open a pull request. That is the whole
+// reason the physical-test channel lives in its own workflow, and it is worth
+// a gate rather than a comment: the mistake is one line of YAML away and it is
+// invisible in review.
+// ---------------------------------------------------------------------------
+const signingSecretPattern = /secrets\.ELRS_(?:KEYSTORE|KEY)_[A-Z0-9_]+/u;
+const releaseCandidateWorkflow = `${workflowDirectory}/android-release-candidate.yml`;
+
+if (!existsSync(releaseCandidateWorkflow)) {
+  fail(`${releaseCandidateWorkflow} is missing`);
+} else {
+  const rc = readFileSync(releaseCandidateWorkflow, "utf8");
+  const rcTriggers = withoutComments(rc).split(/^jobs:/mu)[0] ?? "";
+  if (/^\s*pull_request(_target)?:/mu.test(rcTriggers)) {
+    fail(
+      "android-release-candidate.yml is triggered by a pull request; it signs with a protected key and must never run pull-request code",
+    );
+  }
+  if (!signingSecretPattern.test(rc)) {
+    fail(
+      "android-release-candidate.yml does not use the signing secrets at all",
+    );
+  }
+  // Fail closed. A candidate that silently fell back to the debug key would be
+  // uninstallable over its predecessor, which loses the tester's data and the
+  // durable recovery state that data is there to protect.
+  if (!/Missing signing secrets/u.test(rc) || !/exit 1/u.test(rc)) {
+    fail(
+      "android-release-candidate.yml does not fail closed when the signing secrets are absent",
+    );
+  }
+  if (!/apksigner\S* verify --verbose --print-certs/u.test(rc)) {
+    fail(
+      "android-release-candidate.yml does not run apksigner verify --verbose --print-certs",
+    );
+  }
+  if (!/physical-test-certificate\.sha256/u.test(rc)) {
+    fail(
+      "android-release-candidate.yml does not check the APK against the recorded signing certificate",
+    );
+  }
+  if (!/provenance\.json/u.test(rc)) {
+    fail(
+      "android-release-candidate.yml publishes no provenance manifest beside the APK",
+    );
+  }
+  // The keystore must not be reachable by an artifact upload. It is written to
+  // RUNNER_TEMP, outside the workspace, and shredded unconditionally.
+  if (!/RUNNER_TEMP/u.test(rc) || !/if: always\(\)/u.test(rc)) {
+    fail(
+      "android-release-candidate.yml does not keep the keystore outside the workspace and destroy it unconditionally",
+    );
+  }
+  for (const forbidden of [/\.jks/u, /\.keystore/u]) {
+    const uploadBlocks = rc
+      .split(/- name: /u)
+      .filter((block) => /upload-artifact/u.test(block));
+    for (const block of uploadBlocks) {
+      if (forbidden.test(block)) {
+        fail("android-release-candidate.yml uploads a keystore in an artifact");
+      }
+    }
+  }
+}
+
+// No other workflow may read those secrets, whatever it is triggered by.
+for (const name of readdirSync(workflowDirectory)) {
+  if (name === "android-release-candidate.yml") continue;
+  const contents = readFileSync(`${workflowDirectory}/${name}`, "utf8");
+  if (signingSecretPattern.test(contents)) {
+    fail(
+      `${name} references a release signing secret; only the release-candidate workflow may`,
+    );
+  }
+}
+
+// And the keystore itself is never in the tree.
+for (const name of readdirSync("android/signing")) {
+  if (/\.(jks|keystore|p12|pfx|pem|key)$/iu.test(name)) {
+    fail(
+      `android/signing/${name} looks like key material and must not be committed`,
+    );
+  }
 }
 
 const androidSourceRoot = "android/app/src/main/java/com/fpvarabic/elrs/bridge";

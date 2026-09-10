@@ -1,0 +1,292 @@
+name: Android physical-test candidate
+
+# Builds the signed physical-test APK from an immutable tag.
+#
+# Separate from `android.yml` on purpose, and the separation is the security
+# boundary rather than an organisational one:
+#
+#   * `android.yml` runs on pull requests. It builds the `debug-ci` channel with
+#     whatever ephemeral debug key the runner generated. It has no access to any
+#     signing secret, and it must never gain one — a workflow that runs
+#     pull-request code and holds a release key hands that key to anyone who can
+#     open a pull request.
+#   * this workflow runs only from a tag push or a manual dispatch on a branch
+#     of this repository. It is the only place the stable keystore exists, and
+#     it fails closed when the secrets are absent rather than falling back to a
+#     debug key.
+#
+# `check-ci-hygiene` enforces both halves of that: no `pull_request` trigger
+# here, and no reference to these secrets from any workflow that has one.
+
+on:
+  push:
+    tags:
+      - "physical-test-*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or commit to build. Must be an immutable reference."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-rc-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Signed physical-test APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # A belt-and-braces refusal. The `on:` block above cannot be triggered by
+      # a pull request, but a future edit could add one, and this step makes
+      # that a failure at the top of the job rather than a leaked key.
+      - name: Refuse to run against pull-request code
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || \
+             [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            echo "::error::This workflow signs with a protected key and must never run pull-request code."
+            exit 1
+          fi
+
+      - name: Check out the exact reference
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Record what is being built
+        id: source
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          # An annotated or lightweight tag pointing at this commit, if any.
+          tag="$(git tag --points-at HEAD | head -1)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "commit: $sha"
+            echo "tag:    ${tag:-<none>}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # A candidate must be an immutable reference. A branch head is not,
+          # and an APK handed to a tester has to name a tree that cannot move.
+          if [ -z "$tag" ]; then
+            echo "::warning::No tag points at this commit. The identity record will name the commit only."
+          fi
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      # Every quality gate, on the exact tree being signed. A candidate that
+      # skipped them would be a candidate nobody checked.
+      - name: Run every gate
+        run: pnpm check
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+        with:
+          cache-read-only: true
+
+      # The keystore exists only for the life of this job, only on disk in the
+      # runner's temporary directory, and never inside the workspace — so it
+      # cannot be picked up by an artifact upload path.
+      - name: Materialise the signing keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ELRS_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ELRS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ELRS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ELRS_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${KEYSTORE_BASE64:-}" ] || missing="$missing ELRS_KEYSTORE_BASE64"
+          [ -n "${KEYSTORE_PASSWORD:-}" ] || missing="$missing ELRS_KEYSTORE_PASSWORD"
+          [ -n "${KEY_ALIAS:-}" ] || missing="$missing ELRS_KEY_ALIAS"
+          [ -n "${KEY_PASSWORD:-}" ] || missing="$missing ELRS_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing signing secrets:$missing. This job fails closed rather than" \
+                 "falling back to a debug key: a candidate signed by an ephemeral key cannot be" \
+                 "installed over the previous one, so a tester would lose their data and their" \
+                 "durable recovery state on every update. See docs/ANDROID_SIGNING.md."
+            exit 1
+          fi
+          # Masked so that even an accidental `set -x` or a Gradle error echoing
+          # a property cannot print them into the log.
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "::add-mask::$KEY_PASSWORD"
+          echo "::add-mask::$KEY_ALIAS"
+          keystore="$RUNNER_TEMP/physical-test.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          # A truncated or mis-pasted secret is a broken keystore, and it is
+          # better to say so here than to fail inside the signer.
+          if ! [ -s "$keystore" ]; then
+            echo "::error::ELRS_KEYSTORE_BASE64 did not decode to a file."
+            exit 1
+          fi
+          echo "path=$keystore" >> "$GITHUB_OUTPUT"
+
+      - name: Build the web application
+        run: pnpm build
+
+      - name: Assemble the signed physical-test APK
+        working-directory: android
+        env:
+          ELRS_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          ELRS_KEYSTORE_PASSWORD: ${{ secrets.ELRS_KEYSTORE_PASSWORD }}
+          ELRS_KEY_ALIAS: ${{ secrets.ELRS_KEY_ALIAS }}
+          ELRS_KEY_PASSWORD: ${{ secrets.ELRS_KEY_PASSWORD }}
+          # Monotonic: a run number only ever increases for a workflow, so a
+          # later candidate always installs over an earlier one.
+          ELRS_VERSION_CODE: ${{ github.run_number }}
+          ELRS_VERSION_NAME: >-
+            ${{ steps.source.outputs.tag || format('0.1.0-rc.{0}', github.run_number) }}+${{ steps.source.outputs.short }}
+        run: gradle --no-daemon assemblePhysicalTest
+
+      - name: Verify the signature and record the identity
+        id: identity
+        working-directory: android
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/physicalTest/app-physicalTest.apk"
+          test -f "$apk" || apk="$(find app/build/outputs/apk/physicalTest -name '*.apk' | head -1)"
+          test -f "$apk"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+
+          # The full verbose output, as asked for, kept beside the APK so a
+          # reviewer can read the schemes and the signer rather than trust a
+          # summary of them.
+          "$apksigner" verify --verbose --print-certs "$apk" | tee app-physicalTest.apk.certs.txt
+
+          observed="$(
+            "$apksigner" verify --print-certs "$apk" 2>&1 \
+              | grep -io 'SHA-256 digest: *[0-9a-f]\{64\}' \
+              | grep -io '[0-9a-f]\{64\}' \
+              | head -1
+          )"
+          expected="$(
+            [ -f signing/physical-test-certificate.sha256 ] \
+              && tr -d '[:space:]' < signing/physical-test-certificate.sha256 \
+              || true
+          )"
+          if [ -z "$expected" ]; then
+            echo "::error::No expected certificate is recorded. This APK was signed by" \
+                 "$observed. If that is the intended physical-test key, commit it to" \
+                 "android/signing/physical-test-certificate.sha256 and re-run. Publishing a" \
+                 "candidate whose certificate nobody recorded would mean a later swapped key" \
+                 "could not be detected."
+            exit 1
+          fi
+          if [ "$observed" != "$expected" ]; then
+            echo "::error::This APK was signed by $observed, but the recorded physical-test" \
+                 "certificate is $expected. Either the wrong keystore was supplied or the" \
+                 "keystore was regenerated. A candidate signed by a different key cannot be" \
+                 "installed over the previous one."
+            exit 1
+          fi
+
+          # The embedded source identities must be real, for the same reason as
+          # in the debug channel: an APK whose provenance says nothing cannot be
+          # traced back to a tree.
+          for field in webBuildSha256 nativeSourceSha256; do
+            value="$(
+              unzip -p "$apk" assets/source-identity.json \
+                | sed -n "s/.*\"$field\":\"\([^\"]*\)\".*/\1/p"
+            )"
+            printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::assets/source-identity.json carries no usable $field (got '$value')."
+              exit 1
+            }
+          done
+
+          manifest="app-physicalTest.apk.provenance.json"
+          {
+            printf '{\n'
+            printf '  "schemaVersion": 1,\n'
+            printf '  "channel": "physical-test",\n'
+            printf '  "tag": "%s",\n' "${{ steps.source.outputs.tag }}"
+            printf '  "commit": "%s",\n' "${{ steps.source.outputs.sha }}"
+            printf '  "workflowRun": "%s",\n' "${{ github.run_id }}"
+            printf '  "runAttempt": "%s",\n' "${{ github.run_attempt }}"
+            printf '  "apkFileName": "%s",\n' "$(basename "$apk")"
+            printf '  "apkBytes": %s,\n' "$(stat -c%s "$apk")"
+            printf '  "apkSha256": "%s",\n' "$(sha256sum "$apk" | cut -d' ' -f1)"
+            printf '  "buildTools": "%s",\n' "$build_tools"
+            printf '  "versionCode": "%s",\n' "$(
+              "$aapt2" dump badging "$apk" | sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p"
+            )"
+            printf '  "versionName": "%s",\n' "$(
+              "$aapt2" dump badging "$apk" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p"
+            )"
+            printf '  "minSdk": "%s",\n' "$(
+              "$aapt2" dump badging "$apk" \
+                | sed -n "s/^\(min\)\?[sS]dkVersion:'\([^']*\)'.*/\2/p" | head -1
+            )"
+            printf '  "targetSdk": "%s",\n' "$(
+              "$aapt2" dump badging "$apk" | sed -n "s/^targetSdkVersion:'\([^']*\)'/\1/p"
+            )"
+            printf '  "compileSdk": "%s",\n' "$(
+              sed -n 's/^ *compileSdk = \([0-9]*\)/\1/p' app/build.gradle.kts
+            )"
+            printf '  "signingCertificateSha256": "%s",\n' "$observed"
+            printf '  "targetPack": %s,\n' "$(node ../scripts/print-target-pack-identity.mjs)"
+            printf '  "embedded": %s\n' "$(unzip -p "$apk" assets/source-identity.json)"
+            printf '}\n'
+          } | tee "$manifest"
+
+          sha256sum "$apk" > app-physicalTest.apk.sha256
+          cp "$apk" "app-physicalTest.apk"
+          echo "apk=android/app-physicalTest.apk" >> "$GITHUB_OUTPUT"
+
+      # Only the APK and its public records. The keystore lives in RUNNER_TEMP,
+      # which is not in the workspace, so no path here can reach it.
+      - name: Publish the candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: elrs-physical-test-${{ steps.source.outputs.tag || steps.source.outputs.sha }}
+          path: |
+            android/app-physicalTest.apk
+            android/app-physicalTest.apk.sha256
+            android/app-physicalTest.apk.certs.txt
+            android/app-physicalTest.apk.provenance.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Destroy the keystore
+        if: always()
+        run: |
+          # Best effort and unconditional. The runner is ephemeral, but a
+          # keystore that outlives the step that needed it is a keystore that
+          # something else on the runner could read.
+          shred -u "$RUNNER_TEMP/physical-test.jks" 2>/dev/null \
+            || rm -f "$RUNNER_TEMP/physical-test.jks"

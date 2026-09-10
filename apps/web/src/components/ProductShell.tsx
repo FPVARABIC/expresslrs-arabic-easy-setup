@@ -13,6 +13,7 @@ import { EasySetup } from "./EasySetup";
 import { ExpressLrsParityWorkbenchView } from "./ExpressLrsParityWorkbench";
 import { useDeviceController } from "../hardware/useDeviceController";
 import type { HardwareDriverConnector } from "../hardware/userSession";
+import { readStoredLocale, writeStoredLocale } from "../preferences";
 
 export interface ProductShellProps {
   readonly initialLocale?: Locale;
@@ -29,11 +30,17 @@ export interface ProductShellProps {
  * granted for one operation cannot be inherited by the other view.
  */
 export function ProductShell({
-  initialLocale = defaultLocale,
+  initialLocale,
   initialMode = "easy",
   hardwareConnector,
 }: ProductShellProps = {}) {
-  const [locale, setLocale] = useState<Locale>(initialLocale);
+  // An explicit prop wins, then the remembered choice, then the default. The
+  // order matters: a test that pins a locale must not be overridden by whatever
+  // the last run happened to store, and an operator's choice must survive an
+  // application update rather than resetting to Arabic on every launch.
+  const [locale, setLocale] = useState<Locale>(
+    () => initialLocale ?? readStoredLocale() ?? defaultLocale,
+  );
   const [mode, setMode] = useState<"easy" | "advanced">(initialMode);
   const t = createTranslator(locale);
   const mainRef = useRef<HTMLElement | null>(null);
@@ -47,6 +54,7 @@ export function ProductShell({
     document.documentElement.lang = locale;
     document.documentElement.dir = getDirection(locale);
     document.title = translate(locale, "app.name");
+    writeStoredLocale(locale);
   }, [locale]);
 
   // A mode switch replaces the whole view, so move focus to the new content
