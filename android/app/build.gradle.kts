@@ -1,3 +1,4 @@
+import java.io.File
 import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -20,13 +21,13 @@ plugins {
  * rather than quietly fall back to a debug key.
  */
 data class PhysicalTestSigning(
-    val storeFile: java.io.File,
+    val storeFile: File,
     val storePassword: String,
     val keyAlias: String,
     val keyPassword: String,
 )
 
-fun physicalTestSigning(): PhysicalTestSigning? {
+fun resolvePhysicalTestSigning(): PhysicalTestSigning? {
     fun value(name: String): String? =
         (System.getenv(name) ?: providers.gradleProperty(name).orNull)?.takeIf { it.isNotBlank() }
 
@@ -34,12 +35,12 @@ fun physicalTestSigning(): PhysicalTestSigning? {
     val storePassword = value("ELRS_KEYSTORE_PASSWORD") ?: return null
     val keyAlias = value("ELRS_KEY_ALIAS") ?: return null
     val keyPassword = value("ELRS_KEY_PASSWORD") ?: return null
-    val file = java.io.File(path)
+    val file = File(path)
     if (!file.isFile) return null
     return PhysicalTestSigning(file, storePassword, keyAlias, keyPassword)
 }
 
-val physicalTestSigning: PhysicalTestSigning? = physicalTestSigning()
+val physicalTestSigning: PhysicalTestSigning? = resolvePhysicalTestSigning()
 
 /**
  * The certificate the physical-test channel is expected to be signed by.
@@ -75,12 +76,13 @@ android {
     }
 
     signingConfigs {
-        if (physicalTestSigning != null) {
+        val signing = physicalTestSigning
+        if (signing != null) {
             create("physicalTest") {
-                storeFile = physicalTestSigning.storeFile
-                storePassword = physicalTestSigning.storePassword
-                keyAlias = physicalTestSigning.keyAlias
-                keyPassword = physicalTestSigning.keyPassword
+                storeFile = signing.storeFile
+                storePassword = signing.storePassword
+                keyAlias = signing.keyAlias
+                keyPassword = signing.keyPassword
                 // Both schemes: v1 for API 24 installs, v2 for everything
                 // after, so one APK covers the whole supported range.
                 enableV1Signing = true

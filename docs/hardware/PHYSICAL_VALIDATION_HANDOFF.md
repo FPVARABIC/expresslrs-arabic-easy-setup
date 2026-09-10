@@ -1,5 +1,7 @@
 # Physical validation handoff
 
+> An Arabic summary of the safety rules, the test order and the information needed before starting is in [دليل الاختبار الفعلي](دليل-الاختبار-الفعلي.md). This file is the complete version: every row, every expected observation, and the recording sheet.
+
 Everything a person needs to run the 25 rows of
 [HARDWARE_TEST_SHEET.md](HARDWARE_TEST_SHEET.md) themselves, and nothing that
 claims to have run them.
@@ -102,7 +104,28 @@ reason it gives. It means this device's Android System WebView is too old to
 provide an origin-restricted bridge, and no device can be opened — that is a
 real result for this handoff, not a failure to work around.
 
-## 2. Minimum hardware for all 25 rows
+## 2. What is needed before starting
+
+Eight facts decide which rows can actually be closed and which need hardware
+that is not on the bench yet. **Answer these before buying anything** — several
+of the rows can be closed with less than the full kit, and one of them (spare
+receiver) decides whether three whole stages may be attempted at all.
+
+| # | Question | Why it decides something |
+| --- | --- | --- |
+| 1 | Android phone model and Android version | Decides API level, WebView version, and therefore whether the bridge can be installed at all |
+| 2 | Does that phone support USB OTG? | Many budget devices omit USB host entirely. Without it, rows A1–A13 and H25 cannot run on that phone, and no amount of software fixes it |
+| 3 | TX: exact commercial model, frequency band, current ExpressLRS version | Decides the Target, the regulatory domain, and whether the frozen pack covers it |
+| 4 | RX: exact commercial model, chip/platform if known, frequency band, current ExpressLRS version | As above, plus whether RX-as-TX is even possible — an ESP8285 cannot do external mode, and STM32 cannot do either |
+| 5 | Available USB/UART adapters and cables | Decides which upload methods are reachable: OTG for the phone, and a UART programmer for anything without native USB |
+| 6 | Is a spare receiver available? | **Stages 7, 8 and row A11 must not be run without one.** They break a device on purpose |
+| 7 | Stable power source | A dropped supply mid-write is the most common way a device is lost. A nearly flat battery is not a stable supply |
+| 8 | Can the recovery file be saved outside the app? | Stage 3 needs somewhere the operator chooses — Downloads, an SD card, a cloud folder — with a few megabytes free. Without it, firmware writing stays refused, by design |
+
+An Arabic version of this request, with the safety rules and the order, is in
+[دليل الاختبار الفعلي](دليل-الاختبار-الفعلي.md).
+
+## 3. Minimum hardware for all 25 rows
 
 The per-row table is in
 [HARDWARE_TEST_SHEET.md](HARDWARE_TEST_SHEET.md#hardware-required-per-row).
@@ -125,13 +148,50 @@ Consolidated, the smallest kit that closes every row is:
 Rows whose hardware you do not have stay `UNVERIFIED`. Do not mark them
 failed — "not tested" and "does not work" are different findings.
 
-## 3. Run them in this order
+## 4. Run them in this order
 
 Each stage is safe to stop after. Do not skip forward: the later stages assume
 the earlier ones passed, and a firmware write on a device whose identity you
 have not confirmed is how a device is lost.
 
-### Stage 1 — read-only (H1–H5, H21)
+**None of the 25 hardware rows is closed.** Every row below is `UNVERIFIED`
+until someone runs it on real hardware and records what they saw. This document
+being complete is not the same as the rows being done.
+
+| Stage | Rows | Introduces |
+| --- | --- | --- |
+| 1 — install and detect | A1, A2, H25 | nothing; read-only |
+| 2 — identity and diagnostics | H1–H5, H21, A3–A5 | nothing; read-only |
+| 3 — **durable recovery** | D1–D6 | nothing; it is the safety net for stage 6 |
+| 4 — reversible settings | H6–H8 | a write that is put straight back |
+| 5 — binding and telemetry | H9–H11 | RF |
+| 6 — firmware | H12–H15 | a destructive write |
+| 7 — interruption and recovery | H16, A6, A11 | deliberate breakage; spare only |
+| 8 — RX-as-TX | H17–H20, H22 | the hardest change to undo; spare only |
+| 9 — AirPort, on its own | H23, H24 | nothing new, but must not be mixed with stage 8 |
+| 10 — final RF verification | F1 | the whole system, after everything above |
+
+**Stage 3 sits before stage 6 for a reason, and it is not tidiness.** The
+durable recovery copy is the only way back if a firmware write fails. Until it
+is proven, stage 6 is a device with no safety net — and the application itself
+refuses to write firmware until a copy has been written outside it and
+hash-verified, naming that as the reason.
+
+### Stage 1 — install and read-only OTG detection (A1, A2, H25)
+
+Nothing is written, and nothing is even opened. This stage answers one question:
+does this phone see this device at all?
+
+| Step | Do | Expect | Fails if |
+| --- | --- | --- | --- |
+| A1 | Install the APK per section 1 | It installs; Play Protect warns and you continue | It will not install. If the error is `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, uninstall the earlier build first — see section 1 |
+| A2 | Attach the ELRS device through the OTG adapter | Android offers this app for the attached device, or the app lists it once opened | Nothing happens. Check the phone supports USB host at all before concluding the app is at fault |
+| H25 | Open the app with the device attached and read the device list | The device appears. A device this host cannot drive still appears, **with the reason attached** | The list is empty with a device plugged in, or an undrivable device is hidden rather than explained |
+
+If A2 fails on a phone whose USB host support you have not verified, that is not
+a result for this application — record the phone model and stop.
+
+### Stage 2 — identity and diagnostics (H1–H5, H21, A3–A5)
 
 Nothing is written. Safe on any device, including ones you care about.
 
@@ -143,8 +203,29 @@ Nothing is written. Safe on any device, including ones you care about.
 | H4 | With the TX attached, choose the RX role and identify | A role-mismatch reason; the session stays closed | It connects anyway |
 | H5 | Unplug, replug, identify again | The same role, product and hardware version | Anything differs, or the reconnect needs an app restart |
 | H21 | Choose an STM32 receiver as the Target and open the rx-as-tx selector | Both modes refused, naming the Target and the platform. Nothing is written | The option is hidden, or blamed on the build |
+| A3 | Grant the USB permission when Android asks | A port opens and the identity is read. The dialog names the device — check it is the one you attached | It names a different device, or no port opens after granting |
+| A4 | Deny the permission on a second device | A named refusal. No port is held; the next attempt still works | It hangs, or a later attempt fails because something was left open |
+| A5 | Grant, then revoke in Android settings, then retry | The stale handle is refused rather than used | It carries on with a handle it no longer has |
 
-### Stage 2 — reversible settings (H6–H8)
+### Stage 3 — durable recovery export and re-import (D1–D6)
+
+**Run this before any firmware write.** It is the stage that decides whether
+stage 6 has a way back. Nothing here touches the device: it is entirely about
+whether a file survives.
+
+| Step | Do | Expect | Fails if |
+| --- | --- | --- | --- |
+| D1 | Build a package, then press *Save the recovery package where it will survive* | Android's file picker opens. Choose a location **outside the app** — Downloads, an SD card, a cloud folder | No picker appears, or it offers only app-private storage |
+| D2 | Complete the save | The app reports the exact location and a SHA-256, having written the file, reopened it and hashed it | It reports success without a digest, or the digest is missing |
+| D3 | Dismiss the picker instead of choosing | A cancellation, named as such — not an error, and not a silent success | It reports success, or an unexplained failure |
+| D4 | With the save cancelled, try to start a firmware write | Refused, naming the missing durable copy. **Identity, diagnostics and reversible settings all still work** | The write is allowed, or the whole application locks up |
+| D5 | Check the file with a file manager | It is there, at the location the app named, a few megabytes | It is absent, zero bytes, or somewhere else |
+| D6 | **Uninstall the app, reinstall it, then press *I already have a saved recovery package*** and choose that file | It validates and reports the package imported and verified. Recovery becomes available with no earlier app data at all | It cannot be imported, or recovery stays unavailable |
+
+D6 is the whole point of this stage. Record the location and the digest from D2
+on the recording sheet — you will need them again at stage 7.
+
+### Stage 4 — reversible settings (H6–H8)
 
 Written and put straight back. Safe on a working device, but do it on the spare
 if you would rather.
@@ -155,7 +236,7 @@ if you would rather.
 | H7 | Change one non-sensitive value (packet rate is a good one) and save | The value read back after the write equals what you asked for, exactly | Read-back differs, or is not performed |
 | H8 | Press *Restore the snapshot* | Every value returns; nothing is skipped | Any parameter does not come back |
 
-### Stage 3 — binding and RF (H9–H11)
+### Stage 5 — binding and telemetry (H9–H11)
 
 The first stage that transmits. Antenna fitted. Minimum power. No propellers.
 
@@ -165,7 +246,7 @@ The first stage that transmits. Antenna fitted. Minimum power. No propellers.
 | H10 | Run binding on the receiver | The command and any response recorded, with no assumed link | The app reports success without evidence |
 | H11 | Observe the link at **both** ends | Independent evidence at the TX *and* the RX: telemetry returning, or both indicators. Record what each end showed | Only one end shows anything. A bind acknowledgement alone fails this row |
 
-### Stage 4 — firmware (H12–H15)
+### Stage 6 — standard firmware update and verified reboot (H12–H15)
 
 Destructive. Recovery archive downloaded and stored off the device first. The
 application refuses to write until you have confirmed that.
@@ -177,7 +258,7 @@ application refuses to write until you have confirmed that.
 | H14 | Let it complete | Erase and write complete with read-back or tool-side segment verification | It reports success without verifying |
 | H15 | Let it reboot and reconnect | The same identity returns, reporting the expected release | The identity changed, or the version is not what was written |
 
-### Stage 5 — interruption and recovery (H16)
+### Stage 7 — controlled interruption and recovery (H16, A6, A11)
 
 **Spare device only.** This is the row that proves recovery works, by breaking
 a device on purpose.
@@ -185,14 +266,20 @@ a device on purpose.
 | Step | Do | Expect | Fails if |
 | --- | --- | --- | --- |
 | H16 | Start a write and pull the cable during `WRITING` | `RECOVERY_REQUIRED` appears and the checkpoint is kept. Recovery from the archive restores the original, and the identity and version return | The checkpoint is lost, recovery is unavailable, or the device cannot be restored |
+| A6 | Repeat H16 on Android, detaching mid-write | The port closes, the checkpoint survives, and the app says what happened | The app hangs, or claims success |
+| A11 | Recover the interrupted device on Android **using the file from D2** | The original firmware returns, restored from the durable copy rather than from anything inside the app | It cannot be restored, or it needs app data the reinstall in D6 removed |
 
 Reconnect the interrupted device before recovering it, so the recovery writes
 to a device whose identity has been confirmed.
 
-### Stage 6 — RX-as-TX and AirPort (H17–H20, H22–H24)
+A11 is the row that makes stage 3 worth having: it restores a broken device
+from a file that outlived an uninstall.
 
-Most destructive, and last, because a converted receiver is the hardest thing
-to get back. Spare receivers only.
+### Stage 8 — RX-as-TX, on spare hardware only (H17–H20, H22)
+
+Most destructive, because a converted receiver is the hardest thing to get back.
+**Spare receivers only, and only after stage 7 passed** — if recovery has not
+been proven on this bench, do not start this stage.
 
 | Step | Do | Expect | Fails if |
 | --- | --- | --- | --- |
@@ -201,20 +288,43 @@ to get back. Spare receivers only.
 | H19 | ESP8285 receiver, mode **internal** | As H17 | As above |
 | H20 | ESP8285 receiver, try mode **external** | The application refuses it, naming the Target and the platform — an ESP8285 has one UART | It is offered, hidden, or blamed on the build |
 | H22 | Recover a converted device from its archive | The **original receiver firmware** returns; the device reports a receiver role again | It comes back as a transmitter, or cannot be restored |
+
+### Stage 9 — AirPort, on its own (H23, H24)
+
+AirPort is a different feature from RX-as-TX. It is tested separately and
+deliberately not in the same session as stage 8, because the one thing these two
+rows exist to detect is the two features being entangled.
+
+| Step | Do | Expect | Fails if |
+| --- | --- | --- | --- |
 | H23 | AirPort **on**, rx-as-tx **off** | Bytes cross the serial bridge. The device is still a receiver | The role changed, or the bridge does not carry bytes |
 | H24 | rx-as-tx **on**, AirPort **off** | The role changed. AirPort is not enabled | AirPort turned itself on, or the role did not change |
 
-H23 and H24 together are the check that these are two features. If turning one
-on moves the other, that is a defect and worth reporting on its own.
+If turning one on moves the other, that is a defect and worth reporting on its
+own, before any of the remaining rows.
 
-### Stage 7 — Android OTG (H25)
+### Stage 10 — final functional RF verification (F1)
 
-Rows A1–A13 in
-[ANDROID.md](../ANDROID.md#still-open--needs-a-physical-android-device). Run
-them after the browser rows, so a failure can be attributed to the host rather
-than to the operation.
+Everything above, together, on the real link. Antenna fitted, minimum power, no
+propellers.
 
-## 4. Exporting diagnostics
+| Step | Do | Expect | Fails if |
+| --- | --- | --- | --- |
+| F1 | With the TX and RX both on the firmware and settings this session produced, power both and fly nothing | A bound link with telemetry at both ends, stable for at least two minutes, at the packet rate that was configured | No link, telemetry only one way, a rate that is not what was set, or a link that drops |
+
+This is the row that says the whole session produced a working pair rather than
+a sequence of individually passing steps.
+
+### The remaining Android rows (A7–A10, A12, A13)
+
+Rows A7–A13 in
+[ANDROID.md](../ANDROID.md#still-open--needs-a-physical-android-device) — screen
+rotation and backgrounding mid-operation, cancellation, the file picker, both
+locales at phone width, and nothing hidden merely because the platform is
+Android. Run them alongside whichever stage above they belong to, and record
+them against their own row numbers.
+
+## 5. Exporting diagnostics
 
 Do this **after every row**, not only after a failure. A passing row with no
 export is a claim; a passing row with an export is evidence.
@@ -233,7 +343,7 @@ You do not need to scrub it by hand — but read it before attaching it anyway.
 For the acceptance rows, use the recorder in Advanced Mode as well: it exports
 the same session as JSON and Markdown with the candidate SHA stamped in.
 
-## 5. Recording sheet
+## 6. Recording sheet
 
 Fill this in per device, before you start. A row is passed only by someone who
 watched it happen.
