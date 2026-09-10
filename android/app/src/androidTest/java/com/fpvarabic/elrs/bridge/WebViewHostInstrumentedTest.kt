@@ -139,16 +139,19 @@ class WebViewHostInstrumentedTest {
         attach()
         loadOnOrigin("<html><body>ready</body></html>")
 
-        // A resolved promise: requestPort hands back a Web Serial-shaped port.
+        // A resolved promise: requestPort hands back a Web Serial-shaped port,
+        // and the bytes reach the backend. The port is deliberately left open —
+        // the refusal below is about a *foreign* session, which only means
+        // anything while a real one exists.
         evaluate(
             """
             window.__result = null;
+            window.__port = null;
             window.elrsNativeBridge.serial.requestPort().then(function (port) {
+              window.__port = port;
               return port.open({ baudRate: 420000 }).then(function () {
                 var writer = port.writable.getWriter();
-                return writer.write(new Uint8Array([0xec, 0x04, 0x28])).then(function () {
-                  return port.close();
-                });
+                return writer.write(new Uint8Array([0xec, 0x04, 0x28]));
               }).then(function () {
                 window.__result = JSON.stringify({ ok: true, info: port.getInfo() });
               });
@@ -163,31 +166,46 @@ class WebViewHostInstrumentedTest {
         assertEquals(1, backend.written.size)
         assertEquals(0xec, backend.written.first()[0].toInt() and 0xff)
 
-        // A rejected promise carries the host's machine-readable reason, not a
-        // generic failure the page would have to guess at.
+        // The page cannot forge a session by reaching into the port: the shim
+        // keeps the id in a closure, so there is no property to overwrite.
+        // Asserted rather than assumed, because an earlier revision of the shim
+        // did expose it.
+        assertEquals(
+            "\"undefined\"",
+            evaluate("typeof (window.__port && window.__port._sessionId)"),
+        )
+
+        // A rejected promise carries the host's machine-readable reason rather
+        // than a generic failure the page would have to guess at. Driven
+        // through the raw host protocol, which is the only surface a foreign
+        // session id could actually arrive on, and while the real port is
+        // still open so this is a mismatch and not simply a closed port.
         evaluate(
             """
-            window.__result = null;
+            window.__refusal = null;
             window.elrsNativeHost.postMessage('not json at all');
-            window.__reject = null;
-            var port = null;
-            window.elrsNativeBridge.serial.requestPort().then(function (opened) {
-              port = opened;
-              return port.open({ baudRate: 420000 });
-            }).then(function () {
-              var writer = port.writable.getWriter();
-              port._sessionId = 'deadbeef';
-              return writer.write(new Uint8Array([1]));
-            }).then(function () {
-              window.__result = JSON.stringify({ ok: true });
-            }, function (error) {
-              window.__result = JSON.stringify({ ok: false, name: error.name });
-            });
+            var previous = window.elrsNativeHost.onmessage;
+            window.elrsNativeHost.onmessage = function (event) {
+              var raw = typeof event === 'string' ? event : event.data;
+              var reply = JSON.parse(raw);
+              if (reply.callId === 'forged') {
+                window.__refusal = JSON.stringify({ ok: reply.ok, name: reply.reason });
+              } else if (previous) {
+                previous(event);
+              }
+            };
+            window.elrsNativeHost.postMessage(JSON.stringify({
+              callId: 'forged',
+              operation: 'write',
+              sessionId: 'deadbeef',
+              bytes: [1],
+            }));
             """.trimIndent(),
         )
-        val failure = JSONObject(awaitScript("window.__result"))
+        val failure = JSONObject(awaitScript("window.__refusal"))
         assertFalse(failure.toString(), failure.getBoolean("ok"))
         assertEquals(BridgeCore.Reason.SESSION_MISMATCH, failure.getString("name"))
+        assertEquals("the forged write reached no device", 1, backend.written.size)
     }
 
     @Test
