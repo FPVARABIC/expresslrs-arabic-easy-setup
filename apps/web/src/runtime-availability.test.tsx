@@ -1306,9 +1306,13 @@ describe("runtime availability, from the production entry point", () => {
     await settleUntil(/Enter its recovery passphrase to open it/u);
     expect(screen.getAllByText(/Vendor TX Module/u).length).toBeGreaterThan(0);
 
-    const passphraseFields = screen.getAllByLabelText("Recovery passphrase");
-    const importField = passphraseFields.at(-1);
-    if (importField === undefined) throw new TypeError("no passphrase field");
+    // Scoped to the import block, not picked by position. There are two
+    // passphrase fields once a package is prepared — one to seal an export,
+    // one to open an import — and they are deliberately in different parts of
+    // the page, so an index would silently select the wrong one.
+    const importField = within(
+      document.querySelector(".recovery-import") as HTMLElement,
+    ).getByLabelText("Recovery passphrase");
     fireEvent.change(importField, { target: { value: RECOVERY_PASSPHRASE } });
     fireEvent.click(
       screen.getByRole("button", { name: "Open the recovery file" }),
@@ -1374,6 +1378,174 @@ describe("runtime availability, from the production entry point", () => {
       onFailure:
         "the imported package is kept in state, so the restore can be retried without picking the file again",
     });
+  });
+
+  it("a verified copy of a different package is stale, and says so", async () => {
+    // Two ways a receipt can stop describing the bytes about to be written,
+    // and they are handled differently on purpose.
+    //
+    // Changing an option clears the receipt outright — `resetPreparedState`
+    // nulls it, because a receipt for a package that no longer exists is a
+    // claim about bytes nobody is going to write.
+    //
+    // Importing a saved file is the other way, and it *keeps* the receipt,
+    // because the file really is on durable storage. What it does not do is
+    // make that file a copy of a package prepared afterwards. That is the
+    // stale case, and refusing it is right: the operator has a verified copy
+    // of something, just not of this.
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    const sealed = [...durableStorage.files.values()][0];
+    if (sealed === undefined) throw new TypeError("nothing was written");
+
+    // First route: change an option. The receipt is dropped, so the operator
+    // is told to save this package — not that an old one is stale.
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Unlock the higher power levels/u,
+      }),
+    );
+    await settle(4);
+    // The receipt is gone. The prepared package went with it, so the panel
+    // that displayed the verified copy is no longer on screen at all — which
+    // is the honest rendering of "there is nothing prepared to have a copy
+    // of", and is why this route never reports staleness.
+    expect(screen.queryByText(/Verified copy/u)).toBeNull();
+
+    // Second route: prepare a package, *then* import a saved file. The import
+    // keeps its receipt — the file really is on durable storage — but does not
+    // record it against the prepared package, so the receipt now describes
+    // something other than the bytes about to be written. Order matters here
+    // and the other way round proves nothing: `buildFirmware` begins with
+    // `resetPreparedState`, so importing first and building second simply
+    // clears the receipt.
+    cleanup();
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ importBytes: sealed });
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle(12);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose a saved recovery file" }),
+    );
+    await settleUntil(/Enter its recovery passphrase to open it/u);
+    // Scoped to the import block, not picked by position. There are two
+    // passphrase fields once a package is prepared — one to seal an export,
+    // one to open an import — and they are deliberately in different parts of
+    // the page, so an index would silently select the wrong one.
+    const importField = within(
+      document.querySelector(".recovery-import") as HTMLElement,
+    ).getByLabelText("Recovery passphrase");
+    fireEvent.change(importField, { target: { value: RECOVERY_PASSPHRASE } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the recovery file" }),
+    );
+    await settleUntil(/imported and verified/u);
+    await settle(6);
+
+    expect(
+      screen.getByRole("button", { name: "Start the real flash" }),
+    ).toBeDisabled();
+    expect(
+      screen.getAllByText(/belongs to a different package/u).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("a failed authentication changes nothing and reaches no device", async () => {
+    // The requirement is not only that a wrong passphrase is refused. It is
+    // that nothing is parsed, nothing is stored, and nothing is written — so a
+    // failure leaves the session exactly as it was rather than half-imported.
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    const sealed = [...durableStorage.files.values()][0];
+    if (sealed === undefined) throw new TypeError("nothing was written");
+
+    cleanup();
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ importBytes: sealed });
+    mocks.validateRecoveryPackage.mockClear();
+    mocks.saveCheckpoint.mockClear();
+
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose a saved recovery file" }),
+    );
+    await settleUntil(/Enter its recovery passphrase to open it/u);
+
+    // Scoped to the import block, not picked by position. There are two
+    // passphrase fields once a package is prepared — one to seal an export,
+    // one to open an import — and they are deliberately in different parts of
+    // the page, so an index would silently select the wrong one.
+    const importField = within(
+      document.querySelector(".recovery-import") as HTMLElement,
+    ).getByLabelText("Recovery passphrase");
+    fireEvent.change(importField, {
+      target: { value: "the-wrong-passphrase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the recovery file" }),
+    );
+    await settleUntil(/passphrase is wrong, or this file has been modified/u);
+
+    // Nothing was parsed: the archive validator was never reached, because
+    // AES-GCM verifies before it yields any plaintext.
+    expect(mocks.validateRecoveryPackage).not.toHaveBeenCalled();
+    // Nothing was stored.
+    expect(mocks.saveCheckpoint).not.toHaveBeenCalled();
+    // And nothing was written to a device: the control that would do it is not
+    // even on screen, because there is no imported package.
+    expect(
+      screen.queryByRole("button", {
+        name: "Restore the device from the imported package",
+      }),
+    ).toBeNull();
+    expect(mocks.flashEspFirmware).not.toHaveBeenCalled();
   });
 
   it("both languages expose the same capabilities, not the same words", async () => {

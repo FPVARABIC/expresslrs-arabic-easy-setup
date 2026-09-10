@@ -20,6 +20,7 @@ import {
   readDurableDocumentStore,
 } from "./durable-recovery-stores";
 import type { OfficialTarget } from "./parity-types";
+import { validateRecoveryPackage } from "./recovery-package";
 
 const target: OfficialTarget = {
   id: "vendor/rx_2400/receiver",
@@ -373,6 +374,25 @@ describe("picking and opening a saved recovery file", () => {
         expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+  });
+
+  it("refuses a perfectly valid archive whose hashes all recompute", async () => {
+    // The point a hash cannot make. This archive is *internally consistent*:
+    // its manifest's per-segment SHA-256 matches its contents exactly, so
+    // `validateRecoveryPackage` accepts it without complaint — proven below,
+    // so the test cannot be passing for the wrong reason. Anyone who edits a
+    // recovery archive recomputes those hashes too; that is arithmetic, not a
+    // barrier. What makes the file trustworthy is a tag keyed by a secret the
+    // file does not contain, and this archive has none.
+    const archive = await recoveryArchive();
+    await expect(
+      validateRecoveryPackage({ bytes: archive, expectedTarget: target }),
+    ).resolves.toMatchObject({ targetId: target.id });
+
+    const store = fakeStore({ pickBytes: archive });
+    await expect(pickDurableRecovery({ store })).rejects.toMatchObject({
+      code: "NOT_A_RECOVERY_FILE",
+    });
   });
 
   it("refuses a plaintext archive from before the format existed", async () => {
