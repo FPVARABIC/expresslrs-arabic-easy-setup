@@ -429,6 +429,7 @@ class WebViewHostInstrumentedTest {
             "the page never finished loading",
             latch.await(AWAIT_SECONDS, TimeUnit.SECONDS),
         )
+        captureScriptErrors()
     }
 
     private fun testLoader() = androidx.webkit.WebViewAssetLoader.Builder()
@@ -474,9 +475,16 @@ class WebViewHostInstrumentedTest {
         return result.get() ?: "null"
     }
 
-    /** Polls until an asynchronous page value stops being null. */
+    /**
+     * Polls until an asynchronous page value stops being null.
+     *
+     * On timeout it reports what the page actually knows — the last script
+     * error, whether the bridge is installed, and the document's own URL —
+     * because "never produced a value" is not something anyone can diagnose
+     * from a CI log without the emulator in front of them.
+     */
     private fun awaitScript(expression: String): String {
-        val deadline = System.currentTimeMillis() + AWAIT_SECONDS * 1_000
+        val deadline = System.currentTimeMillis() + ASYNC_AWAIT_SECONDS * 1_000
         while (System.currentTimeMillis() < deadline) {
             val value = evaluate(expression)
             if (value != "null" && value != "\"null\"" && value != "undefined") {
@@ -486,7 +494,36 @@ class WebViewHostInstrumentedTest {
             }
             Thread.sleep(POLL_MILLIS)
         }
-        throw AssertionError("$expression never produced a value")
+        throw AssertionError(
+            buildString {
+                append("$expression never produced a value in ${ASYNC_AWAIT_SECONDS}s")
+                append("\n  location:      ${evaluate("window.location.href")}")
+                append("\n  nativeHost:    ${evaluate("typeof window.elrsNativeHost")}")
+                append("\n  nativeBridge:  ${evaluate("typeof window.elrsNativeBridge")}")
+                append("\n  last error:    ${evaluate("window.__lastError")}")
+                append("\n  frames:        ${evaluate("window.frames.length")}")
+                append("\n  body:          ${evaluate("document.body && document.body.innerHTML")}")
+            },
+        )
+    }
+
+    /**
+     * Records the page's own errors, so a timeout can report why rather than
+     * only that it happened. Installed at document start on every load.
+     */
+    private fun captureScriptErrors() {
+        evaluate(
+            """
+            window.__lastError = null;
+            window.addEventListener('error', function (event) {
+              window.__lastError = String(event.message) + ' @ ' +
+                String(event.filename) + ':' + String(event.lineno);
+            });
+            window.addEventListener('unhandledrejection', function (event) {
+              window.__lastError = 'unhandled rejection: ' + String(event.reason);
+            });
+            """.trimIndent(),
+        )
     }
 
     private fun onMainThread(body: () -> Unit) {
@@ -496,6 +533,14 @@ class WebViewHostInstrumentedTest {
     private companion object {
         const val ORIGIN = MainActivity.APPLICATION_ORIGIN
         const val AWAIT_SECONDS = 10L
+
+        /**
+         * Asynchronous page work gets longer than a page load does. A promise
+         * that crosses into the host, onto its worker thread and back is not
+         * comparable to a document finishing, and 10s was tight enough on a
+         * cold emulator to be worth separating rather than guessing about.
+         */
+        const val ASYNC_AWAIT_SECONDS = 30L
         const val POLL_MILLIS = 50L
     }
 }

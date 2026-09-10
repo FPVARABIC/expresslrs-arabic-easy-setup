@@ -138,6 +138,13 @@ class BridgeCoreInstrumentedTest {
     @Test
     fun listsAnUndrivableDeviceWithItsReasonRatherThanHidingIt() {
         backend.devices.add(FakeUsbBackend.hidDevice("/dev/bus/usb/001/003"))
+        // Permission is granted first, because `refusalFor` reports the
+        // permission state *before* it looks at interfaces — an earlier
+        // revision of this test left it ungranted and then asserted the
+        // interface reason, which is not the answer that input deserves. The
+        // ordering is the gate's, and it is right: what a device exposes is
+        // not the operator's obstacle while permission is still the obstacle.
+        backend.permissions["/dev/bus/usb/001/003"] = UsbDeviceGate.Permission.GRANTED
         val devices = call("list").getJSONArray("result")
         assertEquals(2, devices.length())
         val hid = (0 until devices.length())

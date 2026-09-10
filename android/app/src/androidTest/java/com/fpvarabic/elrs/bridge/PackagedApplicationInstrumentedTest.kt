@@ -189,7 +189,10 @@ class PackagedApplicationInstrumentedTest {
             if (ready.toIntOrNull()?.let { it > 0 } == true) return
             Thread.sleep(POLL_MILLIS)
         }
-        throw AssertionError("the packaged application never rendered a control")
+        throw AssertionError(
+            "the packaged application never rendered a control in ${AWAIT_SECONDS}s" +
+                diagnose(),
+        )
     }
 
     /** Opens the fake device through the page's own bridge, as the app would. */
@@ -224,7 +227,7 @@ class PackagedApplicationInstrumentedTest {
             }
             Thread.sleep(POLL_MILLIS)
         }
-        throw AssertionError("the bridge never replied to $request")
+        throw AssertionError("the bridge never replied to $request" + diagnose())
     }
 
     private fun ActivityScenario<MainActivity>.describeControls(): JSONObject {
@@ -272,7 +275,23 @@ class PackagedApplicationInstrumentedTest {
             if (evaluate("document.documentElement.lang") == "\"en\"") return
             Thread.sleep(POLL_MILLIS)
         }
-        throw AssertionError("the application never switched to English")
+        throw AssertionError("the application never switched to English" + diagnose())
+    }
+
+    /**
+     * What the page knows when something did not happen.
+     *
+     * A bare "never rendered" cannot be diagnosed from a CI log without the
+     * emulator in front of you, and the emulator is gone by the time anyone
+     * reads it.
+     */
+    private fun ActivityScenario<MainActivity>.diagnose(): String = buildString {
+        append("\n  location:     ${runCatching { evaluate("window.location.href") }.getOrElse { "?" }}")
+        append("\n  readyState:   ${runCatching { evaluate("document.readyState") }.getOrElse { "?" }}")
+        append("\n  bridge:       ${runCatching { evaluate("typeof window.elrsNativeBridge") }.getOrElse { "?" }}")
+        append("\n  buttons:      ${runCatching { evaluate("document.querySelectorAll('button').length") }.getOrElse { "?" }}")
+        append("\n  lang/dir:     ${runCatching { evaluate("document.documentElement.lang + '/' + document.documentElement.dir") }.getOrElse { "?" }}")
+        append("\n  head:         ${runCatching { evaluate("document.head && document.head.innerHTML.slice(0, 400)") }.getOrElse { "?" }}")
     }
 
     private fun ActivityScenario<MainActivity>.evaluate(script: String): String {
