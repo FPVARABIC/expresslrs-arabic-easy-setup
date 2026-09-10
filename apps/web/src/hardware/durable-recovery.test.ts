@@ -138,6 +138,34 @@ function fakeStore(
   return store;
 }
 
+/**
+ * Byte helpers written without `Buffer`.
+ *
+ * These suites typecheck under the browser project, which carries no Node
+ * types — and the code under test is browser code, so reaching for a Node
+ * global in its tests would be testing it in an environment it never runs in.
+ */
+function indexOfBytes(haystack: Uint8Array, needle: Uint8Array): number {
+  outer: for (
+    let at = 0;
+    at <= haystack.byteLength - needle.byteLength;
+    at += 1
+  ) {
+    for (let index = 0; index < needle.byteLength; index += 1) {
+      if (haystack[at + index] !== needle[index]) continue outer;
+    }
+    return at;
+  }
+  return -1;
+}
+
+/** Flips a bit at an offset, keeping the index access strict-mode safe. */
+function flipByte(bytes: Uint8Array, offset: number, mask = 0x01): Uint8Array {
+  const copy = bytes.slice();
+  copy.set([(copy[offset] ?? 0) ^ mask], offset);
+  return copy;
+}
+
 const PASSPHRASE = "recovery-passphrase";
 
 const identity: RecoveryVaultIdentity = {
@@ -209,7 +237,7 @@ describe("exportDurableRecovery", () => {
       passphrase: PASSPHRASE,
     });
     const written = store.stored ?? new Uint8Array();
-    expect(Buffer.from(written).includes(Buffer.from(secret))).toBe(false);
+    expect(indexOfBytes(written, secret)).toBe(-1);
   });
 
   it("refuses a passphrase too short to protect the file", async () => {
@@ -363,8 +391,7 @@ describe("picking and opening a saved recovery file", () => {
 
   it("refuses a one-byte edit to the sealed file", async () => {
     const sealed = await sealedFile();
-    const tampered = Uint8Array.from(sealed);
-    tampered[tampered.byteLength - 3] ^= 0x01;
+    const tampered = flipByte(sealed, sealed.byteLength - 3);
     const store = fakeStore({ pickBytes: tampered });
     const picked = await pickDurableRecovery({ store });
     await expect(

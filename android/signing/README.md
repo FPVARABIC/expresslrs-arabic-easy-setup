@@ -12,10 +12,13 @@ a swapped, regenerated or wrong keystore into a build failure rather than into a
 silently different APK that Android then refuses to install over the previous
 one. A fingerprint is not a secret — it is derivable from any signed APK.
 
-The keystore itself, its passwords and the key alias are supplied only through
-protected repository secrets, are written to the runner's temporary directory,
-and are deleted when the job ends. See [../../docs/ANDROID_SIGNING.md](../../docs/ANDROID_SIGNING.md)
-for how to create the keystore and register the secrets.
+The keystore itself, its passwords and the key alias are never available to any
+workflow in this branch, and Gradle refuses to run if one of them appears in its
+environment. They are readable only by the trusted signer, which lives on the
+default branch, runs on manual dispatch behind an environment approval, never
+checks out a candidate commit, and never runs Gradle. See
+[../../docs/ANDROID_SIGNING.md](../../docs/ANDROID_SIGNING.md) for the candidate
+side of that arrangement and where the signer is.
 
 **A keystore must never be committed to this repository.** Anyone holding it can
 build an APK that Android accepts as an update to this application — which, for

@@ -11,6 +11,42 @@ import {
   type RecoveryVaultIdentity,
 } from "./recovery-vault";
 
+/**
+ * Byte helpers written without `Buffer`.
+ *
+ * These suites typecheck under the browser project, which carries no Node
+ * types — and the code under test is browser code, so reaching for a Node
+ * global in its tests would be testing it in an environment it never runs in.
+ */
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let at = 0; at < left.byteLength; at += 1) {
+    if (left[at] !== right[at]) return false;
+  }
+  return true;
+}
+
+function indexOfBytes(haystack: Uint8Array, needle: Uint8Array): number {
+  outer: for (
+    let at = 0;
+    at <= haystack.byteLength - needle.byteLength;
+    at += 1
+  ) {
+    for (let index = 0; index < needle.byteLength; index += 1) {
+      if (haystack[at + index] !== needle[index]) continue outer;
+    }
+    return at;
+  }
+  return -1;
+}
+
+/** Flips a bit at an offset, keeping the index access strict-mode safe. */
+function flipByte(bytes: Uint8Array, offset: number, mask = 0x01): Uint8Array {
+  const copy = bytes.slice();
+  copy.set([(copy[offset] ?? 0) ^ mask], offset);
+  return copy;
+}
+
 const PASSPHRASE = "a-real-recovery-passphrase";
 
 const identity: RecoveryVaultIdentity = {
@@ -83,28 +119,19 @@ describe("the encrypted recovery envelope", () => {
 
   it("does not leave the secret readable anywhere in the file", async () => {
     const sealed = await seal();
-    const needle = new TextEncoder().encode("correct-horse-battery-staple");
-    const haystack = sealed;
-    let found = -1;
-    outer: for (
-      let i = 0;
-      i <= haystack.byteLength - needle.byteLength;
-      i += 1
-    ) {
-      for (let j = 0; j < needle.byteLength; j += 1) {
-        if (haystack[i + j] !== needle[j]) continue outer;
-      }
-      found = i;
-      break;
-    }
-    expect(found).toBe(-1);
+    expect(
+      indexOfBytes(
+        sealed,
+        new TextEncoder().encode("correct-horse-battery-staple"),
+      ),
+    ).toBe(-1);
   });
 
   it("uses a fresh salt and nonce for every file", async () => {
     const first = await seal();
     const second = await seal();
     // Same passphrase, same plaintext, and the bytes must still differ.
-    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(false);
+    expect(sameBytes(first, second)).toBe(false);
   });
 
   it("reads identity without a passphrase, so a file can be recognised", () => {
@@ -151,8 +178,7 @@ describe("the envelope refuses every damaged or hostile file", () => {
       header.ciphertextOffset + Math.floor(header.ciphertextLength / 2),
       sealed.byteLength - 1,
     ]) {
-      const tampered = sealed.slice();
-      tampered[offset] ^= 0x01;
+      const tampered = flipByte(sealed, offset);
       await expect(
         openRecoveryVault({ bytes: tampered, passphrase: PASSPHRASE }),
       ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
@@ -297,8 +323,7 @@ describe("the envelope refuses every damaged or hostile file", () => {
 
   it("produces nothing at all when authentication fails", async () => {
     const sealed = await seal();
-    const tampered = sealed.slice();
-    tampered[tampered.byteLength - 1] ^= 0xff;
+    const tampered = flipByte(sealed, sealed.byteLength - 1, 0xff);
     let leaked: unknown = "nothing was returned";
     try {
       leaked = await openRecoveryVault({
@@ -321,10 +346,8 @@ describe("the envelope refuses every damaged or hostile file", () => {
     // thing that can catch them. A corrupted *header* is reported differently
     // on purpose — that is a structural fault, not a failed authentication —
     // and is covered separately above.
-    const first = sealed.slice();
-    first[first.byteLength - 2] ^= 0x02;
-    const second = sealed.slice();
-    second[header.ciphertextOffset + 3] ^= 0x02;
+    const first = flipByte(sealed, sealed.byteLength - 2, 0x02);
+    const second = flipByte(sealed, header.ciphertextOffset + 3, 0x02);
     const messages = new Set<string>();
     for (const bytes of [first, second]) {
       try {

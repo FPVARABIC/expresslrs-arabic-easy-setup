@@ -364,7 +364,11 @@ if (signingConfigsStart === -1) {
 } else {
   let depth = 0;
   let end = signingConfigsStart;
-  for (let at = gradleBuild.indexOf("{", signingConfigsStart); at < gradleBuild.length; at += 1) {
+  for (
+    let at = gradleBuild.indexOf("{", signingConfigsStart);
+    at < gradleBuild.length;
+    at += 1
+  ) {
     if (gradleBuild[at] === "{") depth += 1;
     else if (gradleBuild[at] === "}") {
       depth -= 1;
@@ -389,9 +393,7 @@ if (signingConfigsStart === -1) {
   }
 }
 if (/resolvePhysicalTestSigning/u.test(gradleBuild)) {
-  fail(
-    `${gradleBuildPath} still resolves a permanent physical-test keystore`,
-  );
+  fail(`${gradleBuildPath} still resolves a permanent physical-test keystore`);
 }
 
 // 4. The candidate build must produce an unsigned physical-test APK, prove it
