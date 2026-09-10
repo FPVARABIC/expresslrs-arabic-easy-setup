@@ -29,6 +29,13 @@ import org.junit.runner.RunWith
  * test — origin matching on the message listener, main-frame reporting,
  * navigation interception — are enforced by Chromium and cannot be proved by
  * asserting that a setter was called.
+ *
+ * The WebView here is deliberately **not** added to a view hierarchy. That is
+ * not an oversight: it is what caught the bridge delivering its replies through
+ * `View.post`, which queues a runnable until the view is attached to a window
+ * and runs it never if that does not happen. A page's promise would then hang
+ * forever rather than be answered or rejected. Keeping this WebView detached
+ * keeps that fixed.
  */
 @RunWith(AndroidJUnit4::class)
 class WebViewHostInstrumentedTest {
@@ -494,16 +501,17 @@ class WebViewHostInstrumentedTest {
             }
             Thread.sleep(POLL_MILLIS)
         }
+        // One line: Gradle's console reporter shows only the first line or two
+        // of an assertion message, which is how the previous revision of this
+        // reported its location and nothing else.
         throw AssertionError(
-            buildString {
-                append("$expression never produced a value in ${ASYNC_AWAIT_SECONDS}s")
-                append("\n  location:      ${evaluate("window.location.href")}")
-                append("\n  nativeHost:    ${evaluate("typeof window.elrsNativeHost")}")
-                append("\n  nativeBridge:  ${evaluate("typeof window.elrsNativeBridge")}")
-                append("\n  last error:    ${evaluate("window.__lastError")}")
-                append("\n  frames:        ${evaluate("window.frames.length")}")
-                append("\n  body:          ${evaluate("document.body && document.body.innerHTML")}")
-            },
+            "$expression never produced a value in ${ASYNC_AWAIT_SECONDS}s" +
+                " | location=${evaluate("window.location.href")}" +
+                " | nativeHost=${evaluate("typeof window.elrsNativeHost")}" +
+                " | nativeBridge=${evaluate("typeof window.elrsNativeBridge")}" +
+                " | lastError=${evaluate("window.__lastError")}" +
+                " | frames=${evaluate("window.frames.length")}" +
+                " | body=${evaluate("document.body && document.body.innerHTML")}",
         )
     }
 

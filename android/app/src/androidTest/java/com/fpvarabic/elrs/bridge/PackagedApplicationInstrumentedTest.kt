@@ -285,13 +285,16 @@ class PackagedApplicationInstrumentedTest {
      * emulator in front of you, and the emulator is gone by the time anyone
      * reads it.
      */
-    private fun ActivityScenario<MainActivity>.diagnose(): String = buildString {
-        append("\n  location:     ${runCatching { evaluate("window.location.href") }.getOrElse { "?" }}")
-        append("\n  readyState:   ${runCatching { evaluate("document.readyState") }.getOrElse { "?" }}")
-        append("\n  bridge:       ${runCatching { evaluate("typeof window.elrsNativeBridge") }.getOrElse { "?" }}")
-        append("\n  buttons:      ${runCatching { evaluate("document.querySelectorAll('button').length") }.getOrElse { "?" }}")
-        append("\n  lang/dir:     ${runCatching { evaluate("document.documentElement.lang + '/' + document.documentElement.dir") }.getOrElse { "?" }}")
-        append("\n  head:         ${runCatching { evaluate("document.head && document.head.innerHTML.slice(0, 400)") }.getOrElse { "?" }}")
+    private fun ActivityScenario<MainActivity>.diagnose(): String {
+        fun probe(script: String) = runCatching { evaluate(script) }.getOrElse { "?" }
+        // One line: Gradle's console reporter shows only the first line or two
+        // of an assertion message.
+        return " | location=${probe("window.location.href")}" +
+            " | readyState=${probe("document.readyState")}" +
+            " | bridge=${probe("typeof window.elrsNativeBridge")}" +
+            " | buttons=${probe("document.querySelectorAll('button').length")}" +
+            " | lang=${probe("document.documentElement.lang")}" +
+            " | head=${probe("document.head && document.head.innerHTML.slice(0, 300)")}"
     }
 
     private fun ActivityScenario<MainActivity>.evaluate(script: String): String {

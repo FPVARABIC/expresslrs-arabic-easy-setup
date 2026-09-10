@@ -7,6 +7,8 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
@@ -109,6 +111,14 @@ class UsbSerialBridge private constructor(
             val core = BridgeCore(resolved, allowedOrigin)
             val bridge = UsbSerialBridge(context, core)
 
+            // Replies go through the main looper rather than `webView.post`.
+            // `View.post` on a view that is not attached to a window queues the
+            // runnable until it *is* attached, and runs it never if that does
+            // not happen — so a reply would be silently withheld and the page's
+            // promise would hang forever rather than being answered or
+            // rejected. `JavaScriptReplyProxy.postMessage` needs the UI thread,
+            // which this guarantees without depending on the view hierarchy.
+            val ui = Handler(Looper.getMainLooper())
             val origins = setOf(allowedOrigin)
             WebViewCompat.addWebMessageListener(
                 webView,
@@ -125,7 +135,7 @@ class UsbSerialBridge private constructor(
                         // addJavascriptInterface.
                         sourceOrigin = "${sourceOrigin.scheme}://${sourceOrigin.host}",
                         isMainFrame = isMainFrame,
-                    ) { reply -> webView.post { replyProxy.postMessage(reply) } }
+                    ) { reply -> ui.post { replyProxy.postMessage(reply) } }
                 }
             }
 
