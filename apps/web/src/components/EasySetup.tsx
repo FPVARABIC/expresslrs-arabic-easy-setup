@@ -91,6 +91,7 @@ export function EasySetup({
     downloadRecovery,
     exportDurableRecoveryPackage,
     pickRecoveryFile,
+    recoverFromImportedPackage,
     unlockRecoveryFile,
     confirmImportedRecoveryIdentity,
     pickedRecovery,
@@ -782,6 +783,19 @@ export function EasySetup({
                                 {t("easy.fw.importedIdentityConfirm")}
                               </span>
                             </label>
+                            {/*
+                              The control that actually restores from an
+                              imported package — the path that works after a
+                              reinstall, when the journal is gone. Refused by
+                              name until the identity above is confirmed.
+                            */}
+                            <button
+                              type="button"
+                              onClick={() => void recoverFromImportedPackage()}
+                              disabled={busy}
+                            >
+                              {t("easy.fw.restoreFromImported")}
+                            </button>
                           </>
                         )}
                         <button

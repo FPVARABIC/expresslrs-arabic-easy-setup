@@ -240,6 +240,7 @@ export const en = {
   "easy.fw.unlockRecoveryFile": "Open the recovery file",
   "easy.fw.pickedRecovery": "Saved from {product} on {created}",
   "easy.fw.importedIdentityHeading": "Recovered from the file",
+  "easy.fw.restoreFromImported": "Restore the device from this package",
   "easy.fw.importedIdentityConfirm":
     "This is the device in front of me, and I want it restored to this image",
   "easy.fw.recoverySaved":

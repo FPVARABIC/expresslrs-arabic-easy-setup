@@ -346,6 +346,7 @@ export const workbenchAr = {
   "wb.ui.pickRecoveryFile": "اختر ملف استعادة محفوظًا",
   "wb.ui.unlockRecoveryFile": "افتح ملف الاستعادة",
   "wb.ui.importedIdentityHeading": "المُستخرَج من الملف",
+  "wb.ui.restoreFromImported": "استعِد الجهاز من الحزمة المستوردة",
   "wb.ui.importedIdentityConfirm":
     "هذا هو الجهاز الموجود أمامي، وأريد استعادته إلى هذه الصورة",
   "wb.ui.confirmTargetForRecovery": "تأكيد Target للاستعادة",

@@ -96,6 +96,7 @@ export function ExpressLrsParityWorkbenchView({
     downloadRecovery,
     exportDurableRecoveryPackage,
     pickRecoveryFile,
+    recoverFromImportedPackage,
     unlockRecoveryFile,
     confirmImportedRecoveryIdentity,
     pickedRecovery,
@@ -1153,6 +1154,23 @@ export function ExpressLrsParityWorkbenchView({
                   />
                   <span>{t("wb.ui.importedIdentityConfirm")}</span>
                 </label>
+                {/*
+                  The control that actually restores from an imported package.
+                  It went a whole round without existing: the handler was
+                  correct and tested, and no view invoked it, so the one path
+                  that recovers a device after a reinstall was unreachable.
+                  Gated by the same evidence authority as every other
+                  destructive operation and refused by name until the identity
+                  above is confirmed — never hidden.
+                */}
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={busy}
+                  onClick={() => void recoverFromImportedPackage()}
+                >
+                  {t("wb.ui.restoreFromImported")}
+                </button>
               </>
             )}
 

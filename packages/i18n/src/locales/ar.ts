@@ -222,6 +222,7 @@ export const ar = {
   "easy.fw.unlockRecoveryFile": "افتح ملف الاستعادة",
   "easy.fw.pickedRecovery": "محفوظ من {product} بتاريخ {created}",
   "easy.fw.importedIdentityHeading": "المُستخرَج من الملف",
+  "easy.fw.restoreFromImported": "استعِد الجهاز من هذه الحزمة",
   "easy.fw.importedIdentityConfirm":
     "هذا هو الجهاز الموجود أمامي، وأريد استعادته إلى هذه الصورة",
   "easy.fw.recoverySaved": "تحققت من حفظ حزمة الاستعادة على جهازي",

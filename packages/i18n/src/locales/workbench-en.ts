@@ -468,6 +468,7 @@ export const workbenchEn = {
   "wb.ui.pickRecoveryFile": "Choose a saved recovery file",
   "wb.ui.unlockRecoveryFile": "Open the recovery file",
   "wb.ui.importedIdentityHeading": "Recovered from the file",
+  "wb.ui.restoreFromImported": "Restore the device from the imported package",
   "wb.ui.importedIdentityConfirm":
     "This is the device in front of me, and I want it restored to this image",
   "wb.ui.durableRecoveryLocation": "Verified copy",
