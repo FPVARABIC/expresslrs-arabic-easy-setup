@@ -8,52 +8,63 @@ plugins {
 }
 
 /**
- * The stable signing identity for physical-test and release-candidate builds.
+ * The permanent signing secrets, and why Gradle must never see them.
  *
- * Read from the environment, never from a file in this repository. A keystore
- * committed here would let anyone build an APK that Android accepts as an
- * update to this one, and for an application with USB write authority over
- * flight hardware that costs far more than it saves. CI materialises the
- * keystore from a protected secret into the runner's temporary directory and
- * deletes it afterwards; see docs/ANDROID_SIGNING.md.
+ * This build script is *candidate code*. It is checked out from a pull request
+ * along with its plugins, its dependency graph and every script any of them
+ * runs. If the permanent signing key were present in the environment while
+ * this ran, then anyone able to open a pull request could read it — the key
+ * that Android accepts as an update to an application holding USB write
+ * authority over flight hardware. No amount of care inside this file fixes
+ * that, because the file is not the only thing running.
  *
- * Null when any part is absent, which is what makes the build fail closed
- * rather than quietly fall back to a debug key.
+ * So signing moved out. The candidate build produces an *unsigned*
+ * `physicalTest` APK; a separate trusted workflow on the default branch, which
+ * never checks out a candidate commit and never runs Gradle, signs that exact
+ * artifact afterwards. See docs/ANDROID_SIGNING.md.
+ *
+ * The names below therefore have no consumer here, and this refuses to build
+ * if they appear anyway. That turns "we do not pass the key to Gradle" from a
+ * promise into a mechanism: a workflow edit that exposes them fails the build
+ * that would have read them, rather than succeeding quietly.
  */
-data class PhysicalTestSigning(
+val PERMANENT_SIGNING_SECRETS = listOf(
+    "ELRS_KEYSTORE_BASE64",
+    "ELRS_KEYSTORE_PASSWORD",
+    "ELRS_KEY_ALIAS",
+    "ELRS_KEY_PASSWORD",
+)
+
+/**
+ * A disposable keystore for the update-persistence test, and nothing else.
+ *
+ * Deliberately named apart from the permanent secrets so the two cannot be
+ * confused or wired together by accident. The property under test there is
+ * "the same key across two builds", which any key satisfies, so the job
+ * generates one, uses it, and shreds it. It never leaves the runner and it
+ * signs nothing a person installs.
+ */
+data class DisposableTestSigning(
     val storeFile: File,
     val storePassword: String,
     val keyAlias: String,
     val keyPassword: String,
 )
 
-fun resolvePhysicalTestSigning(): PhysicalTestSigning? {
+fun resolveDisposableTestSigning(): DisposableTestSigning? {
     fun value(name: String): String? =
         (System.getenv(name) ?: providers.gradleProperty(name).orNull)?.takeIf { it.isNotBlank() }
 
-    val path = value("ELRS_KEYSTORE_PATH") ?: return null
-    val storePassword = value("ELRS_KEYSTORE_PASSWORD") ?: return null
-    val keyAlias = value("ELRS_KEY_ALIAS") ?: return null
-    val keyPassword = value("ELRS_KEY_PASSWORD") ?: return null
+    val path = value("ELRS_TEST_KEYSTORE_PATH") ?: return null
+    val storePassword = value("ELRS_TEST_KEYSTORE_PASSWORD") ?: return null
+    val keyAlias = value("ELRS_TEST_KEY_ALIAS") ?: return null
+    val keyPassword = value("ELRS_TEST_KEY_PASSWORD") ?: return null
     val file = File(path)
     if (!file.isFile) return null
-    return PhysicalTestSigning(file, storePassword, keyAlias, keyPassword)
+    return DisposableTestSigning(file, storePassword, keyAlias, keyPassword)
 }
 
-val physicalTestSigning: PhysicalTestSigning? = resolvePhysicalTestSigning()
-
-/**
- * The certificate the physical-test channel is expected to be signed by.
- *
- * A public fingerprint, so it is committed rather than kept secret — and
- * committing it is the point: it is the independent record that makes a swapped
- * or wrong keystore a build failure instead of a silently different APK. The
- * keystore itself is never here. Blank until the first keystore exists.
- */
-val expectedSigningCertificate: String =
-    rootProject.layout.projectDirectory.file("signing/physical-test-certificate.sha256")
-        .asFile
-        .let { if (it.isFile) it.readText().trim().lowercase() else "" }
+val disposableTestSigning: DisposableTestSigning? = resolveDisposableTestSigning()
 
 android {
     namespace = "com.fpvarabic.elrs.bridge"
@@ -76,35 +87,21 @@ android {
     }
 
     signingConfigs {
-        val signing = physicalTestSigning
+        // Only ever the disposable test key. There is no configuration here
+        // for a permanent one, which is the isolation: an artifact this build
+        // produces is either unsigned or signed by a key that was generated
+        // minutes ago and destroyed minutes later.
+        val signing = disposableTestSigning
         if (signing != null) {
-            create("physicalTest") {
+            create("disposableTest") {
                 storeFile = signing.storeFile
                 storePassword = signing.storePassword
                 keyAlias = signing.keyAlias
                 keyPassword = signing.keyPassword
-                // Both schemes: v1 for API 24 installs, v2 for everything
-                // after, so one APK covers the whole supported range.
                 enableV1Signing = true
                 enableV2Signing = true
             }
         }
-    }
-
-    sourceSets {
-        getByName("main") {
-            // The web application is bundled, not fetched. See MainActivity.
-            // Two directories, not one: Gradle refuses to reason about two
-            // tasks writing into the same output tree.
-            assets.srcDir(layout.buildDirectory.dir("generated/webAssets"))
-            assets.srcDir(layout.buildDirectory.dir("generated/identity"))
-        }
-    }
-
-    buildFeatures {
-        // AGP 8 does not generate BuildConfig by default, and the host reads
-        // BuildConfig.DEBUG to decide whether WebView debugging is allowed.
-        buildConfig = true
     }
 
     buildTypes {
@@ -123,20 +120,26 @@ android {
         }
 
         /**
-         * `physicalTest`: the release-candidate channel.
+         * `physicalTest`: the candidate channel, built **unsigned**.
          *
-         * Signed with the one stable keystore, supplied only through protected
-         * secrets, so successive candidates install over one another and a
-         * tester's data and durable recovery state survive an update. Not
-         * minified: a physical-test build that cannot be read in a stack trace
-         * is worth less than the size it saves.
+         * Unsigned is the correct output here, not a degraded one. This build
+         * runs on pull-request code, so it must not be anywhere near the
+         * permanent key; the trusted signer takes this exact APK afterwards,
+         * verifies its digest against what CI recorded, and signs it without
+         * ever running Gradle. An unsigned APK cannot be installed, which is
+         * the honest state of an artifact nobody has vouched for yet.
+         *
+         * Not minified: a physical-test build that cannot be read in a stack
+         * trace is worth less than the size it saves.
          */
         create("physicalTest") {
             initWith(getByName("debug"))
             isMinifyEnabled = false
             isDebuggable = false
             versionNameSuffix = "-physical-test"
-            signingConfig = signingConfigs.findByName("physicalTest")
+            // The disposable key when the update-persistence job supplied one,
+            // and otherwise nothing at all.
+            signingConfig = signingConfigs.findByName("disposableTest")
             matchingFallbacks += listOf("debug")
         }
     }
@@ -270,28 +273,34 @@ tasks.named("preBuild") {
  * that `assembleDebug`, lint and the unit tests keep working on a machine with
  * no secrets at all, which is every contributor's machine.
  */
+/**
+ * Refuses to build at all if a permanent signing secret is in the environment.
+ *
+ * This is the enforcement behind the comment at the top of the file. It is
+ * attached to every task rather than to packaging, because the leak that
+ * matters is any candidate code reading the environment — a plugin, a
+ * dependency's build hook, a `doLast` someone adds — not specifically the step
+ * that writes an APK. Failing loudly here is strictly better than a build that
+ * succeeds while the key was readable.
+ *
+ * Checked at execution time so that a machine which happens to have these set
+ * for unrelated reasons still gets a clear message rather than a configuration
+ * crash.
+ */
+val leakedSigningSecrets: List<String> =
+    PERMANENT_SIGNING_SECRETS.filter { !System.getenv(it).isNullOrBlank() }
+
 tasks.configureEach {
-    if (!name.startsWith("packagePhysicalTest")) return@configureEach
     doFirst {
-        if (physicalTestSigning == null) {
+        if (leakedSigningSecrets.isNotEmpty()) {
             throw GradleException(
-                "The physical-test channel has no signing keystore. It will not fall back to " +
-                    "the debug key: a candidate signed by an ephemeral key cannot be installed " +
-                    "over the previous one, so a tester would lose their data and their durable " +
-                    "recovery state on every update. Set ELRS_KEYSTORE_PATH, " +
-                    "ELRS_KEYSTORE_PASSWORD, ELRS_KEY_ALIAS and ELRS_KEY_PASSWORD. " +
-                    "See docs/ANDROID_SIGNING.md for how to create the keystore and add the " +
-                    "four repository secrets.",
-            )
-        }
-        if (expectedSigningCertificate.isEmpty()) {
-            // Not fatal, because the fingerprint can only be read from a
-            // keystore that exists — this is the one-time bootstrap. CI still
-            // refuses to publish a candidate whose certificate nobody recorded.
-            logger.warn(
-                "signing/physical-test-certificate.sha256 is absent, so this build's certificate " +
-                    "will not be checked against a recorded expectation. Record it before " +
-                    "publishing a candidate.",
+                "Refusing to run Gradle with permanent signing secrets in the environment: " +
+                    leakedSigningSecrets.joinToString(", ") + ". This build script runs " +
+                    "candidate code from pull requests, so anything it can read, a pull " +
+                    "request can read. The candidate build produces an unsigned physicalTest " +
+                    "APK and the trusted signer workflow signs it afterwards without running " +
+                    "Gradle. See docs/ANDROID_SIGNING.md. For the update-persistence test, " +
+                    "use the disposable ELRS_TEST_KEYSTORE_* variables instead.",
             )
         }
     }

@@ -160,6 +160,147 @@ jobs:
 
           sha256sum "$apk" > app-debug.apk.sha256
 
+      # ---- the unsigned physical-test candidate --------------------------
+      #
+      # Built here, with the permanent signing key nowhere on this runner, and
+      # signed later by a trusted workflow that never checks out this commit
+      # and never runs Gradle. Unsigned is the correct output of a build that
+      # ran pull-request code: it cannot be installed, which is the honest
+      # state of an artifact nobody has vouched for yet.
+      - name: Assemble the unsigned physical-test candidate
+        working-directory: android
+        env:
+          # Monotonic across runs of this workflow, so a later candidate can
+          # always be installed over an earlier one once both are signed.
+          ELRS_VERSION_CODE: ${{ github.run_number }}
+          ELRS_VERSION_NAME: >-
+            ${{ github.ref_type == 'tag' && github.ref_name
+              || format('0.1.0-rc.{0}', github.run_number) }}
+        run: gradle --no-daemon assemblePhysicalTest
+
+      - name: Prove the candidate carries no signature
+        working-directory: android
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/physicalTest/app-physicalTest.apk"
+          test -f "$apk"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+          # An unsigned APK is the whole point of this channel here. If this
+          # ever verifies, something has wired a key into the candidate build
+          # and the isolation is gone, so it is an error rather than a note.
+          if "$apksigner" verify "$apk" >/dev/null 2>&1; then
+            echo "::error::The physical-test candidate is signed. This build" \
+                 "must produce an unsigned APK: a signature here means a key" \
+                 "was readable by pull-request code. See docs/ANDROID_SIGNING.md." >&2
+            exit 1
+          fi
+          echo "The candidate is unsigned, as required."
+
+      - name: Write the candidate provenance manifest
+        id: provenance
+        working-directory: android
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          ARTIFACT_NAME: elrs-android-physicaltest-unsigned-${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/physicalTest/app-physicalTest.apk"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
+          badging="$("$aapt2" dump badging "$apk")"
+          read_badge() { printf '%s' "$badging" | sed -n "$1" | head -1; }
+
+          package_id="$(read_badge "s/^package: name='\([^']*\)'.*/\1/p")"
+          version_code="$(read_badge "s/^package:.*versionCode='\([^']*\)'.*/\1/p")"
+          version_name="$(read_badge "s/^package:.*versionName='\([^']*\)'.*/\1/p")"
+          apk_sha="$(sha256sum "$apk" | cut -d' ' -f1)"
+          identity="$(unzip -p "$apk" assets/source-identity.json)"
+          field() {
+            printf '%s' "$identity" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"
+          }
+          web_sha="$(field webBuildSha256)"
+          native_sha="$(field nativeSourceSha256)"
+
+          # The signer verifies each of these against the artifact it fetches,
+          # so a field that says nothing would let an untraceable APK through.
+          for pair in "package_id:$package_id" "version_code:$version_code" \
+                      "version_name:$version_name" "apk_sha:$apk_sha" \
+                      "web_sha:$web_sha" "native_sha:$native_sha"; do
+            [ -n "${pair#*:}" ] || {
+              echo "::error::candidate provenance field ${pair%%:*} is empty" >&2
+              exit 1
+            }
+          done
+          for value in "$apk_sha" "$web_sha" "$native_sha"; do
+            printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::expected a SHA-256, got '$value'" >&2
+              exit 1
+            }
+          done
+
+          manifest="app-physicalTest-unsigned.provenance.json"
+          cat > "$manifest" <<JSON
+          {
+            "schemaVersion": 1,
+            "channel": "physical-test-unsigned",
+            "signed": false,
+            "repository": "${{ github.repository }}",
+            "workflow": "${{ github.workflow }}",
+            "workflowRef": "${{ github.workflow_ref }}",
+            "eventName": "${{ github.event_name }}",
+            "sourceSha": "$SOURCE_SHA",
+            "runId": "${{ github.run_id }}",
+            "runNumber": "${{ github.run_number }}",
+            "runAttempt": "${{ github.run_attempt }}",
+            "artifactName": "$ARTIFACT_NAME",
+            "apkFileName": "app-physicalTest.apk",
+            "apkByteLength": $(stat -c%s "$apk"),
+            "apkSha256": "$apk_sha",
+            "applicationId": "$package_id",
+            "versionCode": "$version_code",
+            "versionName": "$version_name",
+            "buildTools": "$build_tools",
+            "webBuildSha256": "$web_sha",
+            "nativeSourceSha256": "$native_sha"
+          }
+          JSON
+          # Fails the step if the heredoc produced anything but valid JSON.
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$manifest"
+          cat "$manifest"
+          echo "artifact-name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk-sha256=$apk_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the unsigned physical-test candidate
+        id: candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.provenance.outputs.artifact-name }}
+          path: |
+            android/app/build/outputs/apk/physicalTest/app-physicalTest.apk
+            android/app-physicalTest-unsigned.provenance.json
+          if-no-files-found: error
+          retention-days: 30
+
+      # The artifact id is only known after the upload, and the trusted signer
+      # takes it as an input. Recorded here so a candidate can be handed to the
+      # signer without anyone reading it out of the Actions API by hand.
+      - name: Record what the signer needs
+        run: |
+          {
+            echo "### Unsigned physical-test candidate"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| source SHA | \`${{ github.event.pull_request.head.sha || github.sha }}\` |"
+            echo "| run id | \`${{ github.run_id }}\` |"
+            echo "| artifact name | \`${{ steps.provenance.outputs.artifact-name }}\` |"
+            echo "| artifact id | \`${{ steps.candidate.outputs.artifact-id }}\` |"
+            echo "| unsigned APK SHA-256 | \`${{ steps.provenance.outputs.apk-sha256 }}\` |"
+            echo
+            echo "These are the four inputs the trusted signer requires."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish the debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -544,10 +685,10 @@ jobs:
           out="app/build/outputs/apk/physicalTest"
           build() {
             local keystore="$1" pass="$2" alias="$3" code="$4" name="$5" dest="$6"
-            ELRS_KEYSTORE_PATH="$RUNNER_TEMP/$keystore" \
-            ELRS_KEYSTORE_PASSWORD="$pass" \
-            ELRS_KEY_ALIAS="$alias" \
-            ELRS_KEY_PASSWORD="$pass" \
+            ELRS_TEST_KEYSTORE_PATH="$RUNNER_TEMP/$keystore" \
+            ELRS_TEST_KEYSTORE_PASSWORD="$pass" \
+            ELRS_TEST_KEY_ALIAS="$alias" \
+            ELRS_TEST_KEY_PASSWORD="$pass" \
             ELRS_VERSION_CODE="$code" \
             ELRS_VERSION_NAME="$name" \
               gradle --no-daemon assemblePhysicalTest assemblePhysicalTestAndroidTest

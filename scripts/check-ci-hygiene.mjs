@@ -11,7 +11,6 @@ const allowedWorkflows = new Set([
   "deploy-pages.yml",
   "upstream-live.yml",
   "android.yml",
-  "android-release-candidate.yml",
 ]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
@@ -288,84 +287,156 @@ for (const [path, pattern, complaint] of durableRules) {
 // ---------------------------------------------------------------------------
 // The signing boundary.
 //
-// A workflow that runs pull-request code and can read a release signing secret
-// hands that key to anyone who can open a pull request. That is the whole
-// reason the physical-test channel lives in its own workflow, and it is worth
-// a gate rather than a comment: the mistake is one line of YAML away and it is
-// invisible in review.
+// The earlier design put the permanent signing key in its own workflow and
+// relied on only that workflow naming the secrets. That is not sufficient
+// isolation. The workflow checked out the candidate commit and ran Gradle
+// while the key was in the environment, so candidate build scripts, plugins,
+// dependencies and any shell step could read it — the key Android accepts as
+// an update to an application holding USB write authority over flight
+// hardware.
+//
+// So the boundary moved. No workflow in this repository may reference those
+// secrets at all; the candidate build produces an *unsigned* APK, and a
+// separate trusted workflow on the default branch signs that artifact
+// afterwards without ever checking out a candidate commit or running Gradle.
+// These are the rules that keep it that way, gated rather than documented
+// because the mistake is one line of YAML away and invisible in review.
 // ---------------------------------------------------------------------------
 const signingSecretPattern = /secrets\.ELRS_(?:KEYSTORE|KEY)_[A-Z0-9_]+/u;
-const releaseCandidateWorkflow = `${workflowDirectory}/android-release-candidate.yml`;
 
-if (!existsSync(releaseCandidateWorkflow)) {
-  fail(`${releaseCandidateWorkflow} is missing`);
-} else {
-  const rc = readFileSync(releaseCandidateWorkflow, "utf8");
-  const rcTriggers = withoutComments(rc).split(/^jobs:/mu)[0] ?? "";
-  if (/^\s*pull_request(_target)?:/mu.test(rcTriggers)) {
-    fail(
-      "android-release-candidate.yml is triggered by a pull request; it signs with a protected key and must never run pull-request code",
-    );
-  }
-  if (!signingSecretPattern.test(rc)) {
-    fail(
-      "android-release-candidate.yml does not use the signing secrets at all",
-    );
-  }
-  // Fail closed. A candidate that silently fell back to the debug key would be
-  // uninstallable over its predecessor, which loses the tester's data and the
-  // durable recovery state that data is there to protect.
-  if (!/Missing signing secrets/u.test(rc) || !/exit 1/u.test(rc)) {
-    fail(
-      "android-release-candidate.yml does not fail closed when the signing secrets are absent",
-    );
-  }
-  if (!/apksigner\S* verify --verbose --print-certs/u.test(rc)) {
-    fail(
-      "android-release-candidate.yml does not run apksigner verify --verbose --print-certs",
-    );
-  }
-  if (!/physical-test-certificate\.sha256/u.test(rc)) {
-    fail(
-      "android-release-candidate.yml does not check the APK against the recorded signing certificate",
-    );
-  }
-  if (!/provenance\.json/u.test(rc)) {
-    fail(
-      "android-release-candidate.yml publishes no provenance manifest beside the APK",
-    );
-  }
-  // The keystore must not be reachable by an artifact upload. It is written to
-  // RUNNER_TEMP, outside the workspace, and shredded unconditionally.
-  if (!/RUNNER_TEMP/u.test(rc) || !/if: always\(\)/u.test(rc)) {
-    fail(
-      "android-release-candidate.yml does not keep the keystore outside the workspace and destroy it unconditionally",
-    );
-  }
-  for (const forbidden of [/\.jks/u, /\.keystore/u]) {
-    const uploadBlocks = rc
-      .split(/- name: /u)
-      .filter((block) => /upload-artifact/u.test(block));
-    for (const block of uploadBlocks) {
-      if (forbidden.test(block)) {
-        fail("android-release-candidate.yml uploads a keystore in an artifact");
-      }
-    }
-  }
-}
-
-// No other workflow may read those secrets, whatever it is triggered by.
+// 1. The candidate branch carries no workflow that can read the key.
 for (const name of readdirSync(workflowDirectory)) {
-  if (name === "android-release-candidate.yml") continue;
   const contents = readFileSync(`${workflowDirectory}/${name}`, "utf8");
   if (signingSecretPattern.test(contents)) {
     fail(
-      `${name} references a release signing secret; only the release-candidate workflow may`,
+      `${name} references a permanent signing secret. No workflow here may: ` +
+        "the trusted signer lives on the default branch and is the only place " +
+        "those secrets are readable. See docs/ANDROID_SIGNING.md",
     );
   }
 }
 
-// And the keystore itself is never in the tree.
+// 2. The signing workflow must not be here either. It is deliberately not on
+//    this branch: a `workflow_dispatch` workflow is only dispatchable from the
+//    default branch, and keeping it out of the candidate diff is what makes
+//    "pull-request code cannot reach the key" a structural claim.
+if (existsSync(`${workflowDirectory}/android-release-candidate.yml`)) {
+  fail(
+    "android-release-candidate.yml is present on this branch. The trusted " +
+      "signer belongs on the default branch only; see docs/ANDROID_SIGNING.md",
+  );
+}
+
+// 3. Gradle must actively refuse the permanent secrets rather than merely not
+//    ask for them. This is the mechanism that turns the policy into a build
+//    failure if a workflow edit ever exposes them.
+const gradleBuildPath = "android/app/build.gradle.kts";
+const gradleBuild = readFileSync(gradleBuildPath, "utf8");
+for (const secret of [
+  "ELRS_KEYSTORE_BASE64",
+  "ELRS_KEYSTORE_PASSWORD",
+  "ELRS_KEY_ALIAS",
+  "ELRS_KEY_PASSWORD",
+]) {
+  if (!gradleBuild.includes(secret)) {
+    fail(
+      `${gradleBuildPath} does not name ${secret} in the set it refuses to ` +
+        "build with, so a leak of it into the environment would go unnoticed",
+    );
+  }
+}
+if (
+  !/throw GradleException\([\s\S]*permanent signing secrets/u.test(gradleBuild)
+) {
+  fail(
+    `${gradleBuildPath} does not fail the build when a permanent signing ` +
+      "secret is present in the environment",
+  );
+}
+// And it must configure no signing identity other than the disposable one the
+// update-persistence test generates and shreds. Read out of the
+// `signingConfigs` block by brace matching rather than by proximity: a
+// character-distance rule would false-positive on the `physicalTest` *build
+// type* further down the file, which is a different and legitimate thing.
+const signingConfigsStart = gradleBuild.indexOf("signingConfigs {");
+if (signingConfigsStart === -1) {
+  fail(`${gradleBuildPath} has no signingConfigs block to inspect`);
+} else {
+  let depth = 0;
+  let end = signingConfigsStart;
+  for (let at = gradleBuild.indexOf("{", signingConfigsStart); at < gradleBuild.length; at += 1) {
+    if (gradleBuild[at] === "{") depth += 1;
+    else if (gradleBuild[at] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = at;
+        break;
+      }
+    }
+  }
+  const block = gradleBuild.slice(signingConfigsStart, end + 1);
+  const configured = [...block.matchAll(/create\("([^"]+)"\)/gu)].map(
+    (match) => match[1],
+  );
+  for (const name of configured) {
+    if (name !== "disposableTest") {
+      fail(
+        `${gradleBuildPath} configures the signing identity "${name}". The ` +
+          "candidate build must be unsigned; only the disposable test key the " +
+          "update-persistence job generates and shreds may be configured here",
+      );
+    }
+  }
+}
+if (/resolvePhysicalTestSigning/u.test(gradleBuild)) {
+  fail(
+    `${gradleBuildPath} still resolves a permanent physical-test keystore`,
+  );
+}
+
+// 4. The candidate build must produce an unsigned physical-test APK, prove it
+//    is unsigned, and publish a machine-readable provenance manifest — those
+//    are the signer's only inputs, so a missing one means an unsignable or
+//    untraceable candidate.
+const androidWorkflow = readFileSync(
+  `${workflowDirectory}/android.yml`,
+  "utf8",
+);
+for (const [pattern, complaint] of [
+  [/assemblePhysicalTest/u, "does not build the physical-test candidate"],
+  [
+    /must produce an unsigned APK/u,
+    "does not fail when the candidate turns out to be signed",
+  ],
+  [
+    /app-physicalTest-unsigned\.provenance\.json/u,
+    "publishes no provenance manifest beside the unsigned candidate",
+  ],
+]) {
+  if (!pattern.test(androidWorkflow)) {
+    fail(`android.yml ${complaint}`);
+  }
+}
+for (const field of [
+  "sourceSha",
+  "runId",
+  "artifactName",
+  "apkSha256",
+  "applicationId",
+  "versionCode",
+  "versionName",
+  "webBuildSha256",
+  "nativeSourceSha256",
+]) {
+  if (!androidWorkflow.includes(`"${field}"`)) {
+    fail(
+      `android.yml's candidate provenance manifest omits ${field}, which the ` +
+        "trusted signer verifies before it signs anything",
+    );
+  }
+}
+
+// 5. And the keystore itself is never in the tree.
 for (const name of readdirSync("android/signing")) {
   if (/\.(jks|keystore|p12|pfx|pem|key)$/iu.test(name)) {
     fail(
