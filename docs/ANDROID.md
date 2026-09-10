@@ -233,14 +233,15 @@ weaker one — and the page is told the exact reason, which the build banner sho
 | The bundled application renders in both locales, in the real Activity | `EMULATOR_VERIFIED` | `PackagedApplicationInstrumentedTest` |
 
 All three suites: **42 tests, 0 skipped, 0 failed**, on an API 34 `google_apis`
-x86_64 emulator, first in run
-[34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483)
-and again in run
+x86_64 emulator. Green on three consecutive heads — runs
+[34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483),
 [34421520061](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34421520061)
-on the current head. The suite is byte-identical between those two commits —
-they differ in Markdown only — so the second run is a repeat rather than new
-coverage; it is recorded because a green result on the head under review is
-worth more than a green result on its parent.
+and
+[34422431912](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34422431912),
+the last of which is the head under review. The suite sources are unchanged
+across all three, so the later runs are repeats rather than new coverage; they
+are recorded because a green result on the head being reviewed is worth more
+than one on its ancestor.
 
 Reaching that took four defects in the job itself and two real defects the
 tests then found, all recorded here because each was a genuine fault rather
@@ -266,14 +267,14 @@ to publish an APK whose two embedded source digests are missing or `absent`.
 
 | Field | Value |
 | --- | --- |
-| Commit | `0861c7be0a2483e408453377b2c1903b909108c1` |
-| Workflow run | [34421520061](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34421520061), attempt 1 |
-| Artifact | `elrs-android-host-debug-0861c7be0a2483e408453377b2c1903b909108c1`, ID `10131151852` |
-| Artifact ZIP SHA-256 | `4e2ea8a5fc99981d37ddd180946b479c53286228cf3c6c7267088b8445fe8402` |
-| Artifact ZIP bytes | 3,453,312 |
+| Commit | `a79b19ace1c93ea387f557a3cb8e99c818ce255a` |
+| Workflow run | [34422431912](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34422431912), attempt 1 |
+| Artifact | `elrs-android-host-debug-a79b19ace1c93ea387f557a3cb8e99c818ce255a`, ID `10131478794` |
+| Artifact ZIP SHA-256 | `9c74140cd5e76db365d11d28d761d74fc231d508c661d710fc8203eaa5246891` |
+| Artifact ZIP bytes | 3,453,318 |
 | APK filename | `app-debug.apk` |
 | APK bytes | 3,760,222 |
-| APK SHA-256 | `5f011ce3a3c677af12a018d5278bf815a6dd6a95b8b266ddf786d168afd6e9e0` |
+| APK SHA-256 | `45204d46a022be57d6424f1628167ebf77e7f00f238f9bc342f2cdf5bde8ec7e` |
 | Package id | `com.fpvarabic.elrs.bridge` |
 | `versionCode` | 1 |
 | `versionName` | `0.1.0-unverified-debug` |
@@ -281,7 +282,7 @@ to publish an APK whose two embedded source digests are missing or `absent`.
 | `targetSdk` | 35 |
 | `compileSdk` | 35 |
 | Build tools | 37.0.0 |
-| Signing certificate SHA-256 | `ea89565c2bb19dee2aa0ab67dcc9ed34d1dc28cc412a24b4c4a70ef6614cba08` |
+| Signing certificate SHA-256 | `d7379486747b4d26d85112de24518b40e055b6b5242459a2dd9d2495cb1f05c0` |
 | Embedded web build SHA-256 | `d7fbc61563324ab10112501431245d4bc5e4bd2407e89ec2a45b11c73f61ba7f` |
 | Embedded native source SHA-256 | `a9c4b14ac2395c7428bc75a99f00c80f3599bb93ac363cb1b390e0c0c797e4f9` |
 
@@ -297,20 +298,21 @@ it.
 
 #### What the APK digest does and does not identify
 
-Comparing three consecutive heads makes the distinction concrete, and it is not
+Comparing four consecutive heads makes the distinction concrete, and it is not
 the one you would assume:
 
-| Commit | APK bytes | APK SHA-256 | Signing certificate | Web build | Native source |
-| --- | --- | --- | --- | --- | --- |
-| `6a225f3` | 3,760,158 | `bcfde79c…` | `8bb0af82…` | `d7fbc615…` | `abf487f0…` |
-| `73f2e7f` | 3,760,222 | `e15fe086…` | `be2a7d3e…` | `d7fbc615…` | `a9c4b14a…` |
-| `0861c7b` | 3,760,222 | `5f011ce3…` | `ea89565c…` | `d7fbc615…` | `a9c4b14a…` |
+| Commit | Changed | APK bytes | APK SHA-256 | Signing certificate | Web build | Native source |
+| --- | --- | --- | --- | --- | --- | --- |
+| `6a225f3` | test sources | 3,760,158 | `bcfde79c…` | `8bb0af82…` | `d7fbc615…` | `abf487f0…` |
+| `73f2e7f` | host sources | 3,760,222 | `e15fe086…` | `be2a7d3e…` | `d7fbc615…` | `a9c4b14a…` |
+| `0861c7b` | Markdown | 3,760,222 | `5f011ce3…` | `ea89565c…` | `d7fbc615…` | `a9c4b14a…` |
+| `a79b19a` | workflow, gate, Markdown | 3,760,222 | `45204d46…` | `d7379486…` | `d7fbc615…` | `a9c4b14a…` |
 
-`73f2e7f` and `0861c7b` differ in Markdown only. Every input to the APK is
-identical between them — both source digests match, as do the byte count, the
-version fields and the SDK levels — and the APK digest still differs, because
-the **signing certificate differs too**. No debug keystore is configured, so
-AGP generates one per runner: three runs, three keys. The APK digest therefore
+The last three commits change nothing that goes into the APK. Every input is
+identical across them — both source digests match, as do the byte count, the
+version fields and the SDK levels — and all three APK digests differ, because
+the **signing certificates differ too**. No debug keystore is configured, so
+AGP generates one per runner: four runs, four keys. The APK digest therefore
 identifies **one build**, not one commit; building the same tree again yields a
 different digest.
 
