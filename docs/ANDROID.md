@@ -228,9 +228,26 @@ weaker one — and the page is told the exact reason, which the build banner sho
 | --- | --- | --- |
 | Project compiles, lint clean | `IMPLEMENTED` | `gradle lintDebug` in CI |
 | USB permission and interface rules | `EMULATOR_VERIFIED` | `UsbDeviceGateTest`, JVM unit tests in CI |
-| Bridge origin, frame, validation, session, lifecycle rules | `EMULATOR_VERIFIED` | `BridgeCoreInstrumentedTest` against `FakeUsbBackend`, on an emulator in CI |
+| Bridge origin, frame, validation, session, lifecycle rules | `EMULATOR_VERIFIED` | `BridgeCoreInstrumentedTest` against `FakeUsbBackend` |
 | WebView confinement and bridge injection | `EMULATOR_VERIFIED` | `WebViewHostInstrumentedTest`, on a real WebView |
 | The bundled application renders in both locales, in the real Activity | `EMULATOR_VERIFIED` | `PackagedApplicationInstrumentedTest` |
+
+All three suites: **42 tests, 0 skipped, 0 failed**, on an API 34 `google_apis`
+x86_64 emulator, in run
+[34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483).
+
+Reaching that took four defects in the job itself and two real defects the
+tests then found, all recorded here because each was a genuine fault rather
+than a flake:
+
+| Where | Defect |
+| --- | --- |
+| workflow | `yes \| sdkmanager --licenses` is killed by SIGPIPE, and `pipefail` turned that into a failed step two seconds in |
+| workflow | `adb wait-for-device` has no timeout, so a dead emulator spent the job's whole limit looking like a slow one |
+| workflow | `avdmanager` writes to `$HOME/.config/.android/avd` and the `emulator` binary reads `$HOME/.android/avd`; the AVD was created and invisible |
+| workflow | `${{ runner.temp }}` in a job-level `env:` block fails GitHub's validation — the run had zero jobs and was named by its file path |
+| **host** | `BridgeCore` posted replies with `View.post`, which never runs on a view that is not attached to a window; a page's promise would hang forever, neither answered nor rejected |
+| test | the refusal-ordering assertion expected the interface reason where the gate correctly reports the permission reason first |
 | Debug APK produced with a recorded identity | `IMPLEMENTED` | `android.yml` artifact |
 | USB CDC-ACM byte transport | `IMPLEMENTED` | **not executed anywhere** — `AndroidUsbBackend` is the one part a fake stands in for |
 | Anything over real USB OTG | **`UNVERIFIED`** | none |
@@ -238,32 +255,43 @@ weaker one — and the page is told the exact reason, which the build banner sho
 ### APK identity
 
 Recomputed on every head. A workflow-only change still produces different APK
-bytes, so a digest is never carried over from a previous commit.
+bytes, so a digest is never carried over from a previous commit. CI writes this
+record beside the APK as `app-debug.apk.identity.txt`.
 
 | Field | Value |
 | --- | --- |
-| Commit | `b4ed6c75078ba83308c48adb44ed458aadea42dc` |
-| Workflow run | [34414473713](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34414473713), attempt 1 |
-| Artifact | `elrs-android-host-debug-b4ed6c75078ba83308c48adb44ed458aadea42dc`, ID `10128607884` |
-| Artifact ZIP SHA-256 | `7d29c1d354effffb0752550cc85084d39037a7464e9618c06e604c3112037374` |
-| Artifact ZIP bytes | 3,451,739 |
+| Commit | `73f2e7fc845fb653ad9a3741f4a6ca208487bdd0` |
+| Workflow run | [34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483), attempt 1 |
+| Artifact | `elrs-android-host-debug-73f2e7fc845fb653ad9a3741f4a6ca208487bdd0`, ID `10130851102` |
+| Artifact ZIP SHA-256 | `94ce68c8d6ce10a5779c6e61180b57d6510b8bdc2a56b949d00d07db8689f5de` |
+| Artifact ZIP bytes | 3,453,314 |
 | APK filename | `app-debug.apk` |
-| APK bytes | 3,758,670 |
-| APK SHA-256 | `bb73e2784a498f98aa3d26814a6041271cbc415cc4b20f32053ed2200be699d9` |
+| APK bytes | 3,760,222 |
+| APK SHA-256 | `e15fe08615f1bf09f653e0fe6dcaeb9174d4a0f4ed54b15583eb3080312b89ab` |
 | Package id | `com.fpvarabic.elrs.bridge` |
 | `versionCode` | 1 |
 | `versionName` | `0.1.0-unverified-debug` |
-| `minSdk` | 24 (declared in `app/build.gradle.kts`; the badging label changed in build-tools 37 and the workflow now reads both spellings) |
+| `minSdk` | 24 |
 | `targetSdk` | 35 |
 | `compileSdk` | 35 |
 | Build tools | 37.0.0 |
-| Signing certificate SHA-256 | not yet captured — `apksigner verify --print-certs` produced no match against the pattern used on this run; the workflow now reads the digest by shape rather than by the signer heading |
-| Embedded web build SHA-256 | `47c9c58577c83ca4cce4529ebedb9d123d30644b710843a98406b2781f7f18cc` |
-| Embedded native source SHA-256 | `15c8f608fa04b55caad3f4c7f8383bee54af37d7a2e4f43131fc08998ed48692` |
+| Signing certificate SHA-256 | `be2a7d3eda700563efd1233226cd67b678c63e9f8d9a085e447c07c293a40252` |
+| Embedded web build SHA-256 | `d7fbc61563324ab10112501431245d4bc5e4bd2407e89ec2a45b11c73f61ba7f` |
+| Embedded native source SHA-256 | `a9c4b14ac2395c7428bc75a99f00c80f3599bb93ac363cb1b390e0c0c797e4f9` |
 
-The last two are written into the APK as `assets/source-identity.json`, shown in
-the build banner inside an installed host, and exported in diagnostics — so a
-result reported from a phone names the exact sources behind it.
+Two fields were absent from the first attempt at this record and are worth
+naming, because the absence was silent: build-tools 37 renamed the badging
+label for `minSdk`, and the signing digest was being matched by the signer
+heading rather than by its shape. Both are read robustly now.
+
+The last two rows are written into the APK as `assets/source-identity.json`,
+shown in the build banner inside an installed host, and exported in
+diagnostics — so a result reported from a phone names the exact sources behind
+it.
+
+**This record is for the commit named above.** Any later commit produces a
+different APK; CI records its identity the same way, and the artifact for a
+given commit is named after that commit.
 
 This is a **debug** build signed with the Android debug key. It is not a release
 artifact and must not be treated as one.

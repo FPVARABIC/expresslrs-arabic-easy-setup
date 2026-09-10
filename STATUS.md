@@ -12,6 +12,7 @@
 | Candidate identity | Branch HEAD; injected at build time as the exact 40-character `VITE_BUILD_SHA` |
 | Software status | `SOFTWARE_FEATURE_INTEGRATION_COMPLETE — HARDWARE UNVERIFIED` |
 | Highest evidence level reached | `BROWSER_VERIFIED` for the web application, `EMULATOR_VERIFIED` for the Android host — see the [status vocabulary](docs/FEATURE_REALITY_MATRIX.md#status-vocabulary) |
+| Android instrumentation | 42 tests, 0 skipped, 0 failed, on an API 34 emulator against a fake USB backend — [ANDROID.md](docs/ANDROID.md#what-the-apk-proves-and-what-it-does-not) |
 | Runtime availability | All 10 operations observed becoming available from the shipped entry point — [RUNTIME_AVAILABILITY.md](docs/RUNTIME_AVAILABILITY.md) |
 | Target and layout provenance | Frozen into a hashed, release-scoped pack; nothing mutable is fetched during a write — [PROVENANCE.md](docs/upstream/PROVENANCE.md#determinism-the-pack-not-the-mirror) |
 | Known integration gaps | None open. Receiver-as-transmitter was reimplemented after an earlier version modelled it as AirPort; see [the upstream baseline](docs/upstream/baseline.md#receiver-as-transmitter---rx-as-tx). Android remains `UNVERIFIED` with the evidence recorded in [ANDROID.md](docs/ANDROID.md); it is an unproven platform, not an unfinished feature |
@@ -44,7 +45,7 @@ environment declared in `package.json` `engines`.
 | `pnpm check:security-headers` | PASS — source and build output |
 | `pnpm check:pwa-safety` | PASS — source and build output |
 | `pnpm check:visual-theme` | PASS |
-| `pnpm check:links` | PASS — 164 local links across 83 Markdown files |
+| `pnpm check:links` | PASS — 165 local links across 83 Markdown files |
 | `pnpm check:master-plan` | PASS — headings 1–449 in order |
 | `pnpm test` | PASS — see the exact counts below |
 | `pnpm build` | PASS |
