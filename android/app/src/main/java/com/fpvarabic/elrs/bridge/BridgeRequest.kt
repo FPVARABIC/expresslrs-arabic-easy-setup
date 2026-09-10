@@ -94,6 +94,30 @@ object BridgeRequest {
         override fun hashCode(): Int = System.identityHashCode(this)
     }
 
+    /**
+     * The call id alone, for a refusal that happens before parsing.
+     *
+     * The origin, frame and closed checks deliberately refuse without
+     * interpreting the request — but a reply the page cannot match to a pending
+     * call is a reply the page drops, and the promise behind it then never
+     * settles. On a bridge that can rewrite a transmitter's firmware, a call
+     * that neither resolves nor rejects is the worst outcome available, so the
+     * id is read back even for those refusals.
+     *
+     * Reading one bounded, character-checked field is not "interpreting the
+     * contents": nothing here decides anything, and an unreadable id yields an
+     * empty string rather than an error.
+     */
+    fun callIdOf(raw: String): String {
+        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return ""
+        val callId = json.optString("callId")
+        return if (callId.isEmpty() || callId.length > 64 || !callId.all(::isSafeIdChar)) {
+            ""
+        } else {
+            callId
+        }
+    }
+
     fun parse(raw: String): Parsed {
         val json = runCatching { JSONObject(raw) }.getOrNull()
             ?: return Invalid("", "the request is not a JSON object")

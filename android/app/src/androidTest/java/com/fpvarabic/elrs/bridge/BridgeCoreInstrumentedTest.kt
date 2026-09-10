@@ -67,6 +67,40 @@ class BridgeCoreInstrumentedTest {
         assertTrue("no bytes may reach the device", backend.written.isEmpty())
     }
 
+    @Test
+    fun everyPreParseRefusalCarriesTheCallIdBack() {
+        // A refusal the page cannot match to a pending call is one the page
+        // drops, and the promise behind it then never settles — which on a
+        // bridge that can rewrite firmware is worse than any refusal. Two of
+        // these three are reachable by the trusted page itself: an iframe, and a
+        // call in flight when the Activity goes away.
+        val foreign = callFrom("https://evil.example", isMainFrame = true, operation = "list")
+        assertEquals(BridgeCore.Reason.FOREIGN_ORIGIN, foreign.getString("reason"))
+        assertTrue("the foreign-origin refusal must name the call", foreign.getString("callId").isNotEmpty())
+
+        val subframe = callFrom(ORIGIN, isMainFrame = false, operation = "list")
+        assertEquals(BridgeCore.Reason.NOT_MAIN_FRAME, subframe.getString("reason"))
+        assertTrue("the subframe refusal must name the call", subframe.getString("callId").isNotEmpty())
+
+        core.close()
+        val afterClose = call("list")
+        assertEquals(BridgeCore.Reason.BRIDGE_CLOSED, afterClose.getString("reason"))
+        assertTrue("the closed-bridge refusal must name the call", afterClose.getString("callId").isNotEmpty())
+    }
+
+    @Test
+    fun aRequestWithNoUsableCallIdIsStillAnswered() {
+        // Nothing can be matched to it, but replying keeps the host's behaviour
+        // uniform rather than silently dropping a message.
+        val pending = Pending()
+        core.handle("{\"operation\":\"list\"}", "https://evil.example", isMainFrame = true) {
+            pending.accept(it)
+        }
+        val reply = pending.await()
+        assertEquals(BridgeCore.Reason.FOREIGN_ORIGIN, reply.getString("reason"))
+        assertEquals("", reply.getString("callId"))
+    }
+
     // ---- native input validation ----------------------------------------
 
     @Test

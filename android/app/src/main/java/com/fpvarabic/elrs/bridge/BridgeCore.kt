@@ -90,18 +90,24 @@ class BridgeCore(
      * message, so a page cannot claim to be somewhere it is not.
      */
     fun handle(raw: String, sourceOrigin: String, isMainFrame: Boolean, reply: (String) -> Unit) {
-        // Checked before parsing: a message from the wrong place is refused
-        // without its contents ever being interpreted.
+        // The call id is read first, and only the call id. These three checks
+        // still refuse without acting on anything the request asked for — but a
+        // refusal the page cannot match to a pending call is one it drops, and
+        // the promise behind it then never settles. That is a worse failure than
+        // any of them on a bridge that can rewrite firmware, and it is reachable
+        // by the trusted page itself: an iframe, or a call in flight when the
+        // Activity goes away.
+        val callId = BridgeRequest.callIdOf(raw)
         if (sourceOrigin != allowedOrigin) {
-            reply(BridgeRequest.error("", Reason.FOREIGN_ORIGIN, "origin $sourceOrigin may not use this bridge"))
+            reply(BridgeRequest.error(callId, Reason.FOREIGN_ORIGIN, "origin $sourceOrigin may not use this bridge"))
             return
         }
         if (!isMainFrame) {
-            reply(BridgeRequest.error("", Reason.NOT_MAIN_FRAME, "only the top-level document may use this bridge"))
+            reply(BridgeRequest.error(callId, Reason.NOT_MAIN_FRAME, "only the top-level document may use this bridge"))
             return
         }
         if (closed) {
-            reply(BridgeRequest.error("", Reason.BRIDGE_CLOSED, "the host is no longer accepting requests"))
+            reply(BridgeRequest.error(callId, Reason.BRIDGE_CLOSED, "the host is no longer accepting requests"))
             return
         }
 
