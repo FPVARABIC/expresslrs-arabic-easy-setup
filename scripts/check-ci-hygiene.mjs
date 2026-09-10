@@ -438,7 +438,34 @@ for (const field of [
   }
 }
 
-// 5. And the keystore itself is never in the tree.
+// 5. The Gradle blocks the host cannot build without.
+//
+//    Added after a slice-based edit to `build.gradle.kts` silently deleted
+//    `sourceSets` and `buildFeatures` — the first bundles the web application
+//    into the APK, the second generates `BuildConfig`, which `MainActivity`
+//    reads to decide whether WebView debugging is allowed. Neither failure is
+//    visible in review or reproducible without an Android toolchain, so both
+//    reached CI. These are cheap to assert and expensive to lose.
+for (const [pattern, complaint] of [
+  [
+    /buildConfig = true/u,
+    "does not generate BuildConfig, which MainActivity reads",
+  ],
+  [
+    /assets\.srcDir\(layout\.buildDirectory\.dir\("generated\/webAssets"\)\)/u,
+    "does not bundle the built web application into the APK",
+  ],
+  [
+    /assets\.srcDir\(layout\.buildDirectory\.dir\("generated\/identity"\)\)/u,
+    "does not bundle the source-identity asset, so the APK loses its provenance",
+  ],
+]) {
+  if (!pattern.test(gradleBuild)) {
+    fail(`${gradleBuildPath} ${complaint}`);
+  }
+}
+
+// 6. And the keystore itself is never in the tree.
 for (const name of readdirSync("android/signing")) {
   if (/\.(jks|keystore|p12|pfx|pem|key)$/iu.test(name)) {
     fail(

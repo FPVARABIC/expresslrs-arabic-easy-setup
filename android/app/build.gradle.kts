@@ -86,6 +86,22 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    sourceSets {
+        getByName("main") {
+            // The web application is bundled, not fetched. See MainActivity.
+            // Two directories, not one: Gradle refuses to reason about two
+            // tasks writing into the same output tree.
+            assets.srcDir(layout.buildDirectory.dir("generated/webAssets"))
+            assets.srcDir(layout.buildDirectory.dir("generated/identity"))
+        }
+    }
+
+    buildFeatures {
+        // AGP 8 does not generate BuildConfig by default, and the host reads
+        // BuildConfig.DEBUG to decide whether WebView debugging is allowed.
+        buildConfig = true
+    }
+
     signingConfigs {
         // Only ever the disposable test key. There is no configuration here
         // for a permanent one, which is the isolation: an artifact this build
