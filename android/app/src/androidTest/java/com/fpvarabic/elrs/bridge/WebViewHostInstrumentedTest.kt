@@ -356,9 +356,196 @@ class WebViewHostInstrumentedTest {
         }
     }
 
+    // ---- durable recovery, end to end through the real shim ---------------
+
+    /**
+     * The page-side half of durable recovery, written the way the application
+     * writes it: chunk the archive out through the bridge, commit it, read it
+     * back, and hash both. The digest comparison is the whole point — a write
+     * that reported success proves nothing on its own.
+     */
+    private fun durableRecoveryPage(): String = """
+        <!doctype html><html><body><script>
+        window.__result = null;
+        (async function () {
+          try {
+            const docs = window.elrsNativeBridge.documents;
+            const size = 200 * 1024;
+            const payload = new Uint8Array(size);
+            for (let i = 0; i < size; i += 1) payload[i] = i % 251;
+            const digest = async (bytes) => {
+              const hash = await crypto.subtle.digest('SHA-256', bytes.slice().buffer);
+              return Array.from(new Uint8Array(hash), (b) =>
+                b.toString(16).padStart(2, '0')).join('');
+            };
+            const expected = await digest(payload);
+
+            const created = await docs.create({
+              suggestedName: 'recovery.zip', mimeType: 'application/zip' });
+            const chunk = 64 * 1024;
+            for (let offset = 0; offset < payload.length; offset += chunk) {
+              await docs.write({
+                location: created.location,
+                bytes: Array.from(payload.subarray(offset, Math.min(offset + chunk, payload.length))),
+                offset: offset,
+              });
+            }
+            const committed = await docs.commit({ location: created.location });
+
+            let readBack = [];
+            let offset = 0;
+            for (;;) {
+              const part = await docs.read({
+                location: committed.location, offset: offset, maxBytes: chunk });
+              readBack = readBack.concat(part.bytes);
+              offset += part.length;
+              if (part.eof || part.length === 0) break;
+            }
+            const actual = await digest(new Uint8Array(readBack));
+            window.__result = JSON.stringify({
+              displayName: committed.displayName,
+              byteLength: committed.byteLength,
+              lengthMatches: readBack.length === payload.length,
+              digestMatches: actual === expected,
+            });
+          } catch (error) {
+            window.__result = JSON.stringify({
+              failed: true,
+              reason: error && error.bridgeReason ? error.bridgeReason : String(error),
+            });
+          }
+        })();
+        </script></body></html>
+    """
+
+    @Test
+    fun writesAVerifiedDurableCopyThroughTheRealShim() {
+        val documents = FakeDocumentStore()
+        attach(documents = documents)
+        loadOnOrigin(durableRecoveryPage(), path = "durable-ok.html")
+
+        val result = JSONObject(awaitScript("window.__result"))
+        assertFalse(result.toString(), result.optBoolean("failed"))
+        assertEquals("recovery.zip", result.getString("displayName"))
+        assertEquals(200 * 1024L, result.getLong("byteLength"))
+        assertTrue("the file must read back at full length", result.getBoolean("lengthMatches"))
+        assertTrue("the digest must match what was written", result.getBoolean("digestMatches"))
+        assertEquals(1, documents.committedCount)
+    }
+
+    @Test
+    fun thePageCatchesStorageThatHandsBackDifferentBytes() {
+        // The write reports success and the length is right. Only the digest
+        // shows it, which is why the read-back exists at all.
+        val documents = FakeDocumentStore(corruptOnRead = true)
+        attach(documents = documents)
+        loadOnOrigin(durableRecoveryPage(), path = "durable-corrupt.html")
+
+        val result = JSONObject(awaitScript("window.__result"))
+        assertFalse(result.toString(), result.optBoolean("failed"))
+        assertTrue("the length is unchanged", result.getBoolean("lengthMatches"))
+        assertFalse("the digest must not match", result.getBoolean("digestMatches"))
+    }
+
+    @Test
+    fun thePageIsToldWhenTheOperatorDismissesTheSavePicker() {
+        attach(documents = FakeDocumentStore(dismissCreate = true))
+        loadOnOrigin(durableRecoveryPage(), path = "durable-cancel.html")
+
+        val result = JSONObject(awaitScript("window.__result"))
+        assertTrue(result.toString(), result.getBoolean("failed"))
+        // By name, not by message: the page picks the operator's text from this.
+        assertEquals(DocumentStore.Reason.PICKER_CANCELLED, result.getString("reason"))
+    }
+
+    @Test
+    fun thePageIsToldWhenTheDestinationIsFull() {
+        attach(documents = FakeDocumentStore(spaceLimit = 1_024))
+        loadOnOrigin(durableRecoveryPage(), path = "durable-full.html")
+
+        val result = JSONObject(awaitScript("window.__result"))
+        assertTrue(result.toString(), result.getBoolean("failed"))
+        assertEquals(DocumentStore.Reason.NO_SPACE, result.getString("reason"))
+    }
+
+    @Test
+    fun importsAPackageWrittenByAPreviousInstallation() {
+        // Nothing in this installation wrote the file. That is the situation
+        // durable recovery exists for: the app was reinstalled, its journal is
+        // empty, and the archive is still where the operator put it.
+        val archive = ByteArray(100 * 1024) { index -> (index % 199).toByte() }
+        attach(documents = FakeDocumentStore(importable = archive))
+        loadOnOrigin(
+            """
+            <!doctype html><html><body><script>
+            window.__result = null;
+            (async function () {
+              try {
+                const docs = window.elrsNativeBridge.documents;
+                const picked = await docs.pick({ mimeType: 'application/zip' });
+                let bytes = [];
+                let offset = 0;
+                for (;;) {
+                  const part = await docs.read({
+                    location: picked.location, offset: offset, maxBytes: 64 * 1024 });
+                  bytes = bytes.concat(part.bytes);
+                  offset += part.length;
+                  if (part.eof || part.length === 0) break;
+                }
+                let ok = bytes.length === ${archive.size};
+                for (let i = 0; ok && i < bytes.length; i += 1) ok = bytes[i] === i % 199;
+                window.__result = JSON.stringify({
+                  displayName: picked.displayName, length: bytes.length, matches: ok });
+              } catch (error) {
+                window.__result = JSON.stringify({ failed: true, reason: String(error) });
+              }
+            })();
+            </script></body></html>
+            """,
+            path = "durable-import.html",
+        )
+
+        val result = JSONObject(awaitScript("window.__result"))
+        assertFalse(result.toString(), result.optBoolean("failed"))
+        assertEquals("imported-recovery.zip", result.getString("displayName"))
+        assertEquals(archive.size.toLong(), result.getLong("length"))
+        assertTrue("every byte must come back", result.getBoolean("matches"))
+    }
+
+    @Test
+    fun aSubframeMayNotReachTheDocumentBridge() {
+        attach(documents = FakeDocumentStore())
+        loadOnOrigin(
+            """
+            <!doctype html><html><body>
+            <iframe id="f" srcdoc="&lt;script&gt;
+              window.parent.__result = null;
+              (async function () {
+                try {
+                  await window.elrsNativeBridge.documents.create({ suggestedName: 'x.zip' });
+                  window.parent.__result = JSON.stringify({ reached: true });
+                } catch (error) {
+                  window.parent.__result = JSON.stringify({
+                    reached: false,
+                    reason: error &amp;&amp; error.bridgeReason ? error.bridgeReason : String(error) });
+                }
+              })();
+            &lt;/script&gt;"></iframe>
+            </body></html>
+            """,
+            path = "durable-frame.html",
+        )
+
+        val result = JSONObject(awaitScript("window.__result"))
+        assertFalse("a subframe must not write files", result.getBoolean("reached"))
+    }
+
     // ---- helpers ---------------------------------------------------------
 
-    private fun attach(identity: JSONObject = JSONObject()) {
+    private fun attach(
+        identity: JSONObject = JSONObject(),
+        documents: DocumentStore = UnavailableDocumentStore,
+    ) {
         onMainThread {
             bridge = UsbSerialBridge.attach(
                 context = InstrumentationRegistry.getInstrumentation().targetContext,
@@ -366,6 +553,7 @@ class WebViewHostInstrumentedTest {
                 allowedOrigin = ORIGIN,
                 backend = backend,
                 identity = identity,
+                documents = documents,
             )
         }
         assertNotNull(

@@ -292,6 +292,31 @@ export const workbenchAr = {
     "اكتب اسم Target للتأكيد، لأن هوية الجهاز لا تحدده بدقة.",
   "wb.need.recoveryPackage":
     "اختر حزمة الاستعادة المراد كتابتها، أو استأنف نقطة الاستعادة المفتوحة.",
+  "wb.need.durableRecovery":
+    "احفظ حزمة الاستعادة في مكان دائم ودعها تُتحقَّق أولًا. النسخة داخل التطبيق تُمحى إذا أُزيل التطبيق، وهي اللحظة نفسها التي تحتاجها فيها.",
+  "wb.need.durableRecoveryStale":
+    "النسخة المتحقَّقة تتبع حزمة مختلفة. احفظ هذه الحزمة في مكان دائم من جديد.",
+
+  // --- تصدير واستيراد الاستعادة الدائمة ----------------------------------
+  "wb.durable.exporting": "جارٍ حفظ حزمة الاستعادة والتحقق منها…",
+  "wb.durable.verified":
+    "تم التحقق من حزمة الاستعادة على مكان دائم: {location} · SHA-256 {digest}",
+  "wb.durable.importing": "جارٍ قراءة حزمة الاستعادة…",
+  "wb.durable.imported":
+    "تم استيراد حزمة الاستعادة والتحقق منها من {location}. يمكن تشغيل الاستعادة دون أي بيانات سابقة للتطبيق.",
+  "wb.durable.NO_DURABLE_TARGET":
+    "لا توفّر هذه المنصة مكانًا يستطيع التطبيق الكتابة فيه ثم إعادة قراءته، لذا لا يمكن إثبات وجود نسخة استعادة دائمة. تبقى كتابة Firmware محجوبة، وكل شيء آخر متاح.",
+  "wb.durable.CANCELLED": "تم إلغاء حفظ حزمة الاستعادة.",
+  "wb.durable.WRITE_FAILED": "لم يمكن كتابة حزمة الاستعادة في المكان المختار.",
+  "wb.durable.INSUFFICIENT_STORAGE":
+    "لا توجد مساحة كافية في المكان المختار لحزمة الاستعادة.",
+  "wb.durable.REOPEN_FAILED":
+    "كُتبت حزمة الاستعادة لكن لم يمكن إعادة فتحها، لذا بقاؤها غير مُثبت.",
+  "wb.durable.TRUNCATED": "حزمة الاستعادة المحفوظة أقصر من التي كُتبت.",
+  "wb.durable.HASH_MISMATCH":
+    "حزمة الاستعادة المحفوظة لا تطابق البايتات التي كُتبت.",
+  "wb.durable.PACKAGE_INVALID":
+    "هذا الملف ليس حزمة استعادة يستطيع هذا الإصدار الاستعادة منها.",
 
   // --- Advanced Mode interface --------------------------------------------
   "wb.ui.kicker": "ELRS السهل · Hardware Lab",
@@ -368,6 +393,10 @@ export const workbenchAr = {
   "wb.ui.noPackageYet": "لم تُبنَ حزمة بعد.",
   "wb.ui.downloadFirmware": "تنزيل Firmware / OTA",
   "wb.ui.downloadRecovery": "تنزيل حزمة الاستعادة",
+  "wb.ui.exportDurableRecovery": "احفظ حزمة الاستعادة في مكان دائم",
+  "wb.ui.importDurableRecovery": "استورد حزمة استعادة محفوظة",
+  "wb.ui.durableRecoveryLocation": "النسخة المتحقَّقة",
+  "wb.ui.durableRecoveryPending": "لا توجد نسخة دائمة متحقَّقة بعد",
   "wb.ui.downloadLua": "تنزيل ملف Lua",
   "wb.ui.recoveryKeptConfirmed":
     "أكد المستخدم أن حزمة الاستعادة محفوظة خارج التطبيق.",

@@ -7,11 +7,15 @@ import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
 import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.ServiceWorkerClientCompat
@@ -51,12 +55,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var bridge: UsbSerialBridge? = null
 
+    /**
+     * The Storage Access Framework, wired to whatever asked for it.
+     *
+     * Registered once in `onCreate`, because `registerForActivityResult` must
+     * be called before the Activity is started. Exactly one request can be in
+     * flight, which matches the bridge: one document is written at a time.
+     */
+    private var pendingDocumentResult: ((Uri?) -> Unit)? = null
+    private lateinit var createDocument: ActivityResultLauncher<String>
+    private lateinit var openDocument: ActivityResultLauncher<Array<String>>
+
+    /** The WebView's own file chooser, which is a separate Android callback. */
+    private var pendingFileChooser: ValueCallback<Array<Uri>>? = null
+    private lateinit var chooseFile: ActivityResultLauncher<Array<String>>
+
     /** The hosting WebView. Internal so the instrumentation tests drive the real one. */
     internal val hostWebView: WebView get() = webView
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        registerDocumentLaunchers()
 
         val assetLoader = WebViewAssetLoader.Builder()
             .setDomain(APPLICATION_HOST)
@@ -70,6 +91,27 @@ class MainActivity : AppCompatActivity() {
         webView = WebView(this).apply {
             settings.applyHardening()
             webViewClient = HostWebViewClient(assetLoader, ::openExternally)
+            // Without this a WebView silently does nothing when the page opens
+            // a file input: no picker, no error, no callback. Every `<input
+            // type="file">` in the application was therefore dead on this host,
+            // which included choosing a recovery package and choosing a
+            // firmware file. It is served by the same SAF launcher the document
+            // bridge uses, so there is one path to storage and not two.
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    view: WebView,
+                    filePathCallback: ValueCallback<Array<Uri>>,
+                    params: WebChromeClient.FileChooserParams,
+                ): Boolean {
+                    pendingFileChooser?.onReceiveValue(null)
+                    pendingFileChooser = filePathCallback
+                    val types = params.acceptTypes
+                        .filter { it.isNotBlank() }
+                        .toTypedArray()
+                        .ifEmpty { arrayOf("*/*") }
+                    return runCatching { chooseFile.launch(types) }.isSuccess
+                }
+            }
         }
         setContentView(webView)
 
@@ -88,8 +130,77 @@ class MainActivity : AppCompatActivity() {
             allowedOrigin = APPLICATION_ORIGIN,
             backend = testBackend,
             identity = identity,
+            documents = testDocuments ?: AndroidDocumentStore(this, documentLauncher),
         )
         webView.loadUrl("$APPLICATION_ORIGIN/index.html")
+    }
+
+    /**
+     * Registers the three Activity results this host can receive.
+     *
+     * All three are the Storage Access Framework. Registration has to happen
+     * before the Activity is started, and it has to happen on every recreation
+     * — including one caused by a rotation mid-write, which is why the pending
+     * callbacks are cleared rather than assumed to still be valid.
+     */
+    private fun registerDocumentLaunchers() {
+        createDocument = registerForActivityResult(
+            ActivityResultContracts.CreateDocument("application/octet-stream"),
+        ) { uri -> deliverDocumentResult(uri) }
+        openDocument = registerForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri -> deliverDocumentResult(uri) }
+        chooseFile = registerForActivityResult(
+            ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            val callback = pendingFileChooser
+            pendingFileChooser = null
+            // Null rather than an empty array: an empty array tells the WebView
+            // "no file", which is right, but the callback must be answered
+            // either way or the input stays stuck forever.
+            callback?.onReceiveValue(if (uri == null) arrayOf() else arrayOf(uri))
+        }
+    }
+
+    private fun deliverDocumentResult(uri: Uri?) {
+        val waiting = pendingDocumentResult
+        pendingDocumentResult = null
+        waiting?.invoke(uri)
+    }
+
+    private val documentLauncher = object : AndroidDocumentStore.DocumentPickerLauncher {
+        override fun createDocument(
+            suggestedName: String,
+            mimeType: String,
+            onResult: (Uri?) -> Unit,
+        ) {
+            runOnUiThread {
+                // A second request while one is outstanding would leave the
+                // first waiter with no answer, so it is refused here rather
+                // than silently replaced.
+                if (pendingDocumentResult != null) {
+                    onResult(null)
+                    return@runOnUiThread
+                }
+                pendingDocumentResult = onResult
+                if (runCatching { createDocument.launch(suggestedName) }.isFailure) {
+                    deliverDocumentResult(null)
+                }
+            }
+        }
+
+        override fun openDocument(mimeType: String, onResult: (Uri?) -> Unit) {
+            runOnUiThread {
+                if (pendingDocumentResult != null) {
+                    onResult(null)
+                    return@runOnUiThread
+                }
+                pendingDocumentResult = onResult
+                if (runCatching { openDocument.launch(arrayOf(mimeType)) }.isFailure) {
+                    deliverDocumentResult(null)
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -108,6 +219,13 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         bridge?.close()
         bridge = null
+        // Anything still waiting on a picker is answered, not abandoned: an
+        // unanswered ValueCallback leaves the page's file input permanently
+        // stuck, and an unanswered document result leaves the bridge's worker
+        // thread waiting for a result that can no longer arrive.
+        pendingFileChooser?.onReceiveValue(null)
+        pendingFileChooser = null
+        deliverDocumentResult(null)
         webView.destroy()
         super.onDestroy()
     }
@@ -165,8 +283,23 @@ class MainActivity : AppCompatActivity() {
         @JvmStatic
         var testBackendOverride: UsbBackend? = null
 
+        /**
+         * A fake document provider for instrumentation tests. An emulator has
+         * no operator to tap a picker, so without this seam none of the durable
+         * recovery rules — cancellation, a full disk, a corrupted file, a
+         * changed hash, import after a reinstall — could be tested at all.
+         *
+         * Honoured only in a debug build, like the USB seam above.
+         */
+        @VisibleForTesting
+        @JvmStatic
+        var testDocumentsOverride: DocumentStore? = null
+
         private val testBackend: UsbBackend?
             get() = if (BuildConfig.DEBUG) testBackendOverride else null
+
+        private val testDocuments: DocumentStore?
+            get() = if (BuildConfig.DEBUG) testDocumentsOverride else null
     }
 }
 

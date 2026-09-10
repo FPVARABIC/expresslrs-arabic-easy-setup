@@ -1,3 +1,4 @@
+import { strToU8, zipSync } from "fflate";
 import {
   act,
   fireEvent,
@@ -6,7 +7,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { installDurableStorageStub } from "../test/durable-storage";
 
 import { CrsfAddress, type CrsfParameter } from "../hardware/crsf";
 import type {
@@ -194,7 +197,10 @@ const preparedPackage: PreparedFirmwarePackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: new Uint8Array([4, 5, 6]),
+  recoveryArchive: zipSync({
+    "manifest.json": strToU8('{"schemaVersion":1}'),
+    "segments/firmware.bin": new Uint8Array([4, 5, 6]),
+  }),
   createdAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -394,16 +400,38 @@ function connectedHardware(
   };
 }
 
-function acknowledgeSavedRecoveryPackage(): void {
+/**
+ * Satisfies the recovery prerequisite the way the product now requires: by
+ * actually writing the package to durable storage and letting it be reopened
+ * and hashed. Ticking a box no longer does it, because a tick was never
+ * evidence that a file exists.
+ */
+async function saveRecoveryPackageDurably(): Promise<void> {
   fireEvent.click(
-    screen.getByRole("checkbox", {
-      name: /أؤكد أن ملف حزمة الاستعادة حُفظ/u,
-    }),
+    screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان دائم" }),
   );
+  // The export is a chain of real promises: picker, write, reopen, SHA-256.
+  // Two things make the usual `findByText` unusable here. Some of these tests
+  // run on fake timers, where the DOM-polling helpers never settle at all; and
+  // Web Crypto resolves off the event loop rather than on the microtask queue,
+  // so draining microtasks is not enough either. Both are driven explicitly.
+  await act(async () => {
+    for (let turn = 0; turn < 60; turn += 1) {
+      if (screen.queryByText(/النسخة المتحقَّقة/u) !== null) return;
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1);
+      else await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  });
+  // Asserted rather than awaited, so a failed export names itself here instead
+  // of surfacing as a timeout in whatever step comes next.
+  expect(screen.getByText(/النسخة المتحقَّقة/u)).toBeInTheDocument();
 }
 
 describe("rebuilt ExpressLRS hardware journey", () => {
+  let durableStorage: ReturnType<typeof installDurableStorageStub>;
+
   beforeEach(() => {
+    durableStorage = installDurableStorageStub();
     mocks.downloadPreparedBytes.mockReset();
     mocks.flashEspFirmware.mockReset().mockResolvedValue({
       chipName: "ESP32",
@@ -424,6 +452,10 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     mocks.validateRecoveryPackage
       .mockReset()
       .mockRejectedValue(new Error("stop after confirmation gate"));
+  });
+
+  afterEach(() => {
+    durableStorage.restore();
   });
 
   it("starts with real operations locked and no mock-success surface", () => {
@@ -865,7 +897,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       fireEvent.click(
         screen.getByRole("button", { name: "تنزيل حزمة الاستعادة" }),
       );
-      acknowledgeSavedRecoveryPackage();
+      await saveRecoveryPackageDurably();
       fireEvent.click(
         screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
       );
@@ -1038,7 +1070,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     expect(
       screen.getByText(/التطبيق لا يستطيع إثبات حفظها/u),
     ).toBeInTheDocument();
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1115,7 +1147,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1163,7 +1195,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1227,7 +1259,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       await user.click(
         await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
       );
-      acknowledgeSavedRecoveryPackage();
+      await saveRecoveryPackageDurably();
       await user.click(
         screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
       );
@@ -1288,7 +1320,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.type(screen.getByLabelText(/تأكيد Target/u), "module");
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
@@ -1365,7 +1397,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
@@ -1452,7 +1484,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       await user.click(
         await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
       );
-      acknowledgeSavedRecoveryPackage();
+      await saveRecoveryPackageDurably();
       await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
       await user.click(
         screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
@@ -1507,7 +1539,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.selectOptions(screen.getByLabelText("طريقة التحديث"), "edgetx");
     await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
     await user.click(
@@ -1754,7 +1786,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     // The live CRSF identity already pins this Target exactly, so no manual
     // confirmation is asked for — and none is typed here.
     expect(screen.queryByLabelText(/^تأكيد Target/u)).toBeNull();
@@ -1818,7 +1850,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1872,7 +1904,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );

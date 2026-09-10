@@ -85,6 +85,9 @@ export function ExpressLrsParityWorkbenchView({
     downloadFirmware,
     downloadLuaScript,
     downloadRecovery,
+    exportDurableRecoveryPackage,
+    importDurableRecoveryPackage,
+    durableRecovery,
     exactHardwareTarget,
     flashPreparedFirmware,
     flashProgress,
@@ -1039,6 +1042,22 @@ export function ExpressLrsParityWorkbenchView({
               >
                 {t("wb.ui.downloadRecovery")}
               </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => void exportDurableRecoveryPackage()}
+              >
+                {t("wb.ui.exportDurableRecovery")}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => void importDurableRecoveryPackage()}
+              >
+                {t("wb.ui.importDurableRecovery")}
+              </button>
               {selectedTarget?.role === "tx" ? (
                 <button
                   type="button"
@@ -1050,6 +1069,15 @@ export function ExpressLrsParityWorkbenchView({
                 </button>
               ) : null}
             </div>
+
+            {durableRecovery !== null ? (
+              <p className="success-note">
+                {t("wb.ui.durableRecoveryLocation")}:{" "}
+                {durableRecovery.displayName} · {durableRecovery.sha256}
+              </p>
+            ) : (
+              <p className="danger-note">{t("wb.ui.durableRecoveryPending")}</p>
+            )}
 
             {recoveryDownloaded ? (
               <p className="success-note">{t("wb.ui.recoveryKeptConfirmed")}</p>

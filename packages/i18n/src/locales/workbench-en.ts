@@ -340,6 +340,33 @@ export const workbenchEn = {
     "Type the Target name to confirm it, because the device identity does not pin it exactly.",
   "wb.need.recoveryPackage":
     "Select the recovery package to restore, or resume the open checkpoint.",
+  "wb.need.durableRecovery":
+    "Save the recovery package to durable storage and let it be verified first. A copy inside this app is erased if the app is removed, which is exactly when it is needed.",
+  "wb.need.durableRecoveryStale":
+    "The verified recovery copy belongs to a different package. Save this one to durable storage again.",
+
+  // --- durable recovery export and import ---------------------------------
+  "wb.durable.exporting": "Saving the recovery package and verifying it…",
+  "wb.durable.verified":
+    "Recovery package verified on durable storage: {location} · SHA-256 {digest}",
+  "wb.durable.importing": "Reading the recovery package…",
+  "wb.durable.imported":
+    "Recovery package imported and verified from {location}. Recovery can run without any earlier application data.",
+  "wb.durable.NO_DURABLE_TARGET":
+    "This platform offers no storage this application can write to and read back, so a durable recovery copy cannot be proven. Firmware writing stays blocked; everything else remains available.",
+  "wb.durable.CANCELLED": "Saving the recovery package was cancelled.",
+  "wb.durable.WRITE_FAILED":
+    "The recovery package could not be written to the chosen location.",
+  "wb.durable.INSUFFICIENT_STORAGE":
+    "There is not enough room at the chosen location for the recovery package.",
+  "wb.durable.REOPEN_FAILED":
+    "The recovery package was written but could not be reopened, so its durability is unproven.",
+  "wb.durable.TRUNCATED":
+    "The saved recovery package is shorter than what was written.",
+  "wb.durable.HASH_MISMATCH":
+    "The saved recovery package does not match the bytes that were written.",
+  "wb.durable.PACKAGE_INVALID":
+    "That file is not a recovery package this build can restore from.",
 
   // --- Advanced Mode interface --------------------------------------------
   "wb.ui.kicker": "Easy ELRS · Hardware Lab",
@@ -419,6 +446,10 @@ export const workbenchEn = {
   "wb.ui.noPackageYet": "No package has been built yet.",
   "wb.ui.downloadFirmware": "Download the firmware / OTA",
   "wb.ui.downloadRecovery": "Download the recovery package",
+  "wb.ui.exportDurableRecovery": "Save the recovery package to durable storage",
+  "wb.ui.importDurableRecovery": "Import a saved recovery package",
+  "wb.ui.durableRecoveryLocation": "Verified copy",
+  "wb.ui.durableRecoveryPending": "No verified durable copy yet",
   "wb.ui.downloadLua": "Download the Lua script",
   "wb.ui.recoveryKeptConfirmed":
     "The operator confirmed the recovery package is saved outside this application.",

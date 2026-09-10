@@ -260,10 +260,54 @@
     return Promise.resolve([]);
   }
 
+  /**
+   * Storage the operator owns, for the durable recovery copy.
+   *
+   * The web layer writes the recovery package here, then reads it back and
+   * hashes it, before any destructive firmware write is allowed. Chunked in
+   * both directions with explicit offsets, exactly like the USB path, because
+   * an archive is megabytes and a single message is not the place for it.
+   */
+  var documents = Object.freeze({
+    create: function (options) {
+      return call({
+        operation: "documentCreate",
+        suggestedName: (options && options.suggestedName) || "recovery.zip",
+        mimeType: (options && options.mimeType) || "application/zip",
+      });
+    },
+    write: function (options) {
+      return call({
+        operation: "documentWrite",
+        location: options.location,
+        bytes: options.bytes,
+        offset: options.offset,
+      });
+    },
+    commit: function (options) {
+      return call({ operation: "documentCommit", location: options.location });
+    },
+    read: function (options) {
+      return call({
+        operation: "documentRead",
+        location: options.location,
+        offset: options.offset,
+        maxBytes: options.maxBytes,
+      });
+    },
+    pick: function (options) {
+      return call({
+        operation: "documentPick",
+        mimeType: (options && options.mimeType) || "application/zip",
+      });
+    },
+  });
+
   Object.defineProperty(window, "elrsNativeBridge", {
     value: Object.freeze({
       version: 1,
       serial: Object.freeze({ requestPort: requestPort, getPorts: getPorts }),
+      documents: documents,
       host: Object.freeze(JSON.parse(window.__elrsNativeHostIdentity || "{}")),
     }),
     writable: false,

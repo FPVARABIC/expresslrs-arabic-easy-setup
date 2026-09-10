@@ -80,6 +80,16 @@ export interface DiagnosticsSnapshot {
     readonly packageSegmentHashes: readonly string[];
     readonly bindingPhraseConfigured: boolean;
     readonly recoveryPackageDownloaded: boolean;
+    /**
+     * Whether a copy of the recovery package was written outside this
+     * application, reopened and hashed. The line above records only that a
+     * download was started, which proves nothing about a file existing.
+     */
+    readonly durableRecoveryVerified: boolean;
+    /** Which storage it went to, or null when there is no verified copy. */
+    readonly durableRecoveryBackend: string | null;
+    /** The digest of the copy as it was read back off that storage. */
+    readonly durableRecoverySha256: string | null;
   };
   readonly recovery: {
     readonly journalState: string;
@@ -225,6 +235,20 @@ export function serializeDiagnosticsMarkdown(
     redactedLine(
       "Recovery package downloaded",
       snapshot.firmware.recoveryPackageDownloaded,
+    ),
+    redactedLine(
+      "Durable recovery verified",
+      snapshot.firmware.durableRecoveryVerified,
+    ),
+    redactedLine(
+      "Durable recovery storage",
+      snapshot.firmware.durableRecoveryBackend,
+    ),
+    // The location is deliberately not exported: a chosen path can name the
+    // operator or their device. The digest identifies the file without it.
+    redactedLine(
+      "Durable recovery SHA-256",
+      snapshot.firmware.durableRecoverySha256,
     ),
     "",
     "## Recovery",

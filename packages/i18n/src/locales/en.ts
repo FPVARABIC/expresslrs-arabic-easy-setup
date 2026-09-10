@@ -227,6 +227,10 @@ export const en = {
   "easy.fw.prepared":
     "Prepared {segments} segments with a SHA-256 for each. Download the recovery package before any write.",
   "easy.fw.downloadRecovery": "Download the recovery package",
+  "easy.fw.exportDurableRecovery":
+    "Save the recovery package where it will survive",
+  "easy.fw.importDurableRecovery": "I already have a saved recovery package",
+  "easy.fw.durableRecoveryVerified": "Saved and verified: {location}",
   "easy.fw.recoverySaved":
     "I checked the recovery package is saved on my computer",
   "easy.fw.power":

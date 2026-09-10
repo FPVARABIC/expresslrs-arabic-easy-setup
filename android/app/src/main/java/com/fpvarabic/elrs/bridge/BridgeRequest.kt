@@ -14,7 +14,27 @@ import org.json.JSONObject
 object BridgeRequest {
 
     /** The whole vocabulary. Anything else is refused by name. */
-    val OPERATIONS = setOf("list", "requestPermission", "open", "write", "read", "close", "cancel")
+    val OPERATIONS = setOf(
+        "list", "requestPermission", "open", "write", "read", "close", "cancel",
+        // Durable recovery: a document written outside the application, then
+        // reopened so the page can hash it. See DocumentStore.
+        "documentCreate", "documentWrite", "documentCommit", "documentRead", "documentPick",
+    )
+
+    /** Operations that stream a document, so they must name one. */
+    val LOCATION_OPERATIONS = setOf("documentWrite", "documentCommit", "documentRead")
+
+    /** Operations that write bytes, so they carry a payload and an offset. */
+    val PAYLOAD_OPERATIONS = setOf("write", "documentWrite")
+
+    /** Operations that read bytes, so they carry a bound. */
+    val BOUNDED_READ_OPERATIONS = setOf("read", "documentRead")
+
+    /** A suggested file name is a name, not a path: no separators, bounded. */
+    const val MAX_DOCUMENT_NAME = 200
+
+    /** A content Uri is bounded so a malformed one cannot be unbounded. */
+    const val MAX_DOCUMENT_LOCATION = 2_048
 
     /** A single transfer is bounded so a malformed size cannot exhaust memory. */
     const val MAX_TRANSFER_BYTES = 64 * 1024
@@ -63,6 +83,12 @@ object BridgeRequest {
         val offset: Long?,
         /** The line rate to configure on open. */
         val baudRate: Int,
+        /** The file name to suggest to the operator, for `documentCreate`. */
+        val suggestedName: String?,
+        /** The MIME type, for the two picker operations. */
+        val mimeType: String?,
+        /** Which document a streaming operation acts on. */
+        val location: String?,
     ) : Parsed {
         override fun equals(other: Any?): Boolean = this === other
         override fun hashCode(): Int = System.identityHashCode(this)
@@ -111,9 +137,9 @@ object BridgeRequest {
         }
 
         var payload: ByteArray? = null
-        if (operation == "write") {
+        if (operation in PAYLOAD_OPERATIONS) {
             val array = json.optJSONArray("bytes")
-                ?: return Invalid(callId, "write requires a bytes array")
+                ?: return Invalid(callId, "$operation requires a bytes array")
             if (array.length() == 0 || array.length() > MAX_TRANSFER_BYTES) {
                 return Invalid(callId, "bytes must be 1..$MAX_TRANSFER_BYTES long")
             }
@@ -128,7 +154,7 @@ object BridgeRequest {
         }
 
         var offset: Long? = null
-        if (operation == "write" && json.has("offset")) {
+        if (operation in PAYLOAD_OPERATIONS && json.has("offset")) {
             val value = json.optLong("offset", -1L)
             if (value < 0L || value > MAX_TRANSFER_OFFSET) {
                 return Invalid(callId, "offset must be 0..$MAX_TRANSFER_OFFSET")
@@ -146,11 +172,53 @@ object BridgeRequest {
         }
 
         var maxBytes = 0
-        if (operation == "read") {
+        if (operation in BOUNDED_READ_OPERATIONS) {
             maxBytes = json.optInt("maxBytes", -1)
             if (maxBytes < 1 || maxBytes > MAX_TRANSFER_BYTES) {
                 return Invalid(callId, "maxBytes must be 1..$MAX_TRANSFER_BYTES")
             }
+        }
+
+        var suggestedName: String? = null
+        if (operation == "documentCreate") {
+            val value = json.optString("suggestedName")
+            // A name, not a path. A separator here would be an attempt to place
+            // the file somewhere the operator did not choose.
+            if (value.isEmpty() || value.length > MAX_DOCUMENT_NAME ||
+                value.contains('/') || value.contains('\\') || value.contains('\u0000') ||
+                value == "." || value == ".."
+            ) {
+                return Invalid(callId, "suggestedName must be a 1..$MAX_DOCUMENT_NAME character file name")
+            }
+            suggestedName = value
+        }
+
+        var mimeType: String? = null
+        if (operation == "documentCreate" || operation == "documentPick") {
+            val value = json.optString("mimeType").ifEmpty { "application/octet-stream" }
+            if (value.length > 128 || !value.all { it.isLetterOrDigit() || it in "/.+-_*" }) {
+                return Invalid(callId, "mimeType is not a MIME type")
+            }
+            mimeType = value
+        }
+
+        var location: String? = null
+        if (operation in LOCATION_OPERATIONS) {
+            val value = json.optString("location")
+            if (value.isEmpty() || value.length > MAX_DOCUMENT_LOCATION) {
+                return Invalid(callId, "$operation requires a document location")
+            }
+            location = value
+        }
+
+        // A document read is bounded by the same chunk size as a USB read, and
+        // its offset can run to the whole archive rather than a single transfer.
+        if (operation == "documentRead") {
+            val value = json.optLong("offset", -1L)
+            if (value < 0L || value > MAX_TRANSFER_OFFSET) {
+                return Invalid(callId, "offset must be 0..$MAX_TRANSFER_OFFSET")
+            }
+            offset = value
         }
 
         return Valid(
@@ -163,6 +231,9 @@ object BridgeRequest {
             sessionId = sessionId,
             offset = offset,
             baudRate = baudRate,
+            suggestedName = suggestedName,
+            mimeType = mimeType,
+            location = location,
         )
     }
 

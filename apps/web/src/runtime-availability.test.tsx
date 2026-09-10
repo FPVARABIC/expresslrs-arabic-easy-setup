@@ -1,8 +1,18 @@
+import { strToU8, zipSync } from "fflate";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { installDurableStorageStub } from "./test/durable-storage";
 import path from "node:path";
 
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { CrsfAddress, type CrsfParameter } from "./hardware/crsf";
 import type {
@@ -211,7 +221,10 @@ const preparedPackage: PreparedFirmwarePackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: new Uint8Array([4, 5, 6]),
+  recoveryArchive: zipSync({
+    "manifest.json": strToU8('{"schemaVersion":1}'),
+    "segments/firmware.bin": new Uint8Array([4, 5, 6]),
+  }),
   createdAt: "2026-09-09T00:00:00.000Z",
 };
 
@@ -327,6 +340,25 @@ async function settle(turns = 6): Promise<void> {
   });
 }
 
+/**
+ * Waits for text that only appears once an event-loop-bound promise settles.
+ *
+ * `settle` drains microtasks, which is enough for everything else here. The
+ * durable-recovery export ends in a SHA-256 over the reopened file, and Web
+ * Crypto resolves off the event loop rather than on the microtask queue, so it
+ * needs real turns.
+ */
+async function settleUntil(pattern: RegExp): Promise<void> {
+  for (let turn = 0; turn < 60; turn += 1) {
+    if (screen.queryByText(pattern) !== null) return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+  // Asserted rather than returned, so a failure names the text that is missing.
+  expect(screen.getByText(pattern)).toBeInTheDocument();
+}
+
 function mountAdvanced(): void {
   render(
     <ProductShell
@@ -382,7 +414,10 @@ async function identify(): Promise<void> {
 }
 
 describe("runtime availability, from the production entry point", () => {
+  let durableStorage: ReturnType<typeof installDurableStorageStub>;
+
   beforeEach(() => {
+    durableStorage = installDurableStorageStub();
     vi.clearAllMocks();
     mocks.loadCatalog.mockResolvedValue(catalog);
     mocks.loadCheckpoint.mockResolvedValue(null);
@@ -392,6 +427,10 @@ describe("runtime availability, from the production entry point", () => {
     mocks.preparePackage.mockResolvedValue(preparedPackage);
     mocks.downloadPreparedBytes.mockReturnValue(undefined);
     mocks.flashEspFirmware.mockResolvedValue({ status: "WRITE_VERIFIED" });
+  });
+
+  afterEach(() => {
+    durableStorage.restore();
   });
 
   it("connect: becomes available with no device present at all", async () => {
@@ -696,16 +735,15 @@ describe("runtime availability, from the production entry point", () => {
     const blockersShown = screen.getByText("Flashing is waiting on:");
     expect(blockersShown).toBeInTheDocument();
 
+    // A copy written outside the application, reopened and hashed. A started
+    // download and a ticked box no longer satisfy this, and that is the point:
+    // neither was evidence that a file exists.
     fireEvent.click(
-      screen.getByRole("button", { name: "Download the recovery package" }),
-    );
-    await settle(2);
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /I confirm the recovery package file is saved/u,
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
       }),
     );
-    await settle(2);
+    await settleUntil(/Verified copy/u);
     fireEvent.click(
       screen.getByRole("checkbox", {
         name: "Power stays stable throughout the flash",
@@ -916,18 +954,15 @@ describe("runtime availability, from the production entry point", () => {
       }),
     );
     await settle(12);
+    // Downloading is not the same as having kept it, and the operator's word
+    // for it was never evidence either. The package is written where it will
+    // survive this application being removed, then reopened and hashed.
     fireEvent.click(
-      screen.getByRole("button", { name: "Download the recovery package" }),
-    );
-    await settle(6);
-    // Downloading is not the same as having kept it. The operator confirms the
-    // file is somewhere they can reach without this application.
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /I checked the recovery package is saved/u,
+      screen.getByRole("button", {
+        name: "Save the recovery package where it will survive",
       }),
     );
-    await settle(4);
+    await settleUntil(/Saved and verified/u);
     fireEvent.click(
       screen.getByRole("checkbox", {
         name: /Power is stable and will not be interrupted/u,
@@ -1068,5 +1103,89 @@ describe("runtime availability, from the production entry point", () => {
       onFailure:
         "a host that could not install its bridge reports the exact reason rather than an empty device list",
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // The durable-recovery gate: what it blocks, what it must not block, and
+  // that it survives the application being reinstalled.
+  //
+  // These record no matrix rows. They are about the *reasons* a row can be
+  // refused, which the matrix lists as inputs but cannot demonstrate.
+  // ---------------------------------------------------------------------
+
+  it("a dismissed save blocks the firmware write only, and says why", async () => {
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ dismissSave: true });
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Saving the recovery package was cancelled/u);
+
+    // The one destructive operation is refused, and the refusal names this
+    // condition rather than a generic lock.
+    expect(
+      screen.getByRole("button", { name: "Start the real flash" }),
+    ).toBeDisabled();
+    // Stated beside every operation it blocks, which is more than one.
+    expect(
+      screen.getAllByText(
+        /Save the recovery package to durable storage and let/u,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    // Nothing else is refused: this is not a global lock. Diagnostics is the
+    // operation an operator reaches for precisely when storage has just failed,
+    // so it staying available is the property that matters here.
+    expect(
+      screen.getByRole("button", { name: "Show the report" }),
+    ).toBeEnabled();
+    // And the reason is attached to the flashing gate rather than announced as
+    // a state of the application: the panel that names it is the flashing one.
+    expect(screen.getByText("Flashing is waiting on:")).toBeInTheDocument();
+  });
+
+  it("refuses the write when storage hands back different bytes than it was given", async () => {
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ corruptOnRead: true });
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    // The write reported success. The read-back is what caught it, which is the
+    // entire reason the read-back exists.
+    await settleUntil(/does not match the bytes that were written/u);
+    expect(
+      screen.getByRole("button", { name: "Start the real flash" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(/No verified durable copy yet/u),
+    ).toBeInTheDocument();
   });
 });

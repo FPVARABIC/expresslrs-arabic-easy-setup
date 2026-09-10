@@ -34,6 +34,12 @@ class BridgeCore(
     private val backend: UsbBackend,
     private val allowedOrigin: String,
     private val executor: ExecutorService = Executors.newSingleThreadExecutor(),
+    /**
+     * Storage outside the application, for the durable recovery copy. Defaults
+     * to a store that refuses by name, so a host that cannot reach any tells
+     * the page exactly that instead of appearing to have no recovery at all.
+     */
+    private val documents: DocumentStore = UnavailableDocumentStore,
 ) {
 
     /** Machine-readable refusals. The web layer maps these to operator text. */
@@ -114,7 +120,7 @@ class BridgeCore(
         // Write authority does not survive the host leaving the screen. The
         // session is already gone by then; this refuses the request by the
         // reason the operator needs to see rather than by a stale-session error.
-        if (!visible && request.operation in AUTHORITY_OPERATIONS) {
+        if (!visible && request.operation in VISIBLE_ONLY_OPERATIONS) {
             finish(call, BridgeRequest.error(request.callId, Reason.HOST_NOT_VISIBLE, "the application is not on screen"))
             return
         }
@@ -164,8 +170,83 @@ class BridgeCore(
             "write" -> transfer(request, call, ::write)
             "read" -> transfer(request, call, ::read)
             "close" -> closePort(request, call)
+            // Document operations run on the same worker thread as USB
+            // transfers, which is what keeps a chunked document write in order
+            // for the same reason a chunked firmware write stays in order.
+            "documentCreate" -> document(request, call) {
+                documents.create(request.suggestedName.orEmpty(), request.mimeType.orEmpty())
+            }
+            "documentWrite" -> document(request, call) {
+                documents.write(
+                    request.location.orEmpty(),
+                    request.payload ?: ByteArray(0),
+                    request.offset ?: 0L,
+                )
+            }
+            "documentCommit" -> document(request, call) {
+                documents.commit(request.location.orEmpty())
+            }
+            "documentRead" -> document(request, call) {
+                documents.read(request.location.orEmpty(), request.offset ?: 0L, request.maxBytes)
+            }
+            "documentPick" -> document(request, call) {
+                documents.pick(request.mimeType.orEmpty())
+            }
             else -> finish(call, BridgeRequest.error(request.callId, Reason.INVALID_REQUEST, "unhandled operation"))
         }
+    }
+
+    /**
+     * Runs one document operation and turns its outcome into a reply.
+     *
+     * Refusals keep the store's own reason name rather than being flattened
+     * into a generic failure: the page shows the operator different text for a
+     * dismissed picker, a full disk and a file it could not reopen, and it
+     * decides which by that name.
+     */
+    private fun document(
+        request: BridgeRequest.Valid,
+        call: PendingCall,
+        operation: () -> DocumentStore.Outcome,
+    ) {
+        val outcome = runCatching { operation() }.getOrElse { error ->
+            DocumentStore.Refused(
+                DocumentStore.Reason.WRITE_FAILED,
+                error.message ?: "the document operation failed",
+            )
+        }
+        val reply = when (outcome) {
+            is DocumentStore.Created -> BridgeRequest.ok(
+                request.callId,
+                JSONObject()
+                    .put("location", outcome.location)
+                    .put("displayName", outcome.displayName),
+            )
+            is DocumentStore.Progress -> BridgeRequest.ok(
+                request.callId,
+                JSONObject().put("offset", outcome.offset),
+            )
+            is DocumentStore.Committed -> BridgeRequest.ok(
+                request.callId,
+                JSONObject()
+                    .put("location", outcome.location)
+                    .put("displayName", outcome.displayName)
+                    .put("byteLength", outcome.byteLength),
+            )
+            is DocumentStore.Chunk -> BridgeRequest.ok(
+                request.callId,
+                JSONObject()
+                    .put("bytes", BridgeRequest.bytesToJson(outcome.bytes))
+                    .put("length", outcome.bytes.size)
+                    .put("eof", outcome.eof),
+            )
+            is DocumentStore.Refused -> BridgeRequest.error(
+                request.callId,
+                outcome.reason,
+                outcome.message,
+            )
+        }
+        finish(call, reply)
     }
 
     private fun describeDevices(): JSONArray {
@@ -332,6 +413,10 @@ class BridgeCore(
     fun onHostBackgrounded() {
         visible = false
         session?.let(::releaseSession)
+        // A half-written recovery archive at the place the operator will later
+        // look for their only copy of a firmware image is worse than no file at
+        // all, so it is abandoned rather than left looking complete.
+        documents.abandon()
         rejectPending(Reason.HOST_NOT_VISIBLE, "the application left the screen")
     }
 
@@ -357,6 +442,7 @@ class BridgeCore(
         closed = true
         visible = false
         session?.let(::releaseSession)
+        documents.abandon()
         rejectPending(Reason.BRIDGE_CLOSED, "the host was destroyed")
         executor.shutdownNow()
     }
@@ -410,5 +496,17 @@ class BridgeCore(
          * the ones a backgrounded host may not perform.
          */
         val AUTHORITY_OPERATIONS = setOf("open", "write", "read")
+
+        /**
+         * Everything that may only run while the host is on screen.
+         *
+         * The USB operations because write authority does not follow a
+         * backgrounded WebView, and the document operations because a picker
+         * needs a visible Activity and a background write would be finishing a
+         * file whose stream has already been abandoned.
+         */
+        val VISIBLE_ONLY_OPERATIONS = AUTHORITY_OPERATIONS + setOf(
+            "documentCreate", "documentWrite", "documentCommit", "documentPick",
+        )
     }
 }

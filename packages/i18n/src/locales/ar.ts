@@ -210,6 +210,9 @@ export const ar = {
   "easy.fw.prepared":
     "جُهّز {segments} قطاعًا مع SHA-256 لكل قطاع. نزّل حزمة الاستعادة قبل أي كتابة.",
   "easy.fw.downloadRecovery": "نزّل حزمة الاستعادة",
+  "easy.fw.exportDurableRecovery": "احفظ حزمة الاستعادة في مكان يبقى",
+  "easy.fw.importDurableRecovery": "لديّ حزمة استعادة محفوظة بالفعل",
+  "easy.fw.durableRecoveryVerified": "محفوظة ومتحقَّق منها: {location}",
   "easy.fw.recoverySaved": "تحققت من حفظ حزمة الاستعادة على جهازي",
   "easy.fw.power": "الطاقة ثابتة ولن تنقطع أثناء الكتابة",
   "easy.fw.antenna": "هوائي جهاز الإرسال مركّب",

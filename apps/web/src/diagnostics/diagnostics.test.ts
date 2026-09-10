@@ -63,6 +63,9 @@ function snapshot(
       packageSegmentHashes: ["b".repeat(64)],
       bindingPhraseConfigured: true,
       recoveryPackageDownloaded: true,
+      durableRecoveryVerified: true,
+      durableRecoveryBackend: "ANDROID_SAF",
+      durableRecoverySha256: "b".repeat(64),
     },
     recovery: {
       journalState: "ready",

@@ -89,6 +89,9 @@ export function EasySetup({
     connectHardware,
     disconnectHardware,
     downloadRecovery,
+    exportDurableRecoveryPackage,
+    importDurableRecoveryPackage,
+    durableRecovery,
     exactHardwareTarget,
     flashPreparedFirmware,
     flashProgress,
@@ -664,6 +667,27 @@ export function EasySetup({
                             {t("easy.fw.bindPhraseConfigured")}
                           </p>
                         ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void exportDurableRecoveryPackage()}
+                          disabled={busy}
+                        >
+                          {t("easy.fw.exportDurableRecovery")}
+                        </button>
+                        {durableRecovery !== null ? (
+                          <p className="easy-note">
+                            {t("easy.fw.durableRecoveryVerified", {
+                              location: durableRecovery.displayName,
+                            })}
+                          </p>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void importDurableRecoveryPackage()}
+                          disabled={busy}
+                        >
+                          {t("easy.fw.importDurableRecovery")}
+                        </button>
                         <button
                           type="button"
                           onClick={() => downloadRecovery()}

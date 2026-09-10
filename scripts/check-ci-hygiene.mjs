@@ -249,6 +249,41 @@ if (!existsSync(androidWorkflowPath)) {
   }
 }
 
+// The durable-recovery invariants. Each of these was a real gap: a recovery
+// copy that only lived inside the application, a file input that silently did
+// nothing on this host, and a half-written archive left behind looking whole.
+const durableRules = [
+  [
+    "apps/web/src/hardware/useDeviceController.ts",
+    /durableRecoveryVerified,\s*$/mu,
+    "the firmware write is not gated on a verified durable recovery copy",
+  ],
+  [
+    "apps/web/src/hardware/durable-recovery.ts",
+    /exportDurableRecovery/u,
+    "the durable recovery export is missing",
+  ],
+  [
+    `${"android/app/src/main/java/com/fpvarabic/elrs/bridge"}/MainActivity.kt`,
+    // The signature and the assignment, not just the name: a substring match
+    // would pass a method renamed to something inert.
+    /webChromeClient\s*=[\s\S]*override fun onShowFileChooser\(/u,
+    "the host registers no file chooser, so every file input in the application would silently do nothing",
+  ],
+  [
+    `${"android/app/src/main/java/com/fpvarabic/elrs/bridge"}/BridgeCore.kt`,
+    /documents\.abandon\(\)/u,
+    "a backgrounded or destroyed host does not abandon a half-written document",
+  ],
+];
+for (const [path, pattern, complaint] of durableRules) {
+  if (!existsSync(path)) {
+    fail(`${path} is missing`);
+    continue;
+  }
+  if (!pattern.test(readFileSync(path, "utf8"))) fail(`${path}: ${complaint}`);
+}
+
 const androidSourceRoot = "android/app/src/main/java/com/fpvarabic/elrs/bridge";
 const hostActivityPath = `${androidSourceRoot}/MainActivity.kt`;
 if (!existsSync(hostActivityPath)) {

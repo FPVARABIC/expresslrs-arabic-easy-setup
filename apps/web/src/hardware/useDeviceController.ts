@@ -24,6 +24,13 @@ import {
 } from "./binding-evidence";
 import { verifyObservedFirmwareBuild } from "./build-verification";
 import { copyToArrayBuffer } from "./byte-utils";
+import {
+  DurableRecoveryError,
+  exportDurableRecovery,
+  importDurableRecovery,
+  type DurableRecoveryReceipt,
+} from "./durable-recovery";
+import { readDurableDocumentStore } from "./durable-recovery-stores";
 import type { CrsfFrame, CrsfParameter } from "./crsf";
 import { flashEspFirmware } from "./esp-flasher";
 import {
@@ -104,6 +111,7 @@ export interface RxAsTxModeSupport {
   readonly support: RxAsTxSupport;
 }
 import {
+  attachRecoveryProvenance,
   clearRecoveryCheckpoint,
   loadRecoveryCheckpoint,
   saveRecoveryCheckpoint,
@@ -482,6 +490,28 @@ export function useDeviceController({
   );
   const [recoveryDownloadStarted, setRecoveryDownloadStarted] = useState(false);
   const [recoveryDownloaded, setRecoveryDownloaded] = useState(false);
+  /**
+   * Proof that a copy of the recovery package exists outside this application
+   * and has been read back and hashed. This, not the download attestation, is
+   * what a destructive write is gated on.
+   */
+  const [durableRecovery, setDurableRecovery] =
+    useState<DurableRecoveryReceipt | null>(null);
+  /**
+   * The exact prepared package that receipt covers. Compared by reference, so
+   * re-preparing with different options cannot leave a receipt that describes
+   * bytes nobody is about to write.
+   */
+  const [durableRecoveryFor, setDurableRecoveryFor] =
+    useState<PreparedFirmwarePackage | null>(null);
+  /**
+   * A recovery package the operator imported from durable storage. This is the
+   * path that works on a fresh installation: it carries its own verified bytes,
+   * so recovery does not depend on an application journal that an uninstall
+   * erased.
+   */
+  const [importedRecovery, setImportedRecovery] =
+    useState<ValidatedRecoveryPackage | null>(null);
   const [manualTargetConfirmation, setManualTargetConfirmation] = useState("");
   const [powerAcknowledged, setPowerAcknowledged] = useState(false);
   const [antennaAcknowledged, setAntennaAcknowledged] = useState(false);
@@ -638,7 +668,8 @@ export function useDeviceController({
     (firmwareWriteMethod ? deviceWritesReady : recoveryPathKnown) &&
     prepared !== null &&
     selectedTarget !== null &&
-    recoveryDownloaded &&
+    durableRecovery !== null &&
+    durableRecoveryFor === prepared &&
     powerAcknowledged &&
     (selectedTarget.role !== "tx" || antennaAcknowledged) &&
     (!operationNeedsTargetConfirmation || manualTargetConfirmed) &&
@@ -691,6 +722,22 @@ export function useDeviceController({
    * packaging reads exact layout bytes from the pack and never from the live
    * mirror, and the reason says precisely that rather than blaming the build.
    */
+  /**
+   * Whether a verified copy of *this* package exists outside the application.
+   *
+   * A started download and an operator's tick both used to satisfy this. Neither
+   * is evidence: the page cannot reopen what it downloaded, so it cannot know
+   * the file is there — and the copy that mattered was the one inside the app,
+   * which an uninstall erases at exactly the moment it is needed. What satisfies
+   * it now is a file written to storage the operator owns, reopened, and hashed
+   * back to the bytes that were written.
+   */
+  const durableRecoveryVerified = [
+    durableRecovery !== null && durableRecoveryFor === prepared,
+    durableRecovery !== null
+      ? message("wb.need.durableRecoveryStale")
+      : message("wb.need.durableRecovery"),
+  ] as const;
   const packCoversTarget = [
     selectedTarget === null ||
       targetPackCovers(
@@ -753,7 +800,7 @@ export function useDeviceController({
         journalReady,
         noPendingCheckpoint,
         [prepared !== null, message("wb.need.preparedPackage")] as const,
-        [recoveryDownloaded, message("wb.need.recoveryDownload")] as const,
+        durableRecoveryVerified,
         [powerAcknowledged, message("wb.need.powerAcknowledgement")] as const,
         [
           selectedTarget === null ||
@@ -783,7 +830,9 @@ export function useDeviceController({
         portClean,
         journalReady,
         [
-          checkpoint !== null || recoveryDownloaded,
+          checkpoint !== null ||
+            importedRecovery !== null ||
+            durableRecovery !== null,
           message("wb.need.recoveryPackage"),
         ] as const,
         [powerAcknowledged, message("wb.need.powerAcknowledgement")] as const,
@@ -791,6 +840,7 @@ export function useDeviceController({
       rxAsTx: readinessFrom([
         targetChosen,
         packCoversTarget,
+        durableRecoveryVerified,
         [
           rxAsTxSupport.supported,
           rxAsTxSupport.supported
@@ -827,6 +877,10 @@ export function useDeviceController({
     setPrepared(null);
     setRecoveryDownloadStarted(false);
     setRecoveryDownloaded(false);
+    // A receipt for a package that no longer exists would be a claim about
+    // bytes nobody is going to write.
+    setDurableRecovery(null);
+    setDurableRecoveryFor(null);
     setPowerAcknowledged(false);
     setAntennaAcknowledged(false);
     setFlashProgress(null);
@@ -1036,7 +1090,8 @@ export function useDeviceController({
             targetMatchesDevice: selectedTarget !== null,
             bandMatchesDevice: selectedTarget !== null,
             artifactVerified: prepared !== null,
-            recoveryAvailable: recoveryDownloaded,
+            recoveryAvailable:
+              durableRecovery !== null && durableRecoveryFor === prepared,
             benchAcknowledged:
               powerAcknowledged &&
               (selectedTarget?.role !== "tx" || antennaAcknowledged),
@@ -1580,6 +1635,125 @@ export function useDeviceController({
     setRecoveryDownloadStarted(true);
     setRecoveryDownloaded(false);
     setStatus(message("wb.fw.recoveryDownloadStarted"));
+  }
+
+  /**
+   * Writes the recovery package where it will outlive this installation, then
+   * reopens it and hashes it.
+   *
+   * The provenance sidecar is added here rather than when the package was
+   * built, because this is the first moment the device identity and the time of
+   * saving are known. A failure sets the reason and leaves every other
+   * operation alone — reading identity, diagnostics and reversible settings are
+   * exactly what an operator needs while sorting out storage.
+   */
+  async function exportDurableRecoveryPackage(): Promise<void> {
+    if (prepared === null || selectedTarget === null) return;
+    setStatus(message("wb.durable.exporting"));
+    const provenance = {
+      schemaVersion: 1 as const,
+      createdAt: new Date().toISOString(),
+      device: {
+        productName: identity?.productName ?? null,
+        role: identity?.role ?? null,
+        firmwareVersion: identity?.firmwareVersion ?? null,
+      },
+      layoutPack: {
+        packVersion: targetPackManifest.packVersion,
+        targetsSha: targetPackManifest.targetsRepository.sha,
+        targetsJsonSha256: targetPackManifest.targetsJsonSha256,
+      },
+      configuration: {
+        targetId: selectedTarget.id,
+        release: prepared.release.label,
+        region: prepared.optionsSummary.region,
+        domain: prepared.optionsSummary.domain,
+        bindingConfigured: prepared.optionsSummary.bindingConfigured,
+        wifiConfigured: prepared.optionsSummary.wifiConfigured,
+        rxAsTxMode: prepared.optionsSummary.rxAsTxMode ?? "off",
+        airportEnabled: prepared.optionsSummary.airportEnabled,
+      },
+    };
+    try {
+      const receipt = await exportDurableRecovery({
+        store: readDurableDocumentStore(),
+        suggestedName: prepared.recoveryFileName,
+        bytes: attachRecoveryProvenance(prepared.recoveryArchive, provenance),
+      });
+      setDurableRecovery(receipt);
+      setDurableRecoveryFor(prepared);
+      setStatus(
+        message("wb.durable.verified", {
+          location: receipt.displayName,
+          digest: receipt.sha256,
+        }),
+      );
+    } catch (error) {
+      setDurableRecovery(null);
+      setDurableRecoveryFor(null);
+      setStatus(
+        message(
+          error instanceof DurableRecoveryError
+            ? (`wb.durable.${error.code}` as MessageKey)
+            : "wb.durable.WRITE_FAILED",
+        ),
+      );
+    }
+  }
+
+  /**
+   * Opens a recovery package the operator saved earlier and makes it usable.
+   *
+   * Nothing here reads application state, which is the point: it works on a
+   * fresh installation with an empty journal. The package is validated exactly
+   * as a same-session one is, and the checkpoint it writes records the digest of
+   * the bytes that were just verified — so the recovery path's existing "the
+   * file must match the checkpoint" rule holds without being relaxed.
+   */
+  async function importDurableRecoveryPackage(): Promise<void> {
+    if (selectedTarget === null) {
+      setStatus(message("wb.recovery.needTarget"));
+      return;
+    }
+    setStatus(message("wb.durable.importing"));
+    try {
+      const imported = await importDurableRecovery({
+        store: readDurableDocumentStore(),
+        expectedTarget: selectedTarget,
+      });
+      const now = new Date().toISOString();
+      const restored: RecoveryCheckpoint = {
+        schemaVersion: 1,
+        targetId: imported.recoveryPackage.targetId,
+        productName: imported.recoveryPackage.productName,
+        packageSha256: imported.recoveryPackage.packageSha256,
+        stage: "RECOVERY_REQUIRED",
+        createdAt: imported.recoveryPackage.provenance?.createdAt ?? now,
+        updatedAt: now,
+        safeError: null,
+      };
+      // Best effort: a journal that cannot be written must not stop a recovery
+      // that has the verified bytes in hand. The imported package is the
+      // evidence, and it is held in state either way.
+      await saveRecoveryCheckpoint(restored).catch(() => {});
+      setCheckpoint(restored);
+      setImportedRecovery(imported.recoveryPackage);
+      setDurableRecovery(imported.receipt);
+      setStatus(
+        message("wb.durable.imported", {
+          location: imported.receipt.displayName,
+        }),
+      );
+    } catch (error) {
+      setImportedRecovery(null);
+      setStatus(
+        message(
+          error instanceof DurableRecoveryError
+            ? (`wb.durable.${error.code}` as MessageKey)
+            : "wb.durable.PACKAGE_INVALID",
+        ),
+      );
+    }
   }
 
   async function downloadLuaScript(): Promise<void> {
@@ -2159,7 +2333,19 @@ export function useDeviceController({
     }
   }
 
-  async function recoverFromFile(file: File): Promise<DeviceOperationResult> {
+  /**
+   * Restores a device from a package the operator selects, or from one already
+   * imported and verified from durable storage.
+   *
+   * Only the *source* of the validated package differs between the two; every
+   * guard, every write step and every post-write verification below is the same
+   * code, so an imported package gets no weaker treatment than a picked file.
+   * That matters on the packaged Android host, where a file input cannot be the
+   * only way in.
+   */
+  async function recoverFromValidatedPackage(
+    load: () => Promise<ValidatedRecoveryPackage>,
+  ): Promise<DeviceOperationResult> {
     const authorized = authorizeDeviceOperation("RECOVERY");
     if (!authorized) {
       return refused(lastRefusalRef.current ?? deviceWriteLockMessage());
@@ -2200,11 +2386,7 @@ export function useDeviceController({
     setStatus(message("wb.recovery.validating"));
     let writeFinished = false;
     try {
-      const bytes = await boundedFileBytes(file, 64 * 1024 * 1024);
-      const validated = await validateRecoveryPackage({
-        bytes,
-        expectedTarget: selectedTarget,
-      });
+      const validated = await load();
       if (trustedCheckpoint.packageSha256 !== validated.packageSha256) {
         throw new ControllerError(message("wb.recovery.packageMismatch"));
       }
@@ -2349,6 +2531,35 @@ export function useDeviceController({
     }
   }
 
+  /** The operator picks a file. Unchanged behaviour, unchanged checks. */
+  async function recoverFromFile(file: File): Promise<DeviceOperationResult> {
+    return recoverFromValidatedPackage(async () => {
+      const bytes = await boundedFileBytes(file, 64 * 1024 * 1024);
+      if (selectedTarget === null) {
+        throw new ControllerError(message("wb.recovery.needTarget"));
+      }
+      return validateRecoveryPackage({
+        bytes,
+        expectedTarget: selectedTarget,
+      });
+    });
+  }
+
+  /**
+   * Restores from the package imported from durable storage.
+   *
+   * This is the path that survives a reinstall, and on the packaged host it is
+   * the only path that exists at all: the WebView's file chooser is served by
+   * the same document bridge, and the imported package is already verified.
+   */
+  async function recoverFromImportedPackage(): Promise<DeviceOperationResult> {
+    const imported = importedRecovery;
+    if (imported === null) {
+      return refused(message("wb.need.durableRecovery"));
+    }
+    return recoverFromValidatedPackage(async () => imported);
+  }
+
   function updateOption<Key extends keyof ExpressLrsFirmwareOptions>(
     key: Key,
     value: ExpressLrsFirmwareOptions[Key],
@@ -2450,6 +2661,10 @@ export function useDeviceController({
         bindingPhraseConfigured:
           prepared?.optionsSummary.bindingConfigured ?? false,
         recoveryPackageDownloaded: recoveryDownloaded,
+        durableRecoveryVerified:
+          durableRecovery !== null && durableRecoveryFor === prepared,
+        durableRecoveryBackend: durableRecovery?.backend ?? null,
+        durableRecoverySha256: durableRecovery?.sha256 ?? null,
       }),
       recovery: Object.freeze({
         journalState: recoveryJournalState,
@@ -2561,6 +2776,12 @@ export function useDeviceController({
     radioKey,
     radios,
     recoverFromFile,
+    recoverFromImportedPackage,
+    exportDurableRecoveryPackage,
+    importDurableRecoveryPackage,
+    durableRecovery,
+    durableRecoveryAvailable: readDurableDocumentStore() !== null,
+    importedRecovery,
     recoveryDownloadStarted,
     recoveryDownloaded,
     recoveryJournalState,

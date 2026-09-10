@@ -104,11 +104,12 @@ class UsbSerialBridge private constructor(
             allowedOrigin: String,
             backend: UsbBackend? = null,
             identity: JSONObject = JSONObject(),
+            documents: DocumentStore = UnavailableDocumentStore,
         ): UsbSerialBridge? {
             if (reasonFor(context) != null) return null
 
             val resolved = backend ?: AndroidUsbBackend(context)
-            val core = BridgeCore(resolved, allowedOrigin)
+            val core = BridgeCore(resolved, allowedOrigin, documents = documents)
             val bridge = UsbSerialBridge(context, core)
 
             // Replies go through the main looper rather than `webView.post`.

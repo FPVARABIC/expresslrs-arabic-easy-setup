@@ -45,7 +45,9 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | Identify my device | `identify` | Opens one CRSF session through the shared controller and reads the device's identity. Refused with a named reason when the browser exposes no serial transport. | `EMULATOR_VERIFIED` |
 | Prepare the official source | `loadCatalog` | Loads the official ExpressLRS release index and Target catalog over HTTPS. | `EMULATOR_VERIFIED` |
 | Prepare and verify the package | `buildFirmware` | Downloads the official artifacts, applies the options, and verifies every segment by SHA-256. The typed binding phrase is compiled in and then dropped from memory. | `EMULATOR_VERIFIED` |
-| Download the recovery package | `downloadRecovery` | Writes the recovery archive to the operator's machine. The application cannot prove it was saved, so the operator confirms it. | `EMULATOR_VERIFIED` |
+| Download the recovery package | `downloadRecovery` | Writes the recovery archive to the operator's machine as a convenience second copy. The page cannot reopen a download, so this does **not** satisfy the firmware-write prerequisite. | `EMULATOR_VERIFIED` |
+| Save the recovery package where it will survive | `exportDurableRecoveryPackage` | Writes the archive, with its provenance sidecar, to storage the operator owns — Android's Storage Access Framework or the File System Access API — then reopens it and hashes it. Only a matching digest satisfies the firmware-write prerequisite. | `EMULATOR_VERIFIED` |
+| I already have a saved recovery package | `importDurableRecoveryPackage` | Opens a package saved earlier, validates it in full, and reconstitutes the checkpoint from its digest. Reads no application state, so it works on a fresh installation. | `EMULATOR_VERIFIED` |
 | Put the device into bind mode | `runBinding` | Sends the bind command the device declares, watching link telemetry across the attempt, and grades the result. | `EMULATOR_VERIFIED` |
 | The link came up / No link yet | `confirmBindObservation` | Records the operator's observation as `USER_CONFIRMED_LINK` or `COMMAND_ACKNOWLEDGED_ONLY`. Never shown as a verified success. | `EMULATOR_VERIFIED` |
 | Apply the change | `runSettingsWrite` | Writes one declared setting and reports it applied only when the device reads the value back. | `EMULATOR_VERIFIED` |
@@ -68,7 +70,9 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | Run the real binding | `startBinding` | As Easy Mode's binding, on the same controller and the same evidence grading. | `EMULATOR_VERIFIED` |
 | Build the official firmware | `buildFirmware` | As above. | `EMULATOR_VERIFIED` |
 | Download the firmware | `downloadFirmware` | Hands the verified artifact to the operator; writes nothing to a device. | `EMULATOR_VERIFIED` |
-| Download the recovery package | `downloadRecovery` | As above. | `EMULATOR_VERIFIED` |
+| Download the recovery package | `downloadRecovery` | As above: a second copy, not the gate. | `EMULATOR_VERIFIED` |
+| Save the recovery package to durable storage | `exportDurableRecoveryPackage` | As above. | `EMULATOR_VERIFIED` |
+| Import a saved recovery package | `importDurableRecoveryPackage` | As above. | `EMULATOR_VERIFIED` |
 | Download the Lua script | `downloadLuaScript` | Fetches the official Lua script for the selected release and Target. | `EMULATOR_VERIFIED` |
 | Start the real flash | `flashPreparedFirmware` | The authorized firmware write, followed by reconnect and verification. Any failure leaves a recovery checkpoint. | `EMULATOR_VERIFIED` |
 | Flash this receiver with transmitter firmware | `updateOption("rxAsTxMode", …)` | Upstream's `--rx-as-tx`. Selects the transmitter build for a receiver and rewrites its hardware layout for the chosen mode. Every mode stays visible; one the Target cannot take is closed with that Target's own reason. | `BROWSER_VERIFIED` |
