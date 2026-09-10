@@ -1,0 +1,515 @@
+# The trusted post-build signer.
+#
+# This workflow holds the one permanent signing key for the Android host, and
+# everything about its shape follows from a single constraint: **it must never
+# run code that came from a pull request**.
+#
+# The earlier design failed that. It read the signing secrets in a workflow
+# that checked out the candidate commit and ran Gradle, which means the
+# candidate's build scripts, its plugins, its dependency graph and any shell
+# step in it could read the key. That key is what Android accepts as an update
+# to an application holding USB write authority over flight hardware; a leak is
+# not recoverable by rotation, because rotating it makes every already-installed
+# candidate un-updatable.
+#
+# So the candidate build is now somewhere else and produces an *unsigned* APK.
+# This workflow takes that finished artifact and signs it. It never checks out
+# the candidate SHA. It never runs Gradle, npm, pnpm, a repository hook, a
+# candidate script, or any code from inside the APK. The only things that run
+# while the key is materialised are `base64`, `zipalign`, `apksigner`,
+# `sha256sum` and `shred`.
+#
+# The work is split into two jobs on purpose:
+#
+#   verify  — no environment, no secrets, nothing privileged. Establishes that
+#             the artifact is the exact output of a successful run of the
+#             allowlisted CI workflow, on the claimed commit, in this
+#             repository, with the claimed digest and identity.
+#   sign    — the protected environment. Receives an artifact that has already
+#             been verified, and does nothing but align and sign it.
+#
+# That ordering is the point. Every decision about whether an artifact deserves
+# to be signed is made before any secret exists in the runner, and the job that
+# holds the secret has no decisions left to make.
+name: Android physical-test signer
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character commit SHA the candidate was built from
+        required: true
+        type: string
+      source_run_id:
+        description: Run id of the CI workflow that produced the unsigned candidate
+        required: true
+        type: string
+      artifact_name:
+        description: Name of the unsigned-candidate artifact in that run
+        required: true
+        type: string
+      artifact_id:
+        description: Numeric id of that artifact (from the run summary)
+        required: true
+        type: string
+      expected_apk_sha256:
+        description: SHA-256 the CI run recorded for the unsigned APK
+        required: true
+        type: string
+
+# Read-only at the top level. The signing job widens nothing: it needs no
+# repository write, no packages, no id-token.
+permissions:
+  contents: read
+
+concurrency:
+  group: android-physical-test-signer
+  cancel-in-progress: false
+
+env:
+  # The only CI workflow whose artifacts may be signed. Checked against the
+  # run's own recorded workflow path, not against a name a caller supplies.
+  ALLOWED_WORKFLOW_PATH: .github/workflows/android.yml
+  EXPECTED_APPLICATION_ID: com.fpvarabic.elrs.bridge
+
+jobs:
+  verify:
+    name: Verify the candidate, with no secrets present
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version-code: ${{ steps.inspect.outputs.version-code }}
+      version-name: ${{ steps.inspect.outputs.version-name }}
+      apk-sha256: ${{ steps.inspect.outputs.apk-sha256 }}
+    steps:
+      # The default branch only. This workflow is the trust anchor, so running
+      # a modified copy of it from another ref would defeat the entire design.
+      # `workflow_dispatch` already restricts dispatch to the default branch;
+      # this asserts it rather than assuming it.
+      - name: Refuse to run from anywhere but the default branch
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::This signer may only run from the default branch" \
+                 "($DEFAULT_BRANCH), not $REF_NAME." >&2
+            exit 1
+          fi
+
+      # The trusted branch, for the recorded certificate fingerprint and the
+      # verification script. Explicitly pinned to this workflow's own commit —
+      # never to the candidate SHA, which is not checked out at any point in
+      # this workflow.
+      - name: Check out the trusted branch only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Reject malformed inputs before anything is fetched
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_APK_SHA256: ${{ inputs.expected_apk_sha256 }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1" >&2; exit 1; }
+          printf '%s' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+            || fail "source_sha must be a full 40-character lowercase SHA"
+          printf '%s' "$EXPECTED_APK_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
+            || fail "expected_apk_sha256 must be a 64-character lowercase SHA-256"
+          printf '%s' "$SOURCE_RUN_ID" | grep -Eq '^[0-9]{1,20}$' \
+            || fail "source_run_id must be numeric"
+          printf '%s' "$ARTIFACT_ID" | grep -Eq '^[0-9]{1,20}$' \
+            || fail "artifact_id must be numeric"
+          printf '%s' "$ARTIFACT_NAME" | grep -Eq '^[A-Za-z0-9._-]{1,200}$' \
+            || fail "artifact_name must be a plain artifact name"
+
+      # Everything about the producing run, checked against the inputs. A
+      # caller who names someone else's run, a failed run, a run on a different
+      # commit, or a run of a different workflow gets a refusal here.
+      - name: Verify the producing run and fetch only that artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          EXPECTED_APK_SHA256: ${{ inputs.expected_apk_sha256 }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          api() {
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+          }
+          mkdir -p "$RUNNER_TEMP/candidate"
+          api "https://api.github.com/repos/$REPOSITORY/actions/runs/$SOURCE_RUN_ID" \
+            > "$RUNNER_TEMP/run.json"
+          api "https://api.github.com/repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID" \
+            > "$RUNNER_TEMP/artifact.json"
+          node scripts/verify-unsigned-candidate.mjs \
+            --run "$RUNNER_TEMP/run.json" \
+            --artifact "$RUNNER_TEMP/artifact.json" \
+            --repository "$REPOSITORY" \
+            --source-sha "$SOURCE_SHA" \
+            --run-id "$SOURCE_RUN_ID" \
+            --artifact-id "$ARTIFACT_ID" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --allowed-workflow-path "$ALLOWED_WORKFLOW_PATH"
+
+          # Downloaded by id, so it is the artifact that was verified above and
+          # not merely one with a matching name.
+          api -L \
+            "https://api.github.com/repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            --output "$RUNNER_TEMP/candidate.zip"
+          unzip -o -d "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/candidate.zip"
+          ls -l "$RUNNER_TEMP/candidate"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android build tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: build-tools;35.0.0 platform-tools
+
+      # The digest, the identity, and the absence of a signature. The manifest
+      # CI wrote is cross-checked against the APK itself here, so a manifest
+      # that describes a different artifact than the one delivered is caught.
+      - name: Verify the artifact's digest, identity, and that it is unsigned
+        id: inspect
+        env:
+          EXPECTED_APK_SHA256: ${{ inputs.expected_apk_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1" >&2; exit 1; }
+          apk="$RUNNER_TEMP/candidate/app-physicalTest.apk"
+          manifest="$RUNNER_TEMP/candidate/app-physicalTest-unsigned.provenance.json"
+          test -f "$apk" || fail "the artifact contains no app-physicalTest.apk"
+          test -f "$manifest" || fail "the artifact contains no provenance manifest"
+
+          actual="$(sha256sum "$apk" | cut -d' ' -f1)"
+          [ "$actual" = "$EXPECTED_APK_SHA256" ] \
+            || fail "unsigned APK digest is $actual, not the $EXPECTED_APK_SHA256 that was expected"
+
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+          badging="$("$aapt2" dump badging "$apk")"
+          read_badge() { printf '%s' "$badging" | sed -n "$1" | head -1; }
+          package_id="$(read_badge "s/^package: name='\([^']*\)'.*/\1/p")"
+          version_code="$(read_badge "s/^package:.*versionCode='\([^']*\)'.*/\1/p")"
+          version_name="$(read_badge "s/^package:.*versionName='\([^']*\)'.*/\1/p")"
+
+          [ "$package_id" = "$EXPECTED_APPLICATION_ID" ] \
+            || fail "APK application id is $package_id, not $EXPECTED_APPLICATION_ID"
+
+          # An already-signed input would mean the candidate build had access to
+          # a key, which is the thing this whole arrangement exists to prevent.
+          if "$apksigner" verify "$apk" >/dev/null 2>&1; then
+            fail "the candidate is already signed; a signature on the input means a key was readable by candidate code"
+          fi
+
+          node scripts/verify-unsigned-candidate.mjs \
+            --manifest "$manifest" \
+            --source-sha "$SOURCE_SHA" \
+            --run-id "$SOURCE_RUN_ID" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --apk-sha256 "$actual" \
+            --application-id "$package_id" \
+            --version-code "$version_code" \
+            --version-name "$version_name"
+
+          {
+            echo "version-code=$version_code"
+            echo "version-name=$version_name"
+            echo "apk-sha256=$actual"
+          } >> "$GITHUB_OUTPUT"
+          cp "$apk" "$RUNNER_TEMP/verified-unsigned.apk"
+          cp "$manifest" "$RUNNER_TEMP/verified-unsigned.provenance.json"
+
+      # Handed to the signing job as a verified input. Re-digested there, so
+      # this hop cannot substitute anything.
+      - name: Pass the verified candidate to the signing job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-unsigned-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/verified-unsigned.apk
+            ${{ runner.temp }}/verified-unsigned.provenance.json
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign the verified candidate
+    needs: verify
+    runs-on: ubuntu-latest
+    # The protected environment. Its required reviewer is what makes every
+    # candidate build need an explicit human approval, and its deployment
+    # branch rule is what stops this from being dispatchable from anywhere but
+    # the default branch. Settings are documented in docs/ANDROID_SIGNING.md;
+    # the four secrets are *environment* secrets, not repository-wide ones, so
+    # no other workflow or job can read them even by accident.
+    environment: physical-test-signing
+    # Read-only, and `actions: read` only so the step below can fetch this
+    # run's own verified artifact. No write scope anywhere.
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      # Both toolchain steps run before the keystore exists. Neither references
+      # a secret, so nothing they execute can read one.
+      - name: Check out the trusted branch only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android build tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: build-tools;35.0.0
+
+      # Fetched with curl rather than `actions/download-artifact`, for two
+      # reasons. It is one fewer third-party action executing in the job that
+      # holds the signing key, and it is the same mechanism the verify job
+      # already uses, so there is one way artifacts enter this workflow rather
+      # than two.
+      - name: Collect the verified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ARTIFACT: verified-unsigned-${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          api() {
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+          }
+          mkdir -p "$RUNNER_TEMP/verified"
+          # This run's own artifacts, so the id cannot name someone else's.
+          id="$(
+            api "https://api.github.com/repos/$REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" \
+              | node -e '
+                  const chunks = [];
+                  process.stdin.on("data", (c) => chunks.push(c));
+                  process.stdin.on("end", () => {
+                    const wanted = process.argv[1];
+                    const found = JSON.parse(chunks.join(""))
+                      .artifacts.filter((a) => a.name === wanted && !a.expired);
+                    if (found.length !== 1) {
+                      console.error(`expected exactly one ${wanted}, found ${found.length}`);
+                      process.exit(1);
+                    }
+                    process.stdout.write(String(found[0].id));
+                  });
+                ' "$ARTIFACT"
+          )"
+          api -L \
+            "https://api.github.com/repos/$REPOSITORY/actions/artifacts/$id/zip" \
+            --output "$RUNNER_TEMP/verified.zip"
+          unzip -o -d "$RUNNER_TEMP/verified" "$RUNNER_TEMP/verified.zip"
+
+      # Re-checked here rather than trusted from the previous job: the artifact
+      # hop is the one place between verification and signing where the bytes
+      # could differ, so the digest is confirmed again immediately before a key
+      # touches them.
+      - name: Re-confirm the digest immediately before signing
+        env:
+          EXPECTED_APK_SHA256: ${{ needs.verify.outputs.apk-sha256 }}
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/verified/verified-unsigned.apk"
+          actual="$(sha256sum "$apk" | cut -d' ' -f1)"
+          if [ "$actual" != "$EXPECTED_APK_SHA256" ]; then
+            echo "::error::the verified artifact changed between jobs" \
+                 "($actual vs $EXPECTED_APK_SHA256)" >&2
+            exit 1
+          fi
+
+      # From here the key exists. Nothing below runs anything but base64,
+      # zipalign, apksigner, sha256sum and shred.
+      - name: Materialise the signing keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ELRS_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ELRS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ELRS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ELRS_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${KEYSTORE_BASE64:-}" ] || missing="$missing ELRS_KEYSTORE_BASE64"
+          [ -n "${KEYSTORE_PASSWORD:-}" ] || missing="$missing ELRS_KEYSTORE_PASSWORD"
+          [ -n "${KEY_ALIAS:-}" ] || missing="$missing ELRS_KEY_ALIAS"
+          [ -n "${KEY_PASSWORD:-}" ] || missing="$missing ELRS_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing signing secrets:$missing. This workflow" \
+                 "fails closed and will not fall back to any other key." \
+                 "Add them as *environment* secrets on physical-test-signing;" \
+                 "see docs/ANDROID_SIGNING.md." >&2
+            exit 1
+          fi
+          # Masked so that no later echo, trace or tool output can print them.
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "::add-mask::$KEY_PASSWORD"
+          echo "::add-mask::$KEY_ALIAS"
+
+          # Outside the workspace, so no artifact upload path can reach it.
+          store="$RUNNER_TEMP/physical-test.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$store"
+          chmod 600 "$store"
+          test -s "$store" || {
+            echo "::error::ELRS_KEYSTORE_BASE64 did not decode to a file." >&2
+            exit 1
+          }
+          echo "path=$store" >> "$GITHUB_OUTPUT"
+
+      - name: Align and sign
+        id: signed
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ELRS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ELRS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ELRS_KEY_PASSWORD }}
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+        run: |
+          set -euo pipefail
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          zipalign="$ANDROID_HOME/build-tools/$build_tools/zipalign"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+          unsigned="$RUNNER_TEMP/verified/verified-unsigned.apk"
+          aligned="$RUNNER_TEMP/app-physicalTest-aligned.apk"
+          signed="app-physicalTest-signed.apk"
+
+          # zipalign before signing: doing it afterwards invalidates v2.
+          "$zipalign" -p -f 4 "$unsigned" "$aligned"
+          "$zipalign" -c -v 4 "$aligned" > /dev/null
+
+          # Passwords by file descriptor rather than on the command line, so
+          # they never appear in a process listing.
+          "$apksigner" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-pass "env:KEYSTORE_PASSWORD" \
+            --key-pass "env:KEY_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --out "$signed" \
+            "$aligned"
+          echo "path=$signed" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the signature and the certificate fingerprint
+        id: verified
+        env:
+          SIGNED: ${{ steps.signed.outputs.path }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1" >&2; exit 1; }
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+
+          "$apksigner" verify --verbose --print-certs "$SIGNED" \
+            | tee "$SIGNED.apksigner.txt"
+
+          observed="$(
+            "$apksigner" verify --print-certs "$SIGNED" 2>&1 \
+              | grep -io 'SHA-256 digest: *[0-9a-f]\{64\}' \
+              | grep -io '[0-9a-f]\{64\}' | head -1
+          )"
+          printf '%s' "$observed" | grep -Eq '^[0-9a-f]{64}$' \
+            || fail "could not read a certificate fingerprint from the signed APK"
+
+          recorded_file="android/signing/physical-test-certificate.sha256"
+          if [ ! -f "$recorded_file" ]; then
+            fail "$recorded_file is absent. A candidate must not be published
+                  without an independent record of the certificate that signed
+                  it: commit the fingerprint first. Observed: $observed"
+          fi
+          recorded="$(tr -d '[:space:]' < "$recorded_file" | tr 'A-F' 'a-f')"
+          [ "$observed" = "$recorded" ] \
+            || fail "signed with certificate $observed, but $recorded_file records $recorded"
+
+          echo "certificate=$observed" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$SIGNED" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Write the signed provenance
+        env:
+          SIGNED: ${{ steps.signed.outputs.path }}
+          UNSIGNED_SHA: ${{ needs.verify.outputs.apk-sha256 }}
+          SIGNED_SHA: ${{ steps.verified.outputs.sha256 }}
+          CERTIFICATE: ${{ steps.verified.outputs.certificate }}
+          VERSION_CODE: ${{ needs.verify.outputs.version-code }}
+          VERSION_NAME: ${{ needs.verify.outputs.version-name }}
+        run: |
+          set -euo pipefail
+          cat > "$SIGNED.provenance.json" <<JSON
+          {
+            "schemaVersion": 1,
+            "channel": "physical-test-signed",
+            "signed": true,
+            "repository": "${{ github.repository }}",
+            "sourceSha": "${{ inputs.source_sha }}",
+            "sourceRunId": "${{ inputs.source_run_id }}",
+            "sourceArtifactName": "${{ inputs.artifact_name }}",
+            "sourceArtifactId": "${{ inputs.artifact_id }}",
+            "signerRunId": "${{ github.run_id }}",
+            "signerRunAttempt": "${{ github.run_attempt }}",
+            "signerWorkflowRef": "${{ github.workflow_ref }}",
+            "unsignedApkSha256": "$UNSIGNED_SHA",
+            "signedApkSha256": "$SIGNED_SHA",
+            "signingCertificateSha256": "$CERTIFICATE",
+            "applicationId": "$EXPECTED_APPLICATION_ID",
+            "versionCode": "$VERSION_CODE",
+            "versionName": "$VERSION_NAME",
+            "signedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          JSON
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' \
+            "$SIGNED.provenance.json"
+          cat "$SIGNED.provenance.json"
+
+      # Only the signed APK and public records. The keystore is not in the
+      # workspace, so no path here can match it.
+      - name: Publish the signed candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: elrs-android-physicaltest-signed-${{ inputs.source_sha }}
+          path: |
+            app-physicalTest-signed.apk
+            app-physicalTest-signed.apk.provenance.json
+            app-physicalTest-signed.apk.apksigner.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Destroy the keystore
+        if: always()
+        run: |
+          set -euo pipefail
+          store="$RUNNER_TEMP/physical-test.jks"
+          if [ -f "$store" ]; then
+            shred -u "$store" 2>/dev/null || rm -f "$store"
+          fi
+          test ! -f "$store"
