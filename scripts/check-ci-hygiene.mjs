@@ -1,6 +1,15 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-const allowedWorkflows = new Set(["ci.yml", "deploy-pages.yml"]);
+const allowedWorkflows = new Set([
+  "ci.yml",
+  "deploy-pages.yml",
+  // The trusted post-build signer. It belongs on the default branch and
+  // nowhere else: `workflow_dispatch` is only dispatchable from here, and
+  // keeping it out of candidate branches is what makes "pull-request code
+  // cannot reach the signing key" a structural claim. See
+  // docs/ANDROID_SIGNING.md.
+  "android-physical-test-signer.yml",
+]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
   ".acceptance-stage",
