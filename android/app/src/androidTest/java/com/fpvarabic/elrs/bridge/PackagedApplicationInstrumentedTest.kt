@@ -41,6 +41,117 @@ class PackagedApplicationInstrumentedTest {
         MainActivity.testBackendOverride = null
     }
 
+    /**
+     * That the recovery envelope's primitives actually exist in this WebView.
+     *
+     * The envelope is PBKDF2-HMAC-SHA-256 and AES-256-GCM through WebCrypto,
+     * and its logic is proven in the JVM suite. What that suite cannot prove
+     * is the platform claim: `crypto.subtle` is only defined in a secure
+     * context, and this host serves the application from
+     * `https://appassets.androidplatform.net/` through `WebViewAssetLoader`
+     * rather than from a real origin. If that arrangement did not count as
+     * secure, every recovery export on Android would fail at the moment of
+     * saving — which is the moment an operator is relying on it.
+     *
+     * So this seals and opens a short payload with the same construction the
+     * envelope uses, inside the packaged WebView, and requires the plaintext
+     * back and a tampered tag refused. It asserts the primitives, not the
+     * module.
+     */
+    @Test
+    fun theRecoveryEnvelopesPrimitivesWorkInsideThePackagedWebView() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.awaitApplication()
+
+            assertEquals(
+                "crypto.subtle must exist: without a secure context there is no envelope",
+                "true",
+                scenario.evaluate("typeof crypto !== 'undefined' && !!crypto.subtle"),
+            )
+            assertEquals(
+                "the packaged origin must be treated as a secure context",
+                "true",
+                scenario.evaluate("window.isSecureContext"),
+            )
+
+            scenario.evaluate(
+                """
+                window.__vaultProbe = 'pending';
+                (async function () {
+                  try {
+                    const encoder = new TextEncoder();
+                    const salt = crypto.getRandomValues(new Uint8Array(16));
+                    const nonce = crypto.getRandomValues(new Uint8Array(12));
+                    const material = await crypto.subtle.importKey(
+                      'raw', encoder.encode('a-real-recovery-passphrase'),
+                      'PBKDF2', false, ['deriveKey'],
+                    );
+                    // The production work factor, not a reduced one: this is
+                    // also the only measurement of how long it takes here.
+                    const key = await crypto.subtle.deriveKey(
+                      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600000 },
+                      material, { name: 'AES-GCM', length: 256 }, false,
+                      ['encrypt', 'decrypt'],
+                    );
+                    const plaintext = encoder.encode('wifi-password=hunter2-hunter2');
+                    const prefix = encoder.encode('ELRSRCV1-header');
+                    const sealed = new Uint8Array(await crypto.subtle.encrypt(
+                      { name: 'AES-GCM', iv: nonce, additionalData: prefix, tagLength: 128 },
+                      key, plaintext,
+                    ));
+                    // The secret must not survive in the ciphertext.
+                    const asText = String.fromCharCode(...sealed);
+                    if (asText.includes('hunter2')) {
+                      window.__vaultProbe = 'leaked';
+                      return;
+                    }
+                    const opened = new Uint8Array(await crypto.subtle.decrypt(
+                      { name: 'AES-GCM', iv: nonce, additionalData: prefix, tagLength: 128 },
+                      key, sealed,
+                    ));
+                    if (new TextDecoder().decode(opened) !== 'wifi-password=hunter2-hunter2') {
+                      window.__vaultProbe = 'round-trip-mismatch';
+                      return;
+                    }
+                    // And a flipped bit in the tag must be refused rather than
+                    // returning plaintext.
+                    const tampered = sealed.slice();
+                    tampered[tampered.length - 1] ^= 1;
+                    try {
+                      await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv: nonce, additionalData: prefix, tagLength: 128 },
+                        key, tampered,
+                      );
+                      window.__vaultProbe = 'tamper-accepted';
+                      return;
+                    } catch {
+                      window.__vaultProbe = 'ok';
+                    }
+                  } catch (error) {
+                    window.__vaultProbe = 'threw: ' + String(error);
+                  }
+                })();
+                """.trimIndent(),
+            )
+
+            // 600,000 PBKDF2 iterations on an emulator is slow, and that is
+            // the point of measuring it here rather than assuming a desktop
+            // figure carries over.
+            val deadline = System.currentTimeMillis() + 120_000
+            var last = "\"pending\""
+            while (System.currentTimeMillis() < deadline) {
+                last = scenario.evaluate("window.__vaultProbe")
+                if (last != "\"pending\"") break
+                Thread.sleep(250)
+            }
+            assertEquals(
+                "the envelope's construction must work in the packaged WebView",
+                "\"ok\"",
+                last,
+            )
+        }
+    }
+
     @Test
     fun theBundledApplicationRendersAndReachesTheBridge() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
