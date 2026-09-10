@@ -27,8 +27,10 @@ import { copyToArrayBuffer } from "./byte-utils";
 import {
   DurableRecoveryError,
   exportDurableRecovery,
-  importDurableRecovery,
+  openDurableRecovery,
+  pickDurableRecovery,
   type DurableRecoveryReceipt,
+  type PickedDurableRecovery,
 } from "./durable-recovery";
 import { readDurableDocumentStore } from "./durable-recovery-stores";
 import type { CrsfFrame, CrsfParameter } from "./crsf";
@@ -512,6 +514,22 @@ export function useDeviceController({
    */
   const [importedRecovery, setImportedRecovery] =
     useState<ValidatedRecoveryPackage | null>(null);
+  /**
+   * A recovery file the operator has picked and this build has identified, but
+   * has not yet been given the passphrase for. Held so the identity shown to
+   * the operator and the bytes later opened are the same file.
+   */
+  const [pickedRecovery, setPickedRecovery] =
+    useState<PickedDurableRecovery | null>(null);
+  /**
+   * Whether the operator has looked at the identity recovered from an imported
+   * package and said it is the device in front of them. A restore overwrites a
+   * device wholesale, and the file's own claim about which Target it belongs to
+   * is not a substitute for a person confirming it — a package saved from a
+   * different transmitter of the same model would pass every automated check.
+   */
+  const [importedIdentityConfirmed, setImportedIdentityConfirmed] =
+    useState(false);
   const [manualTargetConfirmation, setManualTargetConfirmation] = useState("");
   const [powerAcknowledged, setPowerAcknowledged] = useState(false);
   const [antennaAcknowledged, setAntennaAcknowledged] = useState(false);
@@ -1647,7 +1665,27 @@ export function useDeviceController({
    * operation alone — reading identity, diagnostics and reversible settings are
    * exactly what an operator needs while sorting out storage.
    */
-  async function exportDurableRecoveryPackage(): Promise<void> {
+  /**
+   * Turns a durable-recovery failure into the operator's exact reason.
+   *
+   * Every code has its own catalogue entry, because an operator does something
+   * different about each one: free space for `INSUFFICIENT_STORAGE`, retype for
+   * `AUTHENTICATION_FAILED`, pick again for `NOT_A_RECOVERY_FILE`.
+   */
+  function durableRecoveryStatus(
+    error: unknown,
+    fallback: MessageKey = "wb.durable.PACKAGE_INVALID",
+  ): ControllerMessage {
+    return message(
+      error instanceof DurableRecoveryError
+        ? (`wb.durable.${error.code}` as MessageKey)
+        : fallback,
+    );
+  }
+
+  async function exportDurableRecoveryPackage(
+    passphrase: string,
+  ): Promise<void> {
     if (prepared === null || selectedTarget === null) return;
     setStatus(message("wb.durable.exporting"));
     const provenance = {
@@ -1677,8 +1715,27 @@ export function useDeviceController({
     try {
       const receipt = await exportDurableRecovery({
         store: readDurableDocumentStore(),
-        suggestedName: prepared.recoveryFileName,
+        // `.elrsrec` rather than `.zip`: the file is a sealed envelope, and
+        // offering it as an archive invites an operator to try to open it in a
+        // file manager and conclude it is corrupt.
+        suggestedName: prepared.recoveryFileName.replace(/\.zip$/u, ".elrsrec"),
         bytes: attachRecoveryProvenance(prepared.recoveryArchive, provenance),
+        identity: {
+          schemaVersion: 1,
+          createdAt: provenance.createdAt,
+          target: {
+            id: selectedTarget.id,
+            productName: selectedTarget.config.productName,
+            platform: selectedTarget.config.platform,
+            firmware: selectedTarget.config.firmware,
+          },
+          release: {
+            label: prepared.release.label,
+            revision: prepared.release.revision,
+          },
+          device: provenance.device,
+        },
+        passphrase,
       });
       setDurableRecovery(receipt);
       setDurableRecoveryFor(prepared);
@@ -1691,34 +1748,68 @@ export function useDeviceController({
     } catch (error) {
       setDurableRecovery(null);
       setDurableRecoveryFor(null);
-      setStatus(
-        message(
-          error instanceof DurableRecoveryError
-            ? (`wb.durable.${error.code}` as MessageKey)
-            : "wb.durable.WRITE_FAILED",
-        ),
-      );
+      setStatus(durableRecoveryStatus(error, "wb.durable.WRITE_FAILED"));
     }
   }
 
   /**
-   * Opens a recovery package the operator saved earlier and makes it usable.
+   * Stage one: pick a saved recovery file and say what it is.
    *
-   * Nothing here reads application state, which is the point: it works on a
-   * fresh installation with an empty journal. The package is validated exactly
-   * as a same-session one is, and the checkpoint it writes records the digest of
-   * the bytes that were just verified — so the recovery path's existing "the
-   * file must match the checkpoint" rule holds without being relaxed.
+   * No passphrase, no decryption, and deliberately so. The envelope's identity
+   * header is authenticated but readable, so the operator is told which Target
+   * and which device the file was saved from *before* being asked for
+   * anything. Pointing at the wrong file then costs a sentence instead of an
+   * authentication failure they have to interpret.
    */
-  async function importDurableRecoveryPackage(): Promise<void> {
+  async function pickRecoveryFile(): Promise<void> {
+    if (selectedTarget === null) {
+      setStatus(message("wb.recovery.needTarget"));
+      return;
+    }
+    setStatus(message("wb.durable.picking"));
+    setPickedRecovery(null);
+    setImportedRecovery(null);
+    setImportedIdentityConfirmed(false);
+    try {
+      const picked = await pickDurableRecovery({
+        store: readDurableDocumentStore(),
+      });
+      setPickedRecovery(picked);
+      setStatus(
+        message("wb.durable.picked", {
+          product: picked.header.identity.target.productName,
+          created: picked.header.identity.createdAt,
+        }),
+      );
+    } catch (error) {
+      setStatus(durableRecoveryStatus(error));
+    }
+  }
+
+  /**
+   * Stage two: open the picked file with the operator's passphrase.
+   *
+   * Authentication happens before anything is parsed, and produces nothing on
+   * failure, so there is no partially read archive to roll back and nothing
+   * that could reach a device. On success the package is held in state and the
+   * journal is updated best-effort; the restore itself is still a separate,
+   * explicitly authorised operation.
+   */
+  async function unlockRecoveryFile(passphrase: string): Promise<void> {
+    const picked = pickedRecovery;
+    if (picked === null) {
+      setStatus(message("wb.durable.needPicked"));
+      return;
+    }
     if (selectedTarget === null) {
       setStatus(message("wb.recovery.needTarget"));
       return;
     }
     setStatus(message("wb.durable.importing"));
     try {
-      const imported = await importDurableRecovery({
-        store: readDurableDocumentStore(),
+      const imported = await openDurableRecovery({
+        picked,
+        passphrase,
         expectedTarget: selectedTarget,
       });
       const now = new Date().toISOString();
@@ -1739,6 +1830,9 @@ export function useDeviceController({
       setCheckpoint(restored);
       setImportedRecovery(imported.recoveryPackage);
       setDurableRecovery(imported.receipt);
+      // Explicitly not confirmed yet. The operator has proven they hold the
+      // passphrase; they have not yet said this is the right device.
+      setImportedIdentityConfirmed(false);
       setStatus(
         message("wb.durable.imported", {
           location: imported.receipt.displayName,
@@ -1746,14 +1840,20 @@ export function useDeviceController({
       );
     } catch (error) {
       setImportedRecovery(null);
-      setStatus(
-        message(
-          error instanceof DurableRecoveryError
-            ? (`wb.durable.${error.code}` as MessageKey)
-            : "wb.durable.PACKAGE_INVALID",
-        ),
-      );
+      setImportedIdentityConfirmed(false);
+      setStatus(durableRecoveryStatus(error));
     }
+  }
+
+  /**
+   * Stage three: the operator says the identity shown is the device in front
+   * of them.
+   *
+   * Cleared by picking another file or importing again, so it can never
+   * describe a package other than the one on screen.
+   */
+  function confirmImportedRecoveryIdentity(confirmed: boolean): void {
+    setImportedIdentityConfirmed(confirmed && importedRecovery !== null);
   }
 
   async function downloadLuaScript(): Promise<void> {
@@ -2557,6 +2657,13 @@ export function useDeviceController({
     if (imported === null) {
       return refused(message("wb.need.durableRecovery"));
     }
+    // An imported package is bytes from outside this session. Every automated
+    // check it can pass, a package saved from a *different* unit of the same
+    // model also passes — so the last word is the operator's, taken against
+    // the identity displayed beside this control.
+    if (!importedIdentityConfirmed) {
+      return refused(message("wb.need.importedIdentity"));
+    }
     return recoverFromValidatedPackage(async () => imported);
   }
 
@@ -2778,7 +2885,11 @@ export function useDeviceController({
     recoverFromFile,
     recoverFromImportedPackage,
     exportDurableRecoveryPackage,
-    importDurableRecoveryPackage,
+    pickRecoveryFile,
+    unlockRecoveryFile,
+    confirmImportedRecoveryIdentity,
+    pickedRecovery,
+    importedIdentityConfirmed,
     durableRecovery,
     durableRecoveryAvailable: readDurableDocumentStore() !== null,
     importedRecovery,

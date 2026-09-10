@@ -407,6 +407,12 @@ function connectedHardware(
  * evidence that a file exists.
  */
 async function saveRecoveryPackageDurably(): Promise<void> {
+  // The passphrase is a real prerequisite and it is collected on this screen,
+  // so the test supplies it the way an operator does. The export button is
+  // never disabled for want of it; pressing it empty names the reason.
+  fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+    target: { value: "bench-recovery-passphrase" },
+  });
   fireEvent.click(
     screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان دائم" }),
   );

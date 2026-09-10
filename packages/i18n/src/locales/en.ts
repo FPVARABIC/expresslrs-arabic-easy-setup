@@ -231,6 +231,17 @@ export const en = {
     "Save the recovery package where it will survive",
   "easy.fw.importDurableRecovery": "I already have a saved recovery package",
   "easy.fw.durableRecoveryVerified": "Saved and verified: {location}",
+  "easy.fw.recoveryPassphrase": "Recovery passphrase",
+  "easy.fw.recoveryPassphraseHint":
+    "Write this down. The saved file is encrypted with it, it is never stored, and without it the file cannot be opened again.",
+  "easy.fw.recoveryPassphraseWhy":
+    "The saved package contains your firmware image, and that image carries your Wi-Fi name and password and the binding UID from your binding phrase.",
+  "easy.fw.pickRecoveryFile": "Choose a saved recovery file",
+  "easy.fw.unlockRecoveryFile": "Open the recovery file",
+  "easy.fw.pickedRecovery": "Saved from {product} on {created}",
+  "easy.fw.importedIdentityHeading": "Recovered from the file",
+  "easy.fw.importedIdentityConfirm":
+    "This is the device in front of me, and I want it restored to this image",
   "easy.fw.recoverySaved":
     "I checked the recovery package is saved on my computer",
   "easy.fw.power":

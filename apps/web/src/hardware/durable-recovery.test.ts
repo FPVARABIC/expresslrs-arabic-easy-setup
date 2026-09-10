@@ -5,10 +5,15 @@ import { copyToArrayBuffer } from "./byte-utils";
 import {
   DurableRecoveryError,
   exportDurableRecovery,
-  importDurableRecovery,
+  openDurableRecovery,
+  pickDurableRecovery,
   type DurableDocumentHandle,
   type DurableDocumentStore,
 } from "./durable-recovery";
+import {
+  sealRecoveryVault,
+  type RecoveryVaultIdentity,
+} from "./recovery-vault";
 import {
   fileSystemAccessStore,
   nativeDocumentStore,
@@ -94,13 +99,19 @@ function fakeStore(
     readonly onPick?: () => never;
     readonly pickBytes?: Uint8Array;
   } = {},
-): DurableDocumentStore & { readonly writes: number } {
+): DurableDocumentStore & {
+  readonly writes: number;
+  readonly stored: Uint8Array | null;
+} {
   let stored: Uint8Array | null = null;
   let writes = 0;
   const store = {
     backend: "FILE_SYSTEM_ACCESS" as const,
     get writes() {
       return writes;
+    },
+    get stored() {
+      return stored;
     },
     async create(input: {
       suggestedName: string;
@@ -126,6 +137,39 @@ function fakeStore(
   return store;
 }
 
+const PASSPHRASE = "recovery-passphrase";
+
+const identity: RecoveryVaultIdentity = {
+  schemaVersion: 1,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  target: {
+    id: target.id,
+    productName: target.config.productName,
+    platform: target.config.platform,
+    firmware: target.config.firmware,
+  },
+  release: { label: "4.1.0", revision: "release410" },
+  device: { productName: "Receiver", role: "rx", firmwareVersion: "4.1.0" },
+};
+
+/** A sealed file, as it would actually exist on the operator's storage. */
+async function sealedFile(
+  overrides: {
+    readonly targetId?: string;
+    readonly identity?: RecoveryVaultIdentity;
+    readonly passphrase?: string;
+  } = {},
+): Promise<Uint8Array> {
+  return sealRecoveryVault({
+    archive: await recoveryArchive(
+      overrides.targetId === undefined ? {} : { targetId: overrides.targetId },
+    ),
+    identity: overrides.identity ?? identity,
+    passphrase: overrides.passphrase ?? PASSPHRASE,
+    iterations: 100_000,
+  });
+}
+
 describe("exportDurableRecovery", () => {
   const bytes = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1]);
 
@@ -133,22 +177,64 @@ describe("exportDurableRecovery", () => {
     const store = fakeStore();
     const receipt = await exportDurableRecovery({
       store,
-      suggestedName: "target-4.1.0-recovery.zip",
+      suggestedName: "target-4.1.0-recovery.elrsrec",
       bytes,
+      identity,
+      passphrase: PASSPHRASE,
     });
     expect(receipt.location).toBe("fake:1");
-    expect(receipt.displayName).toBe("target-4.1.0-recovery.zip");
-    expect(receipt.byteLength).toBe(bytes.byteLength);
-    // The digest is over what came back out of storage, which is the only
-    // reading of it that means anything.
-    expect(receipt.sha256).toBe(await sha256(bytes));
+    expect(receipt.displayName).toBe("target-4.1.0-recovery.elrsrec");
+    // The file on storage is the sealed envelope, so it is longer than the
+    // archive and its digest is over the sealed bytes — the ones that are
+    // actually there and the ones a later import re-reads.
+    expect(receipt.byteLength).toBeGreaterThan(bytes.byteLength);
+    expect(receipt.sha256).toBe(await sha256(store.stored ?? new Uint8Array()));
     expect(receipt.backend).toBe("FILE_SYSTEM_ACCESS");
     expect(Date.parse(receipt.verifiedAt)).not.toBeNaN();
   });
 
+  it("never offers the plaintext archive to storage", async () => {
+    // The whole point: what reaches the document provider is sealed. If this
+    // ever regresses, the operator's Wi-Fi password is in Downloads.
+    const store = fakeStore();
+    const secret = new TextEncoder().encode("wifi-password=hunter2-hunter2");
+    const plaintext = new Uint8Array(256);
+    plaintext.set(secret, 32);
+    await exportDurableRecovery({
+      store,
+      suggestedName: "x.elrsrec",
+      bytes: plaintext,
+      identity,
+      passphrase: PASSPHRASE,
+    });
+    const written = store.stored ?? new Uint8Array();
+    expect(Buffer.from(written).includes(Buffer.from(secret))).toBe(false);
+  });
+
+  it("refuses a passphrase too short to protect the file", async () => {
+    const store = fakeStore();
+    await expect(
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: "abc",
+      }),
+    ).rejects.toMatchObject({ code: "PASSPHRASE_UNUSABLE" });
+    // Nothing was written: the refusal happens before storage is touched.
+    expect(store.writes).toBe(0);
+  });
+
   it("refuses when the platform has no durable target at all", async () => {
     await expect(
-      exportDurableRecovery({ store: null, suggestedName: "x.zip", bytes }),
+      exportDurableRecovery({
+        store: null,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+      }),
     ).rejects.toMatchObject({ code: "NO_DURABLE_TARGET" });
   });
 
@@ -159,7 +245,13 @@ describe("exportDurableRecovery", () => {
       },
     });
     await expect(
-      exportDurableRecovery({ store, suggestedName: "x.zip", bytes }),
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+      }),
     ).rejects.toMatchObject({ code: "CANCELLED" });
   });
 
@@ -170,14 +262,26 @@ describe("exportDurableRecovery", () => {
       },
     });
     await expect(
-      exportDurableRecovery({ store, suggestedName: "x.zip", bytes }),
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+      }),
     ).rejects.toMatchObject({ code: "INSUFFICIENT_STORAGE" });
   });
 
   it("refuses a file it cannot reopen, even though the write reported success", async () => {
     const store = fakeStore({ failRead: true });
     await expect(
-      exportDurableRecovery({ store, suggestedName: "x.zip", bytes }),
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+      }),
     ).rejects.toMatchObject({ code: "REOPEN_FAILED" });
     // The write did happen. That is exactly why an unverifiable write must not
     // be allowed to satisfy the gate.
@@ -189,7 +293,13 @@ describe("exportDurableRecovery", () => {
       mutateStored: (written) => written.subarray(0, written.byteLength - 1),
     });
     await expect(
-      exportDurableRecovery({ store, suggestedName: "x.zip", bytes }),
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+      }),
     ).rejects.toMatchObject({ code: "TRUNCATED" });
   });
 
@@ -202,43 +312,140 @@ describe("exportDurableRecovery", () => {
       },
     });
     await expect(
-      exportDurableRecovery({ store, suggestedName: "x.zip", bytes }),
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+      }),
     ).rejects.toMatchObject({ code: "HASH_MISMATCH" });
   });
 });
 
-describe("importDurableRecovery", () => {
-  it("validates a package chosen after a reinstall, with no application state", async () => {
-    const archive = await recoveryArchive();
-    const store = fakeStore({ pickBytes: archive });
-    const imported = await importDurableRecovery({
-      store,
+describe("picking and opening a saved recovery file", () => {
+  it("identifies a file after a reinstall, with no application state and no passphrase", async () => {
+    // This is the reinstall path: nothing here reads a journal, a preference
+    // or any other application state.
+    const sealed = await sealedFile();
+    const store = fakeStore({ pickBytes: sealed });
+    const picked = await pickDurableRecovery({ store });
+    expect(picked.header.identity.target.id).toBe(target.id);
+    expect(picked.header.identity.device.role).toBe("rx");
+    expect(picked.receipt.sha256).toBe(await sha256(sealed));
+    expect(picked.receipt.byteLength).toBe(sealed.byteLength);
+  });
+
+  it("opens the identified file and validates the archive inside it", async () => {
+    const store = fakeStore({ pickBytes: await sealedFile() });
+    const picked = await pickDurableRecovery({ store });
+    const imported = await openDurableRecovery({
+      picked,
+      passphrase: PASSPHRASE,
       expectedTarget: target,
     });
     expect(imported.recoveryPackage.targetId).toBe(target.id);
     expect(imported.recoveryPackage.segments).toHaveLength(1);
-    expect(imported.receipt.sha256).toBe(await sha256(archive));
-    expect(imported.receipt.byteLength).toBe(archive.byteLength);
   });
 
-  it("refuses a corrupted file", async () => {
-    const archive = await recoveryArchive();
-    const corrupted = Uint8Array.from(archive);
-    const middle = Math.floor(corrupted.byteLength / 2);
-    corrupted.set([(corrupted[middle] ?? 0) ^ 0xff], middle);
-    const store = fakeStore({ pickBytes: corrupted });
+  it("refuses the wrong passphrase and yields nothing", async () => {
+    const store = fakeStore({ pickBytes: await sealedFile() });
+    const picked = await pickDurableRecovery({ store });
     await expect(
-      importDurableRecovery({ store, expectedTarget: target }),
-    ).rejects.toMatchObject({ code: "PACKAGE_INVALID" });
+      openDurableRecovery({
+        picked,
+        passphrase: "not-the-passphrase",
+        expectedTarget: target,
+      }),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+  });
+
+  it("refuses a one-byte edit to the sealed file", async () => {
+    const sealed = await sealedFile();
+    const tampered = Uint8Array.from(sealed);
+    tampered[tampered.byteLength - 3] ^= 0x01;
+    const store = fakeStore({ pickBytes: tampered });
+    const picked = await pickDurableRecovery({ store });
+    await expect(
+      openDurableRecovery({
+        picked,
+        passphrase: PASSPHRASE,
+        expectedTarget: target,
+      }),
+    ).rejects.toMatchObject({ code: "AUTHENTICATION_FAILED" });
+  });
+
+  it("refuses a plaintext archive from before the format existed", async () => {
+    // A bare zip is no longer accepted: it carries no authentication at all,
+    // and accepting one would reopen exactly the hole this closes.
+    const store = fakeStore({ pickBytes: await recoveryArchive() });
+    await expect(pickDurableRecovery({ store })).rejects.toMatchObject({
+      code: "NOT_A_RECOVERY_FILE",
+    });
+  });
+
+  it("refuses a truncated file at the header, before any key derivation", async () => {
+    const sealed = await sealedFile();
+    const store = fakeStore({
+      pickBytes: sealed.subarray(0, sealed.byteLength - 4),
+    });
+    await expect(pickDurableRecovery({ store })).rejects.toMatchObject({
+      code: "PACKAGE_INVALID",
+    });
+  });
+
+  it("refuses appended trailing data", async () => {
+    const sealed = await sealedFile();
+    const padded = new Uint8Array(sealed.byteLength + 16);
+    padded.set(sealed, 0);
+    const store = fakeStore({ pickBytes: padded });
+    await expect(pickDurableRecovery({ store })).rejects.toMatchObject({
+      code: "PACKAGE_INVALID",
+    });
   });
 
   it("refuses a package belonging to a different Target", async () => {
+    // Authenticates correctly and is still the wrong package: the Target
+    // check is inside the archive, not in the header an attacker can see.
     const store = fakeStore({
-      pickBytes: await recoveryArchive({ targetId: "vendor/other/target" }),
+      pickBytes: await sealedFile({ targetId: "vendor/other/target" }),
     });
+    const picked = await pickDurableRecovery({ store });
     await expect(
-      importDurableRecovery({ store, expectedTarget: target }),
+      openDurableRecovery({
+        picked,
+        passphrase: PASSPHRASE,
+        expectedTarget: target,
+      }),
     ).rejects.toMatchObject({ code: "PACKAGE_INVALID" });
+  });
+
+  it("surfaces a device identity that does not match, without refusing it itself", async () => {
+    // A package saved from a *different unit of the same model* is
+    // indistinguishable to every automated check — same Target, same release,
+    // valid signature. So this layer does not pretend to catch it: it reports
+    // the recorded device identity, and the controller requires the operator
+    // to confirm it before a restore may run.
+    const store = fakeStore({
+      pickBytes: await sealedFile({
+        identity: {
+          ...identity,
+          device: {
+            productName: "Receiver",
+            role: "rx",
+            firmwareVersion: "3.5.0",
+          },
+        },
+      }),
+    });
+    const picked = await pickDurableRecovery({ store });
+    expect(picked.header.identity.device.firmwareVersion).toBe("3.5.0");
+    const imported = await openDurableRecovery({
+      picked,
+      passphrase: PASSPHRASE,
+      expectedTarget: target,
+    });
+    expect(imported.recoveryPackage.targetId).toBe(target.id);
   });
 
   it("reports a dismissed open picker as a cancellation", async () => {
@@ -247,15 +454,15 @@ describe("importDurableRecovery", () => {
         throw new DurableRecoveryError("CANCELLED", "dismissed");
       },
     });
-    await expect(
-      importDurableRecovery({ store, expectedTarget: target }),
-    ).rejects.toMatchObject({ code: "CANCELLED" });
+    await expect(pickDurableRecovery({ store })).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
   });
 
   it("refuses when there is nothing to open a file with", async () => {
-    await expect(
-      importDurableRecovery({ store: null, expectedTarget: target }),
-    ).rejects.toMatchObject({ code: "NO_DURABLE_TARGET" });
+    await expect(pickDurableRecovery({ store: null })).rejects.toMatchObject({
+      code: "NO_DURABLE_TARGET",
+    });
   });
 });
 

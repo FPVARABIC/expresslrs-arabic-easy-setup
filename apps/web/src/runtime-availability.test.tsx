@@ -348,11 +348,17 @@ async function settle(turns = 6): Promise<void> {
  * Crypto resolves off the event loop rather than on the microtask queue, so it
  * needs real turns.
  */
-async function settleUntil(pattern: RegExp): Promise<void> {
-  for (let turn = 0; turn < 60; turn += 1) {
+async function settleUntil(pattern: RegExp, timeoutMs = 15_000): Promise<void> {
+  // Bounded by the clock, not by a turn count. The durable export now derives
+  // a key with 600,000 PBKDF2 iterations before it writes anything, which is
+  // a few hundred milliseconds of real work; a fixed number of microtask or
+  // setTimeout turns is not a budget for that, and expressing the wait in
+  // turns made this helper quietly dependent on the work factor.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (screen.queryByText(pattern) !== null) return;
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 5));
     });
   }
   // Asserted rather than returned, so a failure names the text that is missing.
@@ -738,6 +744,9 @@ describe("runtime availability, from the production entry point", () => {
     // A copy written outside the application, reopened and hashed. A started
     // download and a ticked box no longer satisfy this, and that is the point:
     // neither was evidence that a file exists.
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",
@@ -957,6 +966,9 @@ describe("runtime availability, from the production entry point", () => {
     // Downloading is not the same as having kept it, and the operator's word
     // for it was never evidence either. The package is written where it will
     // survive this application being removed, then reopened and hashed.
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package where it will survive",
@@ -1128,6 +1140,9 @@ describe("runtime availability, from the production entry point", () => {
     );
     await settle();
 
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",
@@ -1173,6 +1188,9 @@ describe("runtime availability, from the production entry point", () => {
     );
     await settle();
 
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",

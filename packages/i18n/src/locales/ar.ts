@@ -213,6 +213,17 @@ export const ar = {
   "easy.fw.exportDurableRecovery": "احفظ حزمة الاستعادة في مكان يبقى",
   "easy.fw.importDurableRecovery": "لديّ حزمة استعادة محفوظة بالفعل",
   "easy.fw.durableRecoveryVerified": "محفوظة ومتحقَّق منها: {location}",
+  "easy.fw.recoveryPassphrase": "عبارة مرور الاستعادة",
+  "easy.fw.recoveryPassphraseHint":
+    "اكتبها عندك. الملف المحفوظ مشفّر بها، ولا تُحفظ أبدًا، وبدونها لا يمكن فتح الملف مرة أخرى.",
+  "easy.fw.recoveryPassphraseWhy":
+    "حزمة الاستعادة تحتوي على صورة Firmware، وتلك الصورة تحمل اسم شبكة الواي فاي وكلمة سرها ومعرّف الربط المشتق من عبارة الربط.",
+  "easy.fw.pickRecoveryFile": "اختر ملف استعادة محفوظًا",
+  "easy.fw.unlockRecoveryFile": "افتح ملف الاستعادة",
+  "easy.fw.pickedRecovery": "محفوظ من {product} بتاريخ {created}",
+  "easy.fw.importedIdentityHeading": "المُستخرَج من الملف",
+  "easy.fw.importedIdentityConfirm":
+    "هذا هو الجهاز الموجود أمامي، وأريد استعادته إلى هذه الصورة",
   "easy.fw.recoverySaved": "تحققت من حفظ حزمة الاستعادة على جهازي",
   "easy.fw.power": "الطاقة ثابتة ولن تنقطع أثناء الكتابة",
   "easy.fw.antenna": "هوائي جهاز الإرسال مركّب",

@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installDurableStorageStub } from "../test/durable-storage";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const firmwareMocks = vi.hoisted(() => ({
@@ -538,6 +538,11 @@ describe("public product shell", () => {
 
     // The write is gated on a copy that was written outside the app, reopened
     // and hashed. A started download and a ticked box are no longer accepted.
+    // The passphrase is collected on this screen, so it is supplied the way
+    // an operator supplies it. The button is never disabled for want of it.
+    fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     await user.click(
       screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان يبقى" }),
     );
@@ -684,6 +689,11 @@ describe("public product shell", () => {
     );
     // The write is gated on a copy that was written outside the app, reopened
     // and hashed. A started download and a ticked box are no longer accepted.
+    // The passphrase is collected on this screen, so it is supplied the way
+    // an operator supplies it. The button is never disabled for want of it.
+    fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     await user.click(
       screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان يبقى" }),
     );

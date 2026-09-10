@@ -28,6 +28,14 @@ import {
   validateRecoveryPackage,
   type ValidatedRecoveryPackage,
 } from "./recovery-package";
+import {
+  openRecoveryVault,
+  readRecoveryVaultHeader,
+  sealRecoveryVault,
+  RecoveryVaultError,
+  type RecoveryVaultHeader,
+  type RecoveryVaultIdentity,
+} from "./recovery-vault";
 
 /** Where a verified package lives. Both are outside app-private storage. */
 export type DurableRecoveryBackend = "ANDROID_SAF" | "FILE_SYSTEM_ACCESS";
@@ -54,7 +62,40 @@ export type DurableRecoveryFailure =
   /** Reopened at the right length, and the bytes are not the same bytes. */
   | "HASH_MISMATCH"
   /** An imported file is not a recovery package this build can restore from. */
-  | "PACKAGE_INVALID";
+  | "PACKAGE_INVALID"
+  /**
+   * The file did not authenticate: the passphrase is wrong, or the bytes have
+   * been altered since they were sealed. One code, because AES-GCM cannot tell
+   * the two apart and neither can this.
+   */
+  | "AUTHENTICATION_FAILED"
+  /** Structurally not one of this application's encrypted recovery files. */
+  | "NOT_A_RECOVERY_FILE"
+  /** A passphrase is needed and none usable was supplied. */
+  | "PASSPHRASE_UNUSABLE";
+
+/** Maps an envelope failure onto the durable-recovery vocabulary. */
+function fromVaultError(error: unknown): DurableRecoveryError {
+  if (!(error instanceof RecoveryVaultError)) {
+    return new DurableRecoveryError(
+      "PACKAGE_INVALID",
+      "The selected file is not a recovery package",
+    );
+  }
+  switch (error.code) {
+    case "AUTHENTICATION_FAILED":
+      return new DurableRecoveryError("AUTHENTICATION_FAILED", error.message);
+    case "PASSPHRASE_UNUSABLE":
+      return new DurableRecoveryError("PASSPHRASE_UNUSABLE", error.message);
+    case "NOT_A_VAULT":
+      return new DurableRecoveryError("NOT_A_RECOVERY_FILE", error.message);
+    default:
+      // TRUNCATED, TRAILING_DATA, MALFORMED_HEADER, UNSUPPORTED_FORMAT and
+      // TOO_LARGE are all "this file is not usable", reported with the
+      // envelope's own wording so the operator sees which.
+      return new DurableRecoveryError("PACKAGE_INVALID", error.message);
+  }
+}
 
 export class DurableRecoveryError extends Error {
   public constructor(
@@ -129,6 +170,8 @@ export async function exportDurableRecovery(input: {
   readonly store: DurableDocumentStore | null;
   readonly suggestedName: string;
   readonly bytes: Uint8Array;
+  readonly identity: RecoveryVaultIdentity;
+  readonly passphrase: string;
   readonly mimeType?: string;
 }): Promise<DurableRecoveryReceipt> {
   const { store } = input;
@@ -138,11 +181,25 @@ export async function exportDurableRecovery(input: {
       "This platform offers no storage this application can write to and read back",
     );
   }
-  const expected = await sha256Hex(input.bytes);
+  // Sealed before it is offered to storage, so the plaintext archive never
+  // reaches a location outside this application. The digest in the receipt is
+  // therefore over the sealed file — the bytes that actually exist on disk and
+  // the bytes a later import will re-read.
+  let sealed: Uint8Array;
+  try {
+    sealed = await sealRecoveryVault({
+      archive: input.bytes,
+      identity: input.identity,
+      passphrase: input.passphrase,
+    });
+  } catch (error) {
+    throw fromVaultError(error);
+  }
+  const expected = await sha256Hex(sealed);
   const handle = await store.create({
     suggestedName: input.suggestedName,
-    mimeType: input.mimeType ?? "application/zip",
-    bytes: input.bytes,
+    mimeType: input.mimeType ?? "application/octet-stream",
+    bytes: sealed,
   });
 
   let readBack: Uint8Array;
@@ -158,10 +215,10 @@ export async function exportDurableRecovery(input: {
           `The recovery package was written to ${handle.displayName} but could not be reopened to verify it`,
         );
   }
-  if (readBack.byteLength !== input.bytes.byteLength) {
+  if (readBack.byteLength !== sealed.byteLength) {
     throw new DurableRecoveryError(
       "TRUNCATED",
-      `The saved recovery package is ${String(readBack.byteLength)} bytes, not the ${String(input.bytes.byteLength)} bytes written`,
+      `The saved recovery package is ${String(readBack.byteLength)} bytes, not the ${String(sealed.byteLength)} bytes written`,
     );
   }
   const actual = await sha256Hex(readBack);
@@ -187,17 +244,34 @@ export interface ImportedDurableRecovery {
 }
 
 /**
- * Reads a package the operator points at and validates it completely.
+ * A file the operator picked, identified but not yet opened.
  *
- * This is the path that makes recovery survive a reinstall: nothing here reads
- * application state, so it works on a fresh installation with an empty journal.
- * Validation is the same `validateRecoveryPackage` a same-session recovery
- * uses — an imported file gets no weaker check for having come from outside.
+ * Two stages instead of one, because the identity header is readable without
+ * the passphrase and the operator needs to see it *first*. Being shown "this
+ * file is a Vendor TX Module saved on 3 March" before typing anything is the
+ * difference between recovering the right device and flashing the wrong one;
+ * asking for a passphrase against an unnamed file invites answering it for the
+ * wrong file. The sealed bytes are carried so the second stage cannot be
+ * pointed at a different file than the one that was identified.
  */
-export async function importDurableRecovery(input: {
+export interface PickedDurableRecovery {
+  readonly receipt: DurableRecoveryReceipt;
+  readonly header: RecoveryVaultHeader;
+  readonly sealed: Uint8Array;
+}
+
+/**
+ * Picks a saved recovery file and reads what it says about itself.
+ *
+ * Reads no application state, which is what makes recovery survive a
+ * reinstall: this works on a fresh installation with an empty journal. No
+ * passphrase is involved and nothing is decrypted, so a wrong file costs the
+ * operator a sentence rather than a failed authentication they have to
+ * interpret.
+ */
+export async function pickDurableRecovery(input: {
   readonly store: DurableDocumentStore | null;
-  readonly expectedTarget: OfficialTarget;
-}): Promise<ImportedDurableRecovery> {
+}): Promise<PickedDurableRecovery> {
   const { store } = input;
   if (store === null) {
     throw new DurableRecoveryError(
@@ -205,7 +279,7 @@ export async function importDurableRecovery(input: {
       "This platform offers no way to open a saved recovery package",
     );
   }
-  const handle = await store.pick({ mimeType: "application/zip" });
+  const handle = await store.pick({ mimeType: "application/octet-stream" });
   let bytes: Uint8Array;
   try {
     bytes = await store.read(handle.location);
@@ -217,10 +291,55 @@ export async function importDurableRecovery(input: {
           `${handle.displayName} could not be read`,
         );
   }
+  let header: RecoveryVaultHeader;
+  try {
+    header = readRecoveryVaultHeader(bytes);
+  } catch (error) {
+    throw fromVaultError(error);
+  }
+  return Object.freeze({
+    receipt: Object.freeze({
+      backend: store.backend,
+      location: handle.location,
+      displayName: handle.displayName,
+      byteLength: bytes.byteLength,
+      sha256: await sha256Hex(bytes),
+      verifiedAt: new Date().toISOString(),
+    }),
+    header,
+    sealed: bytes,
+  });
+}
+
+/**
+ * Opens a picked file and validates the archive inside it.
+ *
+ * Authentication comes first and yields nothing on failure — `openRecoveryVault`
+ * verifies the GCM tag before it returns any plaintext — so there is no
+ * half-parsed archive for a caller to act on and no state to roll back. Only
+ * after that does the archive face the same `validateRecoveryPackage` a
+ * same-session recovery uses: an imported file gets no weaker check for having
+ * come from outside, and its Target must still match the selected one.
+ */
+export async function openDurableRecovery(input: {
+  readonly picked: PickedDurableRecovery;
+  readonly passphrase: string;
+  readonly expectedTarget: OfficialTarget;
+}): Promise<ImportedDurableRecovery> {
+  let archive: Uint8Array;
+  try {
+    const opened = await openRecoveryVault({
+      bytes: input.picked.sealed,
+      passphrase: input.passphrase,
+    });
+    archive = opened.archive;
+  } catch (error) {
+    throw fromVaultError(error);
+  }
   let recoveryPackage: ValidatedRecoveryPackage;
   try {
     recoveryPackage = await validateRecoveryPackage({
-      bytes,
+      bytes: archive,
       expectedTarget: input.expectedTarget,
     });
   } catch (error) {
@@ -230,16 +349,13 @@ export async function importDurableRecovery(input: {
         ? error.message
         : "The selected file is not a recovery package",
     );
+  } finally {
+    // The decrypted archive has served its purpose once the package is
+    // validated: the segments it needed are copied into the validated result.
+    archive.fill(0);
   }
   return Object.freeze({
-    receipt: Object.freeze({
-      backend: store.backend,
-      location: handle.location,
-      displayName: handle.displayName,
-      byteLength: bytes.byteLength,
-      sha256: recoveryPackage.packageSha256,
-      verifiedAt: new Date().toISOString(),
-    }),
+    receipt: input.picked.receipt,
     recoveryPackage,
   });
 }

@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { createTranslator, getDirection, type Locale } from "@elrs-easy/i18n";
 
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
@@ -63,6 +65,13 @@ export function ExpressLrsParityWorkbenchView({
   controller,
   locale,
 }: ExpressLrsParityWorkbenchViewProps) {
+  /**
+   * The recovery passphrases live here and nowhere else — component state, not
+   * controller state, so nothing that assembles a diagnostics report can reach
+   * them. They are never persisted and never sent anywhere.
+   */
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [importPassphrase, setImportPassphrase] = useState("");
   const t = createTranslator(locale);
   const {
     antennaAcknowledged,
@@ -86,7 +95,12 @@ export function ExpressLrsParityWorkbenchView({
     downloadLuaScript,
     downloadRecovery,
     exportDurableRecoveryPackage,
-    importDurableRecoveryPackage,
+    pickRecoveryFile,
+    unlockRecoveryFile,
+    confirmImportedRecoveryIdentity,
+    pickedRecovery,
+    importedIdentityConfirmed,
+    importedRecovery,
     durableRecovery,
     exactHardwareTarget,
     flashPreparedFirmware,
@@ -1042,11 +1056,19 @@ export function ExpressLrsParityWorkbenchView({
               >
                 {t("wb.ui.downloadRecovery")}
               </button>
+              {/*
+                Always clickable, both of them. The passphrase is a real
+                prerequisite, collected in the field beside the button, so a
+                press with nothing typed answers with the exact reason instead
+                of the control being dead.
+              */}
               <button
                 type="button"
                 className="secondary-button"
                 disabled={busy}
-                onClick={() => void exportDurableRecoveryPackage()}
+                onClick={() =>
+                  void exportDurableRecoveryPackage(recoveryPassphrase)
+                }
               >
                 {t("wb.ui.exportDurableRecovery")}
               </button>
@@ -1054,9 +1076,9 @@ export function ExpressLrsParityWorkbenchView({
                 type="button"
                 className="secondary-button"
                 disabled={busy}
-                onClick={() => void importDurableRecoveryPackage()}
+                onClick={() => void pickRecoveryFile()}
               >
-                {t("wb.ui.importDurableRecovery")}
+                {t("wb.ui.pickRecoveryFile")}
               </button>
               {selectedTarget?.role === "tx" ? (
                 <button
@@ -1069,6 +1091,70 @@ export function ExpressLrsParityWorkbenchView({
                 </button>
               ) : null}
             </div>
+
+            <label className="field">
+              <span>{t("wb.ui.recoveryPassphrase")}</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={recoveryPassphrase}
+                onChange={(event) => {
+                  setRecoveryPassphrase(event.target.value);
+                }}
+              />
+            </label>
+            <p className="hint">{t("wb.ui.recoveryPassphraseHint")}</p>
+            <p className="hint">{t("wb.ui.recoveryPassphraseWhy")}</p>
+
+            {pickedRecovery === null ? null : (
+              <>
+                <p className="hint">
+                  {t("wb.durable.picked", {
+                    product: pickedRecovery.header.identity.target.productName,
+                    created: pickedRecovery.header.identity.createdAt,
+                  })}
+                </p>
+                <label className="field">
+                  <span>{t("wb.ui.recoveryPassphrase")}</span>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={importPassphrase}
+                    onChange={(event) => {
+                      setImportPassphrase(event.target.value);
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy}
+                  onClick={() => void unlockRecoveryFile(importPassphrase)}
+                >
+                  {t("wb.ui.unlockRecoveryFile")}
+                </button>
+              </>
+            )}
+
+            {importedRecovery === null ? null : (
+              <>
+                <p className="hint">
+                  {t("wb.ui.importedIdentityHeading")}:{" "}
+                  {importedRecovery.productName} · {importedRecovery.targetId} ·{" "}
+                  {importedRecovery.releaseLabel}
+                </p>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={importedIdentityConfirmed}
+                    onChange={(event) => {
+                      confirmImportedRecoveryIdentity(event.target.checked);
+                    }}
+                  />
+                  <span>{t("wb.ui.importedIdentityConfirm")}</span>
+                </label>
+              </>
+            )}
 
             {durableRecovery !== null ? (
               <p className="success-note">

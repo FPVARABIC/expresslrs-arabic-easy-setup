@@ -344,6 +344,8 @@ export const workbenchEn = {
     "Save the recovery package to durable storage and let it be verified first. A copy inside this app is erased if the app is removed, which is exactly when it is needed.",
   "wb.need.durableRecoveryStale":
     "The verified recovery copy belongs to a different package. Save this one to durable storage again.",
+  "wb.need.importedIdentity":
+    "Check the device identity recovered from the file and confirm it beside this control. A package saved from another unit of the same model passes every automatic check.",
 
   // --- durable recovery export and import ---------------------------------
   "wb.durable.exporting": "Saving the recovery package and verifying it…",
@@ -367,6 +369,16 @@ export const workbenchEn = {
     "The saved recovery package does not match the bytes that were written.",
   "wb.durable.PACKAGE_INVALID":
     "That file is not a recovery package this build can restore from.",
+  "wb.durable.picking": "Choose the saved recovery file…",
+  "wb.durable.picked":
+    "This file was saved from {product} on {created}. Enter its recovery passphrase to open it.",
+  "wb.durable.needPicked": "Choose a saved recovery file first.",
+  "wb.durable.AUTHENTICATION_FAILED":
+    "The recovery passphrase is wrong, or this file has been modified since it was saved. Nothing has been read from it.",
+  "wb.durable.NOT_A_RECOVERY_FILE":
+    "That file is not one of this application's encrypted recovery files.",
+  "wb.durable.PASSPHRASE_UNUSABLE":
+    "Enter a recovery passphrase of at least 8 characters. It is never stored, so write it down somewhere safe: without it the saved file cannot be opened again.",
 
   // --- Advanced Mode interface --------------------------------------------
   "wb.ui.kicker": "Easy ELRS · Hardware Lab",
@@ -448,6 +460,16 @@ export const workbenchEn = {
   "wb.ui.downloadRecovery": "Download the recovery package",
   "wb.ui.exportDurableRecovery": "Save the recovery package to durable storage",
   "wb.ui.importDurableRecovery": "Import a saved recovery package",
+  "wb.ui.recoveryPassphrase": "Recovery passphrase",
+  "wb.ui.recoveryPassphraseHint":
+    "The saved file is encrypted with this passphrase. It is never stored or sent anywhere — write it down, because it cannot be recovered and the file cannot be opened without it.",
+  "wb.ui.recoveryPassphraseWhy":
+    "Why: the saved package contains the configured firmware, and that image carries your Wi-Fi name and password and the binding UID derived from your binding phrase. It is written where other applications on the phone can read it.",
+  "wb.ui.pickRecoveryFile": "Choose a saved recovery file",
+  "wb.ui.unlockRecoveryFile": "Open the recovery file",
+  "wb.ui.importedIdentityHeading": "Recovered from the file",
+  "wb.ui.importedIdentityConfirm":
+    "This is the device in front of me, and I want it restored to this image",
   "wb.ui.durableRecoveryLocation": "Verified copy",
   "wb.ui.durableRecoveryPending": "No verified durable copy yet",
   "wb.ui.downloadLua": "Download the Lua script",

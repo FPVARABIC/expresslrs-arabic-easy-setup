@@ -90,7 +90,12 @@ export function EasySetup({
     disconnectHardware,
     downloadRecovery,
     exportDurableRecoveryPackage,
-    importDurableRecoveryPackage,
+    pickRecoveryFile,
+    unlockRecoveryFile,
+    confirmImportedRecoveryIdentity,
+    pickedRecovery,
+    importedIdentityConfirmed,
+    importedRecovery,
     durableRecovery,
     exactHardwareTarget,
     flashPreparedFirmware,
@@ -140,6 +145,13 @@ export function EasySetup({
   );
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
   const [settingId, setSettingId] = useState("");
+  /**
+   * The recovery passphrases, held only in the field the operator typed them
+   * into. Never persisted, never put in application state that is serialised,
+   * and never included in diagnostics.
+   */
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [importPassphrase, setImportPassphrase] = useState("");
   const [bindAwaitingObservation, setBindAwaitingObservation] = useState(false);
   const [operatorBindEvidence, setOperatorBindEvidence] = useState<
     string | null
@@ -667,9 +679,36 @@ export function EasySetup({
                             {t("easy.fw.bindPhraseConfigured")}
                           </p>
                         ) : null}
+                        <label className="easy-field">
+                          <span>{t("easy.fw.recoveryPassphrase")}</span>
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={recoveryPassphrase}
+                            onChange={(event) => {
+                              setRecoveryPassphrase(event.target.value);
+                            }}
+                          />
+                        </label>
+                        <p className="easy-note">
+                          {t("easy.fw.recoveryPassphraseHint")}
+                        </p>
+                        <p className="easy-note">
+                          {t("easy.fw.recoveryPassphraseWhy")}
+                        </p>
+                        {/*
+                          Always clickable. The passphrase is a prerequisite
+                          collected right here, so pressing this with an empty
+                          field answers with the exact reason rather than
+                          presenting a dead control.
+                        */}
                         <button
                           type="button"
-                          onClick={() => void exportDurableRecoveryPackage()}
+                          onClick={() =>
+                            void exportDurableRecoveryPackage(
+                              recoveryPassphrase,
+                            )
+                          }
                           disabled={busy}
                         >
                           {t("easy.fw.exportDurableRecovery")}
@@ -683,11 +722,68 @@ export function EasySetup({
                         ) : null}
                         <button
                           type="button"
-                          onClick={() => void importDurableRecoveryPackage()}
+                          onClick={() => void pickRecoveryFile()}
                           disabled={busy}
                         >
-                          {t("easy.fw.importDurableRecovery")}
+                          {t("easy.fw.pickRecoveryFile")}
                         </button>
+                        {pickedRecovery === null ? null : (
+                          <>
+                            <p className="easy-note">
+                              {t("easy.fw.pickedRecovery", {
+                                product:
+                                  pickedRecovery.header.identity.target
+                                    .productName,
+                                created:
+                                  pickedRecovery.header.identity.createdAt,
+                              })}
+                            </p>
+                            <label className="easy-field">
+                              <span>{t("easy.fw.recoveryPassphrase")}</span>
+                              <input
+                                type="password"
+                                autoComplete="current-password"
+                                value={importPassphrase}
+                                onChange={(event) => {
+                                  setImportPassphrase(event.target.value);
+                                }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void unlockRecoveryFile(importPassphrase)
+                              }
+                              disabled={busy}
+                            >
+                              {t("easy.fw.unlockRecoveryFile")}
+                            </button>
+                          </>
+                        )}
+                        {importedRecovery === null ? null : (
+                          <>
+                            <p className="easy-note">
+                              {t("easy.fw.importedIdentityHeading")}:{" "}
+                              {importedRecovery.productName} ·{" "}
+                              {importedRecovery.targetId} ·{" "}
+                              {importedRecovery.releaseLabel}
+                            </p>
+                            <label className="easy-check">
+                              <input
+                                type="checkbox"
+                                checked={importedIdentityConfirmed}
+                                onChange={(event) => {
+                                  confirmImportedRecoveryIdentity(
+                                    event.target.checked,
+                                  );
+                                }}
+                              />
+                              <span>
+                                {t("easy.fw.importedIdentityConfirm")}
+                              </span>
+                            </label>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => downloadRecovery()}
