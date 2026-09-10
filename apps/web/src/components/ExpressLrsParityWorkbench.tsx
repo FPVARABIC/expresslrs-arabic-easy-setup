@@ -71,6 +71,8 @@ export function ExpressLrsParityWorkbenchView({
    * them. They are never persisted and never sent anywhere.
    */
   const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] =
+    useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
   const t = createTranslator(locale);
   const {
@@ -1155,7 +1157,10 @@ export function ExpressLrsParityWorkbenchView({
                 className="secondary-button"
                 disabled={busy}
                 onClick={() =>
-                  void exportDurableRecoveryPackage(recoveryPassphrase)
+                  void exportDurableRecoveryPackage(
+                    recoveryPassphrase,
+                    recoveryPassphraseConfirm,
+                  )
                 }
               >
                 {t("wb.ui.exportDurableRecovery")}
@@ -1180,6 +1185,17 @@ export function ExpressLrsParityWorkbenchView({
                 value={recoveryPassphrase}
                 onChange={(event) => {
                   setRecoveryPassphrase(event.target.value);
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>{t("wb.ui.recoveryPassphraseConfirm")}</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={recoveryPassphraseConfirm}
+                onChange={(event) => {
+                  setRecoveryPassphraseConfirm(event.target.value);
                 }}
               />
             </label>

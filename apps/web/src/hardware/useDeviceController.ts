@@ -1685,8 +1685,18 @@ export function useDeviceController({
 
   async function exportDurableRecoveryPackage(
     passphrase: string,
+    confirmation: string,
   ): Promise<void> {
     if (prepared === null || selectedTarget === null) return;
+    // Input validation, checked before storage is touched. A mistyped
+    // passphrase produces a file that seals and hashes perfectly and cannot be
+    // opened again — the failure would surface at recovery time, on a device
+    // that is already bricked. Two fields is the cheapest place to catch it,
+    // and this refuses the *export*, not any operation.
+    if (passphrase !== confirmation) {
+      setStatus(message("wb.durable.passphraseMismatch"));
+      return;
+    }
     setStatus(message("wb.durable.exporting"));
     const provenance = {
       schemaVersion: 1 as const,
@@ -1736,6 +1746,7 @@ export function useDeviceController({
           device: provenance.device,
         },
         passphrase,
+        expectedTarget: selectedTarget,
       });
       setDurableRecovery(receipt);
       setDurableRecoveryFor(prepared);

@@ -152,6 +152,8 @@ export function EasySetup({
    * and never included in diagnostics.
    */
   const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] =
+    useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
   const [bindAwaitingObservation, setBindAwaitingObservation] = useState(false);
   const [operatorBindEvidence, setOperatorBindEvidence] = useState<
@@ -771,6 +773,19 @@ export function EasySetup({
                             }}
                           />
                         </label>
+                        <label className="easy-field">
+                          <span>
+                            {t("easy.fw.recoveryPassphraseConfirm")}
+                          </span>
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={recoveryPassphraseConfirm}
+                            onChange={(event) => {
+                              setRecoveryPassphraseConfirm(event.target.value);
+                            }}
+                          />
+                        </label>
                         <p className="easy-note">
                           {t("easy.fw.recoveryPassphraseHint")}
                         </p>
@@ -788,6 +803,7 @@ export function EasySetup({
                           onClick={() =>
                             void exportDurableRecoveryPackage(
                               recoveryPassphrase,
+                              recoveryPassphraseConfirm,
                             )
                           }
                           disabled={busy}

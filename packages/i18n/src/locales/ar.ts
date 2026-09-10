@@ -214,6 +214,7 @@ export const ar = {
   "easy.fw.importDurableRecovery": "لديّ حزمة استعادة محفوظة بالفعل",
   "easy.fw.durableRecoveryVerified": "محفوظة ومتحقَّق منها: {location}",
   "easy.fw.recoveryPassphrase": "عبارة مرور الاستعادة",
+  "easy.fw.recoveryPassphraseConfirm": "أعد كتابة عبارة مرور الاستعادة",
   "easy.fw.recoveryPassphraseHint":
     "اكتبها عندك. الملف المحفوظ مشفّر بها، ولا تُحفظ أبدًا، وبدونها لا يمكن فتح الملف مرة أخرى.",
   "easy.fw.recoveryPassphraseWhy":

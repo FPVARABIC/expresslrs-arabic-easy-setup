@@ -369,6 +369,8 @@ export const workbenchEn = {
     "The saved recovery package does not match the bytes that were written.",
   "wb.durable.PACKAGE_INVALID":
     "That file is not a recovery package this build can restore from.",
+  "wb.durable.passphraseMismatch":
+    "The two recovery passphrases do not match. Correct them and save again — nothing has been written.",
   "wb.durable.picking": "Choose the saved recovery file…",
   "wb.durable.picked":
     "This file was saved from {product} on {created}. Enter its recovery passphrase to open it.",
@@ -461,6 +463,7 @@ export const workbenchEn = {
   "wb.ui.exportDurableRecovery": "Save the recovery package to durable storage",
   "wb.ui.importDurableRecovery": "Import a saved recovery package",
   "wb.ui.recoveryPassphrase": "Recovery passphrase",
+  "wb.ui.recoveryPassphraseConfirm": "Recovery passphrase again",
   "wb.ui.recoveryPassphraseHint":
     "The saved file is encrypted with this passphrase. It is never stored or sent anywhere — write it down, because it cannot be recovered and the file cannot be opened without it.",
   "wb.ui.recoveryPassphraseWhy":

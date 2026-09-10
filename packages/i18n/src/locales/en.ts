@@ -232,6 +232,7 @@ export const en = {
   "easy.fw.importDurableRecovery": "I already have a saved recovery package",
   "easy.fw.durableRecoveryVerified": "Saved and verified: {location}",
   "easy.fw.recoveryPassphrase": "Recovery passphrase",
+  "easy.fw.recoveryPassphraseConfirm": "Recovery passphrase again",
   "easy.fw.recoveryPassphraseHint":
     "Write this down. The saved file is encrypted with it, it is never stored, and without it the file cannot be opened again.",
   "easy.fw.recoveryPassphraseWhy":

@@ -120,7 +120,17 @@ export interface DurableRecoveryReceipt {
   readonly location: string;
   readonly displayName: string;
   readonly byteLength: number;
+  /** Digest of the sealed file as it was read back from storage. */
   readonly sha256: string;
+  /**
+   * Digest of the *archive inside* it, recovered by actually opening the file.
+   *
+   * Non-null only when the file was decrypted, authenticated and validated, so
+   * it is the part of the receipt a byte comparison cannot produce. Null after
+   * a pick, because at that point nothing has been opened and claiming a
+   * digest would be inventing one.
+   */
+  readonly archiveSha256: string | null;
   readonly verifiedAt: string;
 }
 
@@ -172,6 +182,7 @@ export async function exportDurableRecovery(input: {
   readonly bytes: Uint8Array;
   readonly identity: RecoveryVaultIdentity;
   readonly passphrase: string;
+  readonly expectedTarget: OfficialTarget;
   readonly mimeType?: string;
 }): Promise<DurableRecoveryReceipt> {
   const { store } = input;
@@ -182,9 +193,7 @@ export async function exportDurableRecovery(input: {
     );
   }
   // Sealed before it is offered to storage, so the plaintext archive never
-  // reaches a location outside this application. The digest in the receipt is
-  // therefore over the sealed file — the bytes that actually exist on disk and
-  // the bytes a later import will re-read.
+  // reaches a location outside this application.
   let sealed: Uint8Array;
   try {
     sealed = await sealRecoveryVault({
@@ -196,6 +205,7 @@ export async function exportDurableRecovery(input: {
     throw fromVaultError(error);
   }
   const expected = await sha256Hex(sealed);
+  const archiveDigest = await sha256Hex(input.bytes);
   const handle = await store.create({
     suggestedName: input.suggestedName,
     mimeType: input.mimeType ?? "application/octet-stream",
@@ -228,12 +238,61 @@ export async function exportDurableRecovery(input: {
       "The saved recovery package does not match the bytes that were written",
     );
   }
+
+  // Everything above proves storage handed back the same bytes. That is not
+  // the question an operator needs answered.
+  //
+  // The question is whether *this file*, with *the passphrase they just
+  // typed*, will open on the day a transmitter is bricked — and a digest
+  // cannot answer it. A mistyped passphrase seals perfectly and hashes
+  // perfectly; so does a file whose archive is subtly wrong. Both would have
+  // been reported "verified" and discovered at recovery time, which is the
+  // one moment there is nothing left to fall back on.
+  //
+  // So the file is actually opened, actually authenticated, actually
+  // validated, and actually matched against the package that was prepared.
+  // Only then is a receipt issued.
+  let opened: { readonly archive: Uint8Array };
+  try {
+    opened = await openRecoveryVault({
+      bytes: readBack,
+      passphrase: input.passphrase,
+    });
+  } catch (error) {
+    throw fromVaultError(error);
+  }
+  try {
+    const validated = await validateRecoveryPackage({
+      bytes: opened.archive,
+      expectedTarget: input.expectedTarget,
+    });
+    if (validated.packageSha256 !== archiveDigest) {
+      throw new DurableRecoveryError(
+        "PACKAGE_INVALID",
+        "The saved file opened, but the archive inside it is not the package that was prepared",
+      );
+    }
+  } catch (error) {
+    throw error instanceof DurableRecoveryError
+      ? error
+      : new DurableRecoveryError(
+          "PACKAGE_INVALID",
+          error instanceof Error
+            ? error.message
+            : "The saved file did not contain a usable recovery package",
+        );
+  } finally {
+    // The decrypted archive was only ever needed to answer the question.
+    opened.archive.fill(0);
+  }
+
   return Object.freeze({
     backend: store.backend,
     location: handle.location,
     displayName: handle.displayName,
     byteLength: readBack.byteLength,
     sha256: actual,
+    archiveSha256: archiveDigest,
     verifiedAt: new Date().toISOString(),
   });
 }
@@ -304,6 +363,7 @@ export async function pickDurableRecovery(input: {
       displayName: handle.displayName,
       byteLength: bytes.byteLength,
       sha256: await sha256Hex(bytes),
+      archiveSha256: null,
       verifiedAt: new Date().toISOString(),
     }),
     header,
@@ -355,7 +415,10 @@ export async function openDurableRecovery(input: {
     archive.fill(0);
   }
   return Object.freeze({
-    receipt: input.picked.receipt,
+    receipt: Object.freeze({
+      ...input.picked.receipt,
+      archiveSha256: recoveryPackage.packageSha256,
+    }),
     recoveryPackage,
   });
 }

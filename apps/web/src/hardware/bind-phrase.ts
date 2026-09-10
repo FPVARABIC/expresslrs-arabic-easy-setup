@@ -159,3 +159,127 @@ export function bindPhraseIssue(phrase: string): BindPhraseIssue | null {
 export function forgetBindPhrase(buffer: Uint8Array): void {
   buffer.fill(0);
 }
+
+/**
+ * How guessable a phrase is, which is a different question from whether it
+ * works.
+ *
+ * A weak phrase is completely valid: it derives a UID, it binds, and the link
+ * works. Nothing here may refuse it, and nothing in the interface may withhold
+ * an operation because of it. What it affects is a specific, real risk.
+ *
+ * The UID is `md5("-DMY_BINDING_PHRASE=\"…\"")[0..6]` — upstream's derivation,
+ * so it is not negotiable. It is unsalted, and the format around the phrase is
+ * public and fixed. An attacker who observes the 6-byte UID can therefore test
+ * candidate phrases offline at the speed of MD5: a dictionary word, a name, a
+ * date or a short number falls immediately. Anyone who recovers the phrase can
+ * bind to the link.
+ *
+ * That is worth telling an operator plainly and worth offering to fix. It is
+ * not worth blocking them over: an operator who has already flashed a receiver
+ * with a phrase must be able to type that same phrase into the transmitter,
+ * whatever anyone thinks of it, or the two will never talk to each other.
+ */
+export type BindPhraseStrength = "STRONG" | "WEAK";
+
+/**
+ * Bits of entropy at or above which a phrase is not called weak.
+ *
+ * A deliberately modest bar. This is not a password policy; it is the line
+ * below which an offline search against a 6-byte MD5 is trivially worth
+ * running. Phrases above it are not called strong in any absolute sense —
+ * only "not obviously guessable".
+ */
+export const WEAK_BIND_PHRASE_BITS = 40;
+
+/** Entropy the generator produces. */
+export const GENERATED_BIND_PHRASE_BITS = 96;
+
+/**
+ * The alphabet the generator draws from.
+ *
+ * Lower-case letters and digits, minus the pairs that are read back wrongly
+ * over a phone call or copied wrongly off a screen — `0`/`o`, `1`/`l`/`i`.
+ * A phrase has to be transcribed onto a second device by a person, so
+ * characters that survive that trip are worth more than alphabet size.
+ */
+const GENERATOR_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+
+/**
+ * A rough lower bound on how much guessing a phrase costs.
+ *
+ * Deliberately pessimistic: it counts the character classes actually used and
+ * assumes the attacker knows the length, which is the assumption that matters
+ * when the answer decides whether to warn someone. It is not a strength meter
+ * and is not shown as a score — it feeds one boolean.
+ */
+export function bindPhraseEntropyBits(phrase: string): number {
+  const normalized = phrase.normalize("NFC");
+  if (normalized.length === 0) return 0;
+  const classes = [
+    /[a-z]/u.test(normalized) ? 26 : 0,
+    /[A-Z]/u.test(normalized) ? 26 : 0,
+    /[0-9]/u.test(normalized) ? 10 : 0,
+    /[^A-Za-z0-9]/u.test(normalized) ? 33 : 0,
+  ];
+  const alphabet = classes.reduce((total, size) => total + size, 0);
+  if (alphabet === 0) return 0;
+  const distinct = new Set([...normalized]).size;
+  // Repetition is not entropy: "aaaaaaaa" is not eight characters of choice.
+  const effectiveLength = Math.min(normalized.length, distinct * 2);
+  return Math.floor(effectiveLength * Math.log2(alphabet));
+}
+
+/**
+ * Whether a phrase is worth warning about. Never a reason to refuse one.
+ *
+ * Returns null for an empty phrase, which means "no binding phrase set" and is
+ * a legitimate choice rather than a weak one.
+ */
+export function bindPhraseStrength(phrase: string): BindPhraseStrength | null {
+  if (phrase.normalize("NFC").length === 0) return null;
+  if (bindPhraseIssue(phrase) !== null) return null;
+  return bindPhraseEntropyBits(phrase) >= WEAK_BIND_PHRASE_BITS
+    ? "STRONG"
+    : "WEAK";
+}
+
+/**
+ * Generates a phrase with at least {@link GENERATED_BIND_PHRASE_BITS} bits.
+ *
+ * `crypto.getRandomValues`, never `Math.random`: the latter is seeded
+ * predictably and is not a source anyone should bind a radio link with.
+ * Rejection sampling rather than a modulo, so every character of the alphabet
+ * is equally likely — a modulo would quietly bias the first few characters and
+ * cost real entropy.
+ *
+ * The result is checked against the same constraints a typed phrase faces, so
+ * a generated phrase can never be one the rest of the application would
+ * refuse.
+ */
+export function generateBindPhrase(): string {
+  const alphabet = GENERATOR_ALPHABET;
+  const length = Math.ceil(GENERATED_BIND_PHRASE_BITS / Math.log2(alphabet.length));
+  // The largest multiple of the alphabet size that fits in a byte; values at
+  // or above it are discarded rather than folded, which is what keeps the
+  // distribution uniform.
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  const characters: string[] = [];
+  const scratch = new Uint8Array(length * 2);
+  while (characters.length < length) {
+    crypto.getRandomValues(scratch);
+    for (const byte of scratch) {
+      if (characters.length >= length) break;
+      if (byte >= limit) continue;
+      characters.push(alphabet[byte % alphabet.length] ?? "");
+    }
+  }
+  const phrase = characters.join("");
+  if (bindPhraseIssue(phrase) !== null) {
+    // Unreachable with this alphabet, and asserted rather than assumed: a
+    // generator that produced a phrase the application refuses would be worse
+    // than no generator.
+    throw new Error("generated binding phrase failed its own validation");
+  }
+  return phrase;
+}

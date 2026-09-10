@@ -319,6 +319,8 @@ export const workbenchAr = {
     "حزمة الاستعادة المحفوظة لا تطابق البايتات التي كُتبت.",
   "wb.durable.PACKAGE_INVALID":
     "هذا الملف ليس حزمة استعادة يستطيع هذا الإصدار الاستعادة منها.",
+  "wb.durable.passphraseMismatch":
+    "عبارتا مرور الاستعادة غير متطابقتين. صحّحهما ثم احفظ مرة أخرى — لم يُكتب أي ملف.",
   "wb.durable.picking": "اختر ملف الاستعادة المحفوظ…",
   "wb.durable.picked":
     "هذا الملف محفوظ من {product} بتاريخ {created}. أدخل عبارة مرور الاستعادة لفتحه.",
@@ -339,6 +341,7 @@ export const workbenchAr = {
   "wb.ui.cancelOperation": "إلغاء العملية",
   "wb.ui.pendingRecovery": "استعادة معلّقة ·",
   "wb.ui.recoveryPassphrase": "عبارة مرور الاستعادة",
+  "wb.ui.recoveryPassphraseConfirm": "أعد كتابة عبارة مرور الاستعادة",
   "wb.ui.recoveryPassphraseHint":
     "الملف المحفوظ مشفّر بهذه العبارة. لا تُحفظ ولا تُرسل إلى أي مكان — اكتبها، فلا يمكن استرجاعها ولا يمكن فتح الملف بدونها.",
   "wb.ui.recoveryPassphraseWhy":

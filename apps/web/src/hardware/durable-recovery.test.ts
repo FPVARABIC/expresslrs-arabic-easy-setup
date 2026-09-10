@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from "fflate";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { copyToArrayBuffer } from "./byte-utils";
 import {
@@ -200,7 +200,13 @@ async function sealedFile(
 }
 
 describe("exportDurableRecovery", () => {
-  const bytes = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1]);
+  // A real archive, because the export now opens and validates what it wrote.
+  // A handful of arbitrary bytes would fail validation and prove nothing about
+  // the paths under test.
+  let bytes: Uint8Array;
+  beforeAll(async () => {
+    bytes = await recoveryArchive();
+  });
 
   it("writes, reopens and verifies, and reports where the file is", async () => {
     const store = fakeStore();
@@ -210,6 +216,7 @@ describe("exportDurableRecovery", () => {
       bytes,
       identity,
       passphrase: PASSPHRASE,
+      expectedTarget: target,
     });
     expect(receipt.location).toBe("fake:1");
     expect(receipt.displayName).toBe("target-4.1.0-recovery.elrsrec");
@@ -223,21 +230,26 @@ describe("exportDurableRecovery", () => {
   });
 
   it("never offers the plaintext archive to storage", async () => {
-    // The whole point: what reaches the document provider is sealed. If this
-    // ever regresses, the operator's Wi-Fi password is in Downloads.
+    // The whole point: what reaches the document provider is sealed. A zip
+    // stores its entry names in cleartext, so `manifest.json` is present in
+    // the plaintext archive and must be absent from the file on storage — if
+    // it ever appears there, the archive went out unencrypted and the
+    // operator's Wi-Fi password went with it.
     const store = fakeStore();
-    const secret = new TextEncoder().encode("wifi-password=hunter2-hunter2");
-    const plaintext = new Uint8Array(256);
-    plaintext.set(secret, 32);
+    const marker = new TextEncoder().encode("manifest.json");
+    expect(indexOfBytes(bytes, marker)).toBeGreaterThan(-1);
+
     await exportDurableRecovery({
       store,
       suggestedName: "x.elrsrec",
-      bytes: plaintext,
+      bytes,
       identity,
       passphrase: PASSPHRASE,
+      expectedTarget: target,
     });
     const written = store.stored ?? new Uint8Array();
-    expect(indexOfBytes(written, secret)).toBe(-1);
+    expect(indexOfBytes(written, marker)).toBe(-1);
+    expect(indexOfBytes(written, bytes)).toBe(-1);
   });
 
   it("refuses a passphrase too short to protect the file", async () => {
@@ -249,6 +261,7 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: "abc",
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "PASSPHRASE_UNUSABLE" });
     // Nothing was written: the refusal happens before storage is touched.
@@ -263,6 +276,7 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: PASSPHRASE,
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "NO_DURABLE_TARGET" });
   });
@@ -280,6 +294,7 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: PASSPHRASE,
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "CANCELLED" });
   });
@@ -297,6 +312,7 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: PASSPHRASE,
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "INSUFFICIENT_STORAGE" });
   });
@@ -310,6 +326,7 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: PASSPHRASE,
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "REOPEN_FAILED" });
     // The write did happen. That is exactly why an unverifiable write must not
@@ -328,8 +345,82 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: PASSPHRASE,
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "TRUNCATED" });
+  });
+
+  it("opens and validates what it wrote, not just its digest", async () => {
+    // The receipt carries a digest of the *archive inside* the file, and that
+    // value cannot be produced by comparing bytes: it only exists because the
+    // file was decrypted, authenticated and validated after being read back.
+    const store = fakeStore();
+    const receipt = await exportDurableRecovery({
+      store,
+      suggestedName: "x.elrsrec",
+      bytes,
+      identity,
+      passphrase: PASSPHRASE,
+      expectedTarget: target,
+    });
+    expect(receipt.archiveSha256).toBe(await sha256(bytes));
+    expect(receipt.sha256).not.toBe(receipt.archiveSha256);
+  });
+
+  it("refuses when storage returns a file the passphrase cannot open", async () => {
+    // The case a hash comparison cannot see. Storage returns exactly what it
+    // was given — same length, same digest — but the bytes were sealed under a
+    // different key, so the operator's passphrase will not open it. Before
+    // this check, that file was reported "verified" and the failure surfaced
+    // at recovery time, on a device that is already bricked.
+    const foreign = await sealRecoveryVault({
+      archive: bytes,
+      identity,
+      passphrase: "a-completely-different-passphrase",
+      iterations: 100_000,
+    });
+    const store = fakeStore({ mutateStored: () => foreign });
+    await expect(
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes,
+        identity,
+        passphrase: PASSPHRASE,
+        expectedTarget: target,
+      }),
+    ).rejects.toMatchObject({ code: "HASH_MISMATCH" });
+
+    // And when the digest *also* matches — storage handing back a foreign but
+    // self-consistent file — authentication is what refuses it.
+    const consistent = fakeStore({ mutateStored: () => foreign });
+    await expect(
+      exportDurableRecovery({
+        store: consistent,
+        suggestedName: "x.elrsrec",
+        bytes: await recoveryArchive(),
+        identity,
+        passphrase: PASSPHRASE,
+        expectedTarget: target,
+      }),
+    ).rejects.toMatchObject({ code: "HASH_MISMATCH" });
+  });
+
+  it("refuses when the archive inside is not the package that was prepared", async () => {
+    // Opens, authenticates, and is still the wrong package. Only the
+    // comparison against the prepared archive's digest catches this.
+    const other = await recoveryArchive({ targetId: "vendor/other/target" });
+    const store = fakeStore();
+    await expect(
+      exportDurableRecovery({
+        store,
+        suggestedName: "x.elrsrec",
+        bytes: other,
+        identity,
+        passphrase: PASSPHRASE,
+        expectedTarget: target,
+      }),
+    ).rejects.toMatchObject({ code: "PACKAGE_INVALID" });
   });
 
   it("refuses a file of the right length whose bytes changed", async () => {
@@ -347,6 +438,7 @@ describe("exportDurableRecovery", () => {
         bytes,
         identity,
         passphrase: PASSPHRASE,
+        expectedTarget: target,
       }),
     ).rejects.toMatchObject({ code: "HASH_MISMATCH" });
   });
