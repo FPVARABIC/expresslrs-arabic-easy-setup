@@ -26,7 +26,7 @@ which a check could have helped.
 
 | Phase | Where | Has the key | What runs |
 | --- | --- | --- | --- |
-| Candidate build | `android.yml`, on pull requests and branches | **No** | The whole toolchain: pnpm, Gradle, lint, unit tests, instrumentation. Produces an **unsigned** `physicalTest` APK and a provenance manifest. |
+| Candidate build | `android.yml`, on pull requests and branches | **No** | The whole toolchain: pnpm, Gradle, lint, unit tests, instrumentation. Produces `app-physicalTest-unsigned.apk` and a provenance manifest. |
 | Trusted signing | `android-physical-test-signer.yml`, default branch, `workflow_dispatch` | Yes, in one job | `base64`, `zipalign`, `apksigner`, `sha256sum`, `shred`. Nothing else. |
 
 The signer never checks out the candidate SHA, never runs Gradle, npm, pnpm, a
@@ -150,6 +150,34 @@ Check, and keep checking, that there is no path which reaches
 - `permissions:` is `contents: read` at the top level, and the signing job adds
   nothing.
 
+## What the shell in this workflow is allowed to do
+
+The signer's shell is part of the security boundary, not a style question, so
+every rule below is enforced by `pnpm check:ci-hygiene` and every one of them
+was proven by reintroducing the defect it names and watching the check fail.
+
+| Rule | Why | The defect it caught |
+| --- | --- | --- |
+| No `${{ … }}` inside any `run:` block | Actions substitutes expressions into the script *text* before a shell parses it, so a value containing `$(…)` becomes a command | `github.run_id` pasted into an API URL; four `inputs.*` pasted into a JSON heredoc |
+| The signed provenance is produced by a JSON encoder | `versionName` is read out of an APK built from pull-request code; in a document assembled by pasting strings, one quote rewrites the record | the heredoc was unquoted, so a command substitution in an input would have run in the job holding the key |
+| `apksigner`'s answer is read, not its exit status | `apksigner verify` exits non-zero for a missing file, an unreadable zip or a JVM that would not start | any of those read as "no signature found", which is how a broken toolchain hands an APK to the key |
+| Bounded formats for every candidate-controlled value | a field with no shape is a field with no meaning | `versionCode` and `versionName` were unbounded |
+| The APK is `app-physicalTest-unsigned.apk` | AGP appends the suffix exactly when no signing config was applied, so the name is the claim | the signer looked for `app-physicalTest.apk` and would have died silently at `test -f` on its first real run |
+| Build-tools pinned, not "newest present" | apksigner's signature-scheme defaults move between versions | the version was chosen by `ls | sort -V | tail -1` |
+| Exactly one signer certificate | `head -1` on a multiply-signed APK checks the first and says nothing about the rest | the fingerprint check read only the first digest |
+
+Two of these were latent rather than exploitable today: nothing could reach the
+heredoc's command substitution, because the verify job's regexes happen to
+exclude the characters. That is a property of a check in a different job rather
+than of the step itself, and the whole point of splitting `verify` from `sign`
+is not to have the key's safety rest on where a check happens to sit.
+
+Neither the injection nor the filename defect could be found by reading alone.
+Both were confirmed by running the shell: the old heredoc, given a value
+containing `$(touch …)`, created the file and forged `"signed": false` in its
+own provenance; the replacement stores the same value as text, runs nothing,
+and leaves the record intact.
+
 ## Dispatching a signing run
 
 **Actions → Android physical-test signer → Run workflow**, from `main`, with the
@@ -208,23 +236,34 @@ Download the unsigned candidate from the `android.yml` run's artifacts, then:
 EXPECTED=<expected_apk_sha256 from the run summary>
 
 unzip elrs-android-physicaltest-unsigned-<sha>.zip
-sha256sum app-physicalTest.apk
+sha256sum app-physicalTest-unsigned.apk
 
 # 1. Refuse to continue on a mismatch. This is the check the verify job runs;
 #    doing it by hand means actually doing it.
-test "$(sha256sum app-physicalTest.apk | cut -d' ' -f1)" = "$EXPECTED" \
+test "$(sha256sum app-physicalTest-unsigned.apk | cut -d' ' -f1)" = "$EXPECTED" \
   || { echo "digest mismatch — do not sign this"; exit 1; }
 
-# 2. Confirm it is unsigned. A signature here would mean the candidate build
-#    had access to a key.
-apksigner verify app-physicalTest.apk && echo "ALREADY SIGNED — stop" && exit 1
+# 2. Confirm it is unsigned — and read the answer rather than the exit status.
+#    A signature here would mean the candidate build had access to a key. But
+#    `apksigner verify` also exits non-zero for a missing file, an unreadable
+#    zip or a JVM that would not start, and none of those is a statement about
+#    signatures. "It failed, so it must be unsigned" is how a broken toolchain
+#    talks you into signing something.
+out="$(apksigner verify app-physicalTest-unsigned.apk 2>&1)"; status=$?
+if [ "$status" -eq 0 ]; then
+  echo "ALREADY SIGNED — stop"; exit 1
+fi
+case "$out" in
+  *"DOES NOT VERIFY"*|*"No JAR signature"*|*"Missing META-INF"*) ;;
+  *) echo "apksigner exited $status without saying it is unsigned: $out"; exit 1 ;;
+esac
 
 # 3. Check the manifest describes this APK.
 cat app-physicalTest-unsigned.provenance.json
-aapt2 dump badging app-physicalTest.apk | head -1
+aapt2 dump badging app-physicalTest-unsigned.apk | head -1
 
 # 4. Align, then sign. Aligning after signing invalidates the v2 signature.
-zipalign -p -f 4 app-physicalTest.apk app-physicalTest-aligned.apk
+zipalign -p -f 4 app-physicalTest-unsigned.apk app-physicalTest-aligned.apk
 zipalign -c -v 4 app-physicalTest-aligned.apk
 
 apksigner sign \
@@ -242,7 +281,7 @@ apksigner verify --print-certs app-physicalTest-signed.apk \
 cat android/signing/physical-test-certificate.sha256
 
 # 6. Record what you produced, so a phone can be traced back to a tree.
-sha256sum app-physicalTest.apk app-physicalTest-signed.apk
+sha256sum app-physicalTest-unsigned.apk app-physicalTest-signed.apk
 ```
 
 Keep step 6's output with the APK. Without it there is no link between what a
@@ -256,7 +295,7 @@ node scripts/verify-unsigned-candidate.mjs \
   --manifest app-physicalTest-unsigned.provenance.json \
   --source-sha <sha> --run-id <run id> \
   --artifact-name elrs-android-physicaltest-unsigned-<sha> \
-  --apk-sha256 "$(sha256sum app-physicalTest.apk | cut -d' ' -f1)" \
+  --apk-sha256 "$(sha256sum app-physicalTest-unsigned.apk | cut -d' ' -f1)" \
   --application-id com.fpvarabic.elrs.bridge \
   --version-code <from aapt2> --version-name <from aapt2>
 ```

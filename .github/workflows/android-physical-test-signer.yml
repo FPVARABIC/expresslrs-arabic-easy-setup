@@ -71,6 +71,11 @@ env:
   # run's own recorded workflow path, not against a name a caller supplies.
   ALLOWED_WORKFLOW_PATH: .github/workflows/android.yml
   EXPECTED_APPLICATION_ID: com.fpvarabic.elrs.bridge
+  # The exact build-tools this workflow signs with, and the version the setup
+  # steps install. Picking "the newest directory present" instead would let a
+  # runner image's own build-tools decide which apksigner signs the candidate,
+  # and apksigner's signature-scheme defaults are version-dependent.
+  SIGNER_BUILD_TOOLS: 35.0.0
 
 jobs:
   verify:
@@ -183,7 +188,7 @@ jobs:
       - name: Set up Android build tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
-          packages: build-tools;35.0.0 platform-tools
+          packages: build-tools;${{ env.SIGNER_BUILD_TOOLS }} platform-tools
 
       # The digest, the identity, and the absence of a signature. The manifest
       # CI wrote is cross-checked against the APK itself here, so a manifest
@@ -198,16 +203,25 @@ jobs:
         run: |
           set -euo pipefail
           fail() { echo "::error::$1" >&2; exit 1; }
-          apk="$RUNNER_TEMP/candidate/app-physicalTest.apk"
+          # `app-physicalTest-unsigned.apk`, with the suffix. AGP writes that
+          # name precisely because no signing config was applied, and drops the
+          # suffix only when one was — so the name is itself a claim about the
+          # thing this workflow exists to check. Looking for the wrong name
+          # here is not a typo that fails loudly: under `set -e` the step dies
+          # silently at `test -f`, which is how the candidate build hid the
+          # same mistake for two rounds.
+          apk="$RUNNER_TEMP/candidate/app-physicalTest-unsigned.apk"
           manifest="$RUNNER_TEMP/candidate/app-physicalTest-unsigned.provenance.json"
-          test -f "$apk" || fail "the artifact contains no app-physicalTest.apk"
+          test -f "$apk" || fail "the artifact contains no app-physicalTest-unsigned.apk; found: $(ls -1 "$RUNNER_TEMP/candidate" | tr '\n' ' ')"
           test -f "$manifest" || fail "the artifact contains no provenance manifest"
 
           actual="$(sha256sum "$apk" | cut -d' ' -f1)"
           [ "$actual" = "$EXPECTED_APK_SHA256" ] \
             || fail "unsigned APK digest is $actual, not the $EXPECTED_APK_SHA256 that was expected"
 
-          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          build_tools="$SIGNER_BUILD_TOOLS"
+          test -x "$ANDROID_HOME/build-tools/$build_tools/apksigner" \
+            || { echo "::error::build-tools $build_tools is not installed" >&2; exit 1; }
           aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
           apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
           badging="$("$aapt2" dump badging "$apk")"
@@ -219,11 +233,38 @@ jobs:
           [ "$package_id" = "$EXPECTED_APPLICATION_ID" ] \
             || fail "APK application id is $package_id, not $EXPECTED_APPLICATION_ID"
 
+          # `versionCode` and `versionName` come out of an APK built from
+          # pull-request code, so they are candidate-controlled strings, and
+          # they end up in the signed provenance record that ties a tester's
+          # phone back to a tree. Bounded to formats a version can actually
+          # take, so nothing with a quote, a backslash or a newline in it can
+          # reach that record and shape what it appears to say.
+          printf '%s' "$version_code" | grep -Eq '^[0-9]{1,9}$' \
+            || fail "APK versionCode is not a plain number: $version_code"
+          printf '%s' "$version_name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$' \
+            || fail "APK versionName is not a plain version string: $version_name"
+
           # An already-signed input would mean the candidate build had access to
           # a key, which is the thing this whole arrangement exists to prevent.
-          if "$apksigner" verify "$apk" >/dev/null 2>&1; then
+          #
+          # The result is read, not merely its exit status. `apksigner verify`
+          # exits non-zero for a missing file, an unreadable zip, a JVM that
+          # failed to start, or a build-tools install that is not there — and
+          # treating any of those as "no signature found" would let a broken
+          # toolchain wave an APK through to the key. So the two outcomes are
+          # separated explicitly and anything else fails closed.
+          set +e
+          verify_output="$("$apksigner" verify "$apk" 2>&1)"
+          verify_status=$?
+          set -e
+          if [ "$verify_status" -eq 0 ]; then
             fail "the candidate is already signed; a signature on the input means a key was readable by candidate code"
           fi
+          # apksigner's own words for "this file carries no signature". Any
+          # other failure is a failure to determine, which is not an answer.
+          printf '%s' "$verify_output" | grep -Eqi \
+            'DOES NOT VERIFY|No JAR signature|Missing (APK Signature Scheme|META-INF)|not signed' \
+            || fail "apksigner exited $verify_status without saying the APK is unsigned, so whether it carries a signature is unknown. Refusing. Output: $verify_output"
 
           node scripts/verify-unsigned-candidate.mjs \
             --manifest "$manifest" \
@@ -289,7 +330,7 @@ jobs:
       - name: Set up Android build tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
-          packages: build-tools;35.0.0
+          packages: build-tools;${{ env.SIGNER_BUILD_TOOLS }}
 
       # Fetched with curl rather than `actions/download-artifact`, for two
       # reasons. It is one fewer third-party action executing in the job that
@@ -301,6 +342,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           ARTIFACT: verified-unsigned-${{ inputs.source_sha }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           api() {
@@ -312,7 +354,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/verified"
           # This run's own artifacts, so the id cannot name someone else's.
           id="$(
-            api "https://api.github.com/repos/$REPOSITORY/actions/runs/${{ github.run_id }}/artifacts" \
+            api "https://api.github.com/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" \
               | node -e '
                   const chunks = [];
                   process.stdin.on("data", (c) => chunks.push(c));
@@ -397,7 +439,9 @@ jobs:
           KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
         run: |
           set -euo pipefail
-          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          build_tools="$SIGNER_BUILD_TOOLS"
+          test -x "$ANDROID_HOME/build-tools/$build_tools/apksigner" \
+            || { echo "::error::build-tools $build_tools is not installed" >&2; exit 1; }
           zipalign="$ANDROID_HOME/build-tools/$build_tools/zipalign"
           apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
           unsigned="$RUNNER_TEMP/verified/verified-unsigned.apk"
@@ -408,8 +452,10 @@ jobs:
           "$zipalign" -p -f 4 "$unsigned" "$aligned"
           "$zipalign" -c -v 4 "$aligned" > /dev/null
 
-          # Passwords by file descriptor rather than on the command line, so
-          # they never appear in a process listing.
+          # Passwords through the environment rather than on the command
+          # line. `apksigner`'s own `env:` scheme, so they never appear in
+          # `ps` output, which any process on the runner can read; an
+          # environment is readable only by the same user.
           "$apksigner" sign \
             --ks "$KEYSTORE_PATH" \
             --ks-pass "env:KEYSTORE_PASSWORD" \
@@ -428,16 +474,30 @@ jobs:
         run: |
           set -euo pipefail
           fail() { echo "::error::$1" >&2; exit 1; }
-          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          build_tools="$SIGNER_BUILD_TOOLS"
+          test -x "$ANDROID_HOME/build-tools/$build_tools/apksigner" \
+            || { echo "::error::build-tools $build_tools is not installed" >&2; exit 1; }
           apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
 
           "$apksigner" verify --verbose --print-certs "$SIGNED" \
             | tee "$SIGNED.apksigner.txt"
 
+          # Read from a file rather than through a pipeline into `head`. Under
+          # `pipefail`, `head` closing the pipe early can take the producer
+          # down with SIGPIPE and fail the step for no reason — the same shape
+          # that once killed `yes | sdkmanager --licenses` in this repository.
+          certs="$RUNNER_TEMP/apksigner-certs.txt"
+          "$apksigner" verify --print-certs "$SIGNED" > "$certs" 2>&1
+          # Exactly one signer. `head -1` on a multiply-signed APK would check
+          # the first certificate and say nothing about the others, which is
+          # the difference between "signed by the recorded key" and "signed by
+          # the recorded key among others".
+          signers="$(grep -c '^Signer #[0-9]* certificate SHA-256 digest:' "$certs" || true)"
+          [ "$signers" = "1" ] \
+            || fail "expected exactly one signer certificate, found $signers"
           observed="$(
-            "$apksigner" verify --print-certs "$SIGNED" 2>&1 \
-              | grep -io 'SHA-256 digest: *[0-9a-f]\{64\}' \
-              | grep -io '[0-9a-f]\{64\}' | head -1
+            sed -n 's/^Signer #1 certificate SHA-256 digest: *\([0-9a-fA-F]\{64\}\).*/\1/p' "$certs" \
+              | tr 'A-F' 'a-f'
           )"
           printf '%s' "$observed" | grep -Eq '^[0-9a-f]{64}$' \
             || fail "could not read a certificate fingerprint from the signed APK"
@@ -455,6 +515,24 @@ jobs:
           echo "certificate=$observed" >> "$GITHUB_OUTPUT"
           echo "sha256=$(sha256sum "$SIGNED" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+      # Every value arrives as an environment variable and is serialised by a
+      # JSON encoder, not pasted into a document.
+      #
+      # The previous version built this with an unquoted heredoc carrying
+      # `${{ inputs.* }}` directly. GitHub substitutes those before the shell
+      # parses anything, and an unquoted heredoc *does* evaluate `$(…)` inside
+      # it — the timestamp below relied on exactly that. So a value containing
+      # a command substitution would have run as a command, in the one job
+      # where the signing key exists. Nothing could reach it today, because the
+      # verify job's regexes happen to exclude the characters; that is a
+      # property of a check in another job rather than of this step, and it is
+      # not the sort of thing to leave resting on a coincidence of ordering.
+      #
+      # `versionName` is the other half of the same problem: it is read out of
+      # an APK built from pull-request code, so it is candidate-controlled, and
+      # in a JSON document assembled by string concatenation a quote in it
+      # would let a candidate add or overwrite fields in its own provenance
+      # record. Bounded in the verify job, and encoded rather than pasted here.
       - name: Write the signed provenance
         env:
           SIGNED: ${{ steps.signed.outputs.path }}
@@ -463,30 +541,48 @@ jobs:
           CERTIFICATE: ${{ steps.verified.outputs.certificate }}
           VERSION_CODE: ${{ needs.verify.outputs.version-code }}
           VERSION_NAME: ${{ needs.verify.outputs.version-name }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+          SIGNER_RUN_ID: ${{ github.run_id }}
+          SIGNER_RUN_ATTEMPT: ${{ github.run_attempt }}
+          SIGNER_WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          cat > "$SIGNED.provenance.json" <<JSON
-          {
-            "schemaVersion": 1,
-            "channel": "physical-test-signed",
-            "signed": true,
-            "repository": "${{ github.repository }}",
-            "sourceSha": "${{ inputs.source_sha }}",
-            "sourceRunId": "${{ inputs.source_run_id }}",
-            "sourceArtifactName": "${{ inputs.artifact_name }}",
-            "sourceArtifactId": "${{ inputs.artifact_id }}",
-            "signerRunId": "${{ github.run_id }}",
-            "signerRunAttempt": "${{ github.run_attempt }}",
-            "signerWorkflowRef": "${{ github.workflow_ref }}",
-            "unsignedApkSha256": "$UNSIGNED_SHA",
-            "signedApkSha256": "$SIGNED_SHA",
-            "signingCertificateSha256": "$CERTIFICATE",
-            "applicationId": "$EXPECTED_APPLICATION_ID",
-            "versionCode": "$VERSION_CODE",
-            "versionName": "$VERSION_NAME",
-            "signedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          JSON
+          OUT="$SIGNED.provenance.json" \
+          SIGNED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          node -e '
+            const field = (name) => {
+              const value = process.env[name];
+              if (typeof value !== "string" || value.length === 0) {
+                console.error(`::error::provenance field ${name} is empty`);
+                process.exit(1);
+              }
+              return value;
+            };
+            require("fs").writeFileSync(process.env.OUT, JSON.stringify({
+              schemaVersion: 1,
+              channel: "physical-test-signed",
+              signed: true,
+              repository: field("REPOSITORY"),
+              sourceSha: field("SOURCE_SHA"),
+              sourceRunId: field("SOURCE_RUN_ID"),
+              sourceArtifactName: field("ARTIFACT_NAME"),
+              sourceArtifactId: field("ARTIFACT_ID"),
+              signerRunId: field("SIGNER_RUN_ID"),
+              signerRunAttempt: field("SIGNER_RUN_ATTEMPT"),
+              signerWorkflowRef: field("SIGNER_WORKFLOW_REF"),
+              unsignedApkSha256: field("UNSIGNED_SHA"),
+              signedApkSha256: field("SIGNED_SHA"),
+              signingCertificateSha256: field("CERTIFICATE"),
+              applicationId: field("EXPECTED_APPLICATION_ID"),
+              versionCode: field("VERSION_CODE"),
+              versionName: field("VERSION_NAME"),
+              signedAt: field("SIGNED_AT"),
+            }, null, 2) + "\n");
+          '
           node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' \
             "$SIGNED.provenance.json"
           cat "$SIGNED.provenance.json"
