@@ -1,4 +1,21 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+import {
+  UNSIGNED_APK_RELATIVE_PATH,
+  UNSIGNED_MANIFEST_RELATIVE_PATH,
+  verifyUnsignedCandidateLayout,
+} from "./verify-unsigned-candidate-layout.mjs";
 
 const allowedWorkflows = new Set([
   "ci.yml",
@@ -230,6 +247,20 @@ if (!existsSync(signerPath)) {
       `${signerPath} looks for app-physicalTest.apk; the candidate build writes app-physicalTest-unsigned.apk`,
     );
   }
+  if (/RUNNER_TEMP\/candidate\/app-physicalTest-unsigned\.apk/u.test(signer)) {
+    fail(
+      `${signerPath} looks for the unsigned APK at the artifact root; upload-artifact preserves its app/build/outputs path`,
+    );
+  }
+  if (
+    !/node scripts\/verify-unsigned-candidate-layout\.mjs \\\s*"\$RUNNER_TEMP\/candidate"/u.test(
+      signer,
+    )
+  ) {
+    fail(
+      `${signerPath} does not verify the candidate artifact's exact layout before selecting the APK`,
+    );
+  }
 
   // 5. Bounded formats for everything a candidate controls.
   for (const [what, pattern] of [
@@ -257,6 +288,88 @@ if (!existsSync(signerPath)) {
       `${signerPath} picks build-tools by listing the directory; pin the version instead`,
     );
   }
+}
+
+// The first live rehearsal exposed a contract mismatch that a source-only
+// check could not: upload-artifact preserved the APK below app/build/outputs,
+// while the signer looked only at the extraction root. Exercise the same
+// resolver the workflow invokes against both the real layout and the ways a
+// candidate could otherwise make an ambiguous or misleading archive.
+const layoutProbeRoot = mkdtempSync(join(tmpdir(), "elrs-signer-layout-"));
+
+function writeValidCandidateLayout(root) {
+  const apk = join(root, ...UNSIGNED_APK_RELATIVE_PATH.split("/"));
+  mkdirSync(dirname(apk), { recursive: true });
+  writeFileSync(apk, "unsigned-apk-fixture");
+  writeFileSync(join(root, UNSIGNED_MANIFEST_RELATIVE_PATH), "{}");
+}
+
+function expectLayoutRejection(name, mutate, expectedMessage) {
+  const root = join(layoutProbeRoot, name);
+  mkdirSync(root, { recursive: true });
+  writeValidCandidateLayout(root);
+  mutate(root);
+  try {
+    verifyUnsignedCandidateLayout(root);
+    fail(`candidate-layout check accepted ${name}`);
+  } catch (error) {
+    if (!expectedMessage.test(error.message)) {
+      fail(
+        `candidate-layout check rejected ${name} for the wrong reason: ${error.message}`,
+      );
+    }
+  }
+}
+
+try {
+  const validRoot = join(layoutProbeRoot, "valid");
+  mkdirSync(validRoot, { recursive: true });
+  writeValidCandidateLayout(validRoot);
+  const valid = verifyUnsignedCandidateLayout(validRoot);
+  if (
+    valid.apk !== join(validRoot, ...UNSIGNED_APK_RELATIVE_PATH.split("/")) ||
+    valid.manifest !== join(validRoot, UNSIGNED_MANIFEST_RELATIVE_PATH)
+  ) {
+    fail("candidate-layout check did not resolve the producer's exact paths");
+  }
+
+  expectLayoutRejection(
+    "flattened-apk",
+    (root) => {
+      rmSync(join(root, ...UNSIGNED_APK_RELATIVE_PATH.split("/")));
+      writeFileSync(join(root, "app-physicalTest-unsigned.apk"), "wrong-place");
+    },
+    /not app\/build\/outputs\/apk\/physicalTest/u,
+  );
+  expectLayoutRejection(
+    "two-apks",
+    (root) => writeFileSync(join(root, "second.apk"), "ambiguous"),
+    /expected exactly one APK, found 2/u,
+  );
+  expectLayoutRejection(
+    "missing-manifest",
+    (root) => rmSync(join(root, UNSIGNED_MANIFEST_RELATIVE_PATH)),
+    /contains no app-physicalTest-unsigned\.provenance\.json/u,
+  );
+  expectLayoutRejection(
+    "extra-file",
+    (root) => writeFileSync(join(root, "candidate-script.sh"), "echo unsafe"),
+    /contains unexpected file/u,
+  );
+  expectLayoutRejection(
+    "symlink",
+    (root) => {
+      const manifest = join(root, UNSIGNED_MANIFEST_RELATIVE_PATH);
+      rmSync(manifest);
+      symlinkSync(
+        join(root, ...UNSIGNED_APK_RELATIVE_PATH.split("/")),
+        manifest,
+      );
+    },
+    /symbolic links are forbidden/u,
+  );
+} finally {
+  rmSync(layoutProbeRoot, { recursive: true, force: true });
 }
 
 const serialPath = "apps/web/src/hardware/serial.ts";

@@ -203,17 +203,27 @@ jobs:
         run: |
           set -euo pipefail
           fail() { echo "::error::$1" >&2; exit 1; }
-          # `app-physicalTest-unsigned.apk`, with the suffix. AGP writes that
-          # name precisely because no signing config was applied, and drops the
-          # suffix only when one was — so the name is itself a claim about the
-          # thing this workflow exists to check. Looking for the wrong name
-          # here is not a typo that fails loudly: under `set -e` the step dies
-          # silently at `test -f`, which is how the candidate build hid the
-          # same mistake for two rounds.
-          apk="$RUNNER_TEMP/candidate/app-physicalTest-unsigned.apk"
-          manifest="$RUNNER_TEMP/candidate/app-physicalTest-unsigned.provenance.json"
-          test -f "$apk" || fail "the artifact contains no app-physicalTest-unsigned.apk; found: $(ls -1 "$RUNNER_TEMP/candidate" | tr '\n' ' ')"
-          test -f "$manifest" || fail "the artifact contains no provenance manifest"
+          # upload-artifact preserves the paths relative to the two uploaded
+          # files' common `android/` ancestor. The APK therefore arrives below
+          # `app/build/outputs`, while the manifest arrives at the root. The
+          # first rehearsal caught the old root-only assumption before a key
+          # was present. Verify the complete layout before selecting either
+          # file: exactly one APK, at the producer's exact path, no symlinks and
+          # no extra files.
+          layout="$(
+            node scripts/verify-unsigned-candidate-layout.mjs \
+              "$RUNNER_TEMP/candidate"
+          )"
+          apk="$(
+            node -e \
+              'process.stdout.write(JSON.parse(process.argv[1]).apk)' \
+              "$layout"
+          )"
+          manifest="$(
+            node -e \
+              'process.stdout.write(JSON.parse(process.argv[1]).manifest)' \
+              "$layout"
+          )"
 
           actual="$(sha256sum "$apk" | cut -d' ' -f1)"
           [ "$actual" = "$EXPECTED_APK_SHA256" ] \
