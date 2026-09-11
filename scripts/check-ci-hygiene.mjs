@@ -1,6 +1,15 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-const allowedWorkflows = new Set(["ci.yml", "deploy-pages.yml"]);
+const allowedWorkflows = new Set([
+  "ci.yml",
+  "deploy-pages.yml",
+  // The trusted post-build signer. It belongs on the default branch and
+  // nowhere else: `workflow_dispatch` is only dispatchable from here, and
+  // keeping it out of candidate branches is what makes "pull-request code
+  // cannot reach the signing key" a structural claim. See
+  // docs/ANDROID_SIGNING.md.
+  "android-physical-test-signer.yml",
+]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
   ".acceptance-stage",
@@ -145,6 +154,108 @@ if (!existsSync(pagesWorkflowPath)) {
   }
   if (!/^\s*run:\s*pnpm check:pages-build\s*$/mu.test(pagesWorkflow)) {
     fail("deploy-pages.yml does not verify the exact artifact before upload");
+  }
+}
+
+// The signer holds the one permanent signing key, so the shape of its shell is
+// part of the security boundary rather than a style question. Each rule below
+// corresponds to a defect that was actually present in this file.
+const signerPath = ".github/workflows/android-physical-test-signer.yml";
+if (!existsSync(signerPath)) {
+  fail(`${signerPath} is missing`);
+} else {
+  const signer = readFileSync(signerPath, "utf8");
+
+  // 1. No GitHub expression inside a `run:` block.
+  //
+  //    Actions substitutes `${{ … }}` into the script text before any shell
+  //    parses it, so a value carrying `$(…)` becomes a command in the job that
+  //    holds the key. Values belong in `env:`, where a substituted `$(…)`
+  //    is the variable's contents and never a command. Two of these were here:
+  //    `github.run_id` in a URL, and four `inputs.*` in a JSON heredoc — and
+  //    the heredoc was unquoted, so it really did evaluate command
+  //    substitutions.
+  for (const block of signer.matchAll(/^ {8}run: \|\n((?: {10}.*\n|\n)*)/gmu)) {
+    const expression = /\$\{\{[^}]*\}\}/u.exec(block[1] ?? "");
+    if (expression !== null) {
+      fail(
+        `${signerPath} interpolates ${expression[0]} into a run block; pass it through env: instead`,
+      );
+    }
+  }
+
+  // 2. The provenance record is serialised, not concatenated.
+  //
+  //    `versionName` is read out of an APK built from pull-request code. In a
+  //    document assembled by pasting strings, a quote in it rewrites the
+  //    record that ties a tester's phone to a tree.
+  if (/cat > "\$SIGNED\.provenance\.json" <</u.test(signer)) {
+    fail(
+      `${signerPath} writes the signed provenance with a heredoc; it must be produced by a JSON encoder`,
+    );
+  }
+
+  // 3. A failed `apksigner` is not evidence of an unsigned APK.
+  //
+  //    `apksigner verify` exits non-zero for a missing file, an unreadable
+  //    zip or a JVM that would not start. Accepting any non-zero status as
+  //    "no signature found" lets a broken toolchain hand an APK to the key.
+  if (
+    /if\s+"\$apksigner"\s+verify\s+"\$apk"\s+>\/dev\/null\s+2>&1;\s+then/u.test(
+      signer,
+    )
+  ) {
+    fail(
+      `${signerPath} treats any non-zero apksigner status as proof the APK is unsigned`,
+    );
+  }
+  if (
+    !signer.includes(
+      "DOES NOT VERIFY|No JAR signature|Missing (APK Signature Scheme|META-INF)|not signed",
+    )
+  ) {
+    fail(
+      `${signerPath} does not read apksigner's own statement that the APK carries no signature`,
+    );
+  }
+
+  // 4. The filename AGP actually writes.
+  //
+  //    AGP appends `-unsigned` precisely when no signing config was applied,
+  //    so the name is itself the claim being checked. The candidate build
+  //    looked for the wrong one and died silently at `test -f` under `set -e`
+  //    for two rounds; the signer carried the same mistake.
+  if (/RUNNER_TEMP\/candidate\/app-physicalTest\.apk/u.test(signer)) {
+    fail(
+      `${signerPath} looks for app-physicalTest.apk; the candidate build writes app-physicalTest-unsigned.apk`,
+    );
+  }
+
+  // 5. Bounded formats for everything a candidate controls.
+  for (const [what, pattern] of [
+    ["source_sha", /source_sha must be a full 40-character lowercase SHA/u],
+    [
+      "expected_apk_sha256",
+      /expected_apk_sha256 must be a 64-character lowercase SHA-256/u,
+    ],
+    ["source_run_id", /source_run_id must be numeric/u],
+    ["artifact_id", /artifact_id must be numeric/u],
+    ["artifact_name", /artifact_name must be a plain artifact name/u],
+    ["versionCode", /APK versionCode is not a plain number/u],
+    ["versionName", /APK versionName is not a plain version string/u],
+  ]) {
+    if (!pattern.test(signer)) {
+      fail(`${signerPath} does not bound the format of ${what}`);
+    }
+  }
+
+  // 6. The build-tools that sign are the ones the workflow asked for, not
+  //    whatever happens to be newest on the runner image. apksigner's
+  //    signature-scheme defaults move between versions.
+  if (/ls -1 "\$ANDROID_HOME\/build-tools"/u.test(signer)) {
+    fail(
+      `${signerPath} picks build-tools by listing the directory; pin the version instead`,
+    );
   }
 }
 
