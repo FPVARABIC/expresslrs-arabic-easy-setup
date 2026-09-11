@@ -6,11 +6,24 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 //   deploy-pages.yml  the GitHub Pages deploy
 //   upstream-live.yml the opt-in live suites against the official mirror
 //   android.yml       the Android host APK, lint and unit tests
+//   android-physical-test-signer.yml
+//                     the trusted post-build signer, which holds the one
+//                     permanent signing key
 const allowedWorkflows = new Set([
   "ci.yml",
   "deploy-pages.yml",
   "upstream-live.yml",
   "android.yml",
+  // The signer is authored and merged on the default branch, which is the
+  // only place GitHub will dispatch a `workflow_dispatch` workflow from. It
+  // reaches a candidate branch only by merging main into it, so its presence
+  // here is not by itself a finding. What the signer boundary now rests on is
+  // checked below, against this file's contents rather than its absence: it is
+  // the only workflow allowed to name the permanent secrets, it stays
+  // manual-only and read-only, the job holding the key is gated by a protected
+  // environment, and it never checks out a candidate commit or runs a build
+  // tool. See docs/ANDROID_SIGNING.md.
+  "android-physical-test-signer.yml",
 ]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
@@ -200,6 +213,108 @@ if (!existsSync(pagesWorkflowPath)) {
   }
 }
 
+// The signer holds the one permanent signing key, so the shape of its shell is
+// part of the security boundary rather than a style question. Each rule below
+// corresponds to a defect that was actually present in this file.
+const signerPath = ".github/workflows/android-physical-test-signer.yml";
+if (!existsSync(signerPath)) {
+  fail(`${signerPath} is missing`);
+} else {
+  const signer = readFileSync(signerPath, "utf8");
+
+  // 1. No GitHub expression inside a `run:` block.
+  //
+  //    Actions substitutes `${{ … }}` into the script text before any shell
+  //    parses it, so a value carrying `$(…)` becomes a command in the job that
+  //    holds the key. Values belong in `env:`, where a substituted `$(…)`
+  //    is the variable's contents and never a command. Two of these were here:
+  //    `github.run_id` in a URL, and four `inputs.*` in a JSON heredoc — and
+  //    the heredoc was unquoted, so it really did evaluate command
+  //    substitutions.
+  for (const block of signer.matchAll(/^ {8}run: \|\n((?: {10}.*\n|\n)*)/gmu)) {
+    const expression = /\$\{\{[^}]*\}\}/u.exec(block[1] ?? "");
+    if (expression !== null) {
+      fail(
+        `${signerPath} interpolates ${expression[0]} into a run block; pass it through env: instead`,
+      );
+    }
+  }
+
+  // 2. The provenance record is serialised, not concatenated.
+  //
+  //    `versionName` is read out of an APK built from pull-request code. In a
+  //    document assembled by pasting strings, a quote in it rewrites the
+  //    record that ties a tester's phone to a tree.
+  if (/cat > "\$SIGNED\.provenance\.json" <</u.test(signer)) {
+    fail(
+      `${signerPath} writes the signed provenance with a heredoc; it must be produced by a JSON encoder`,
+    );
+  }
+
+  // 3. A failed `apksigner` is not evidence of an unsigned APK.
+  //
+  //    `apksigner verify` exits non-zero for a missing file, an unreadable
+  //    zip or a JVM that would not start. Accepting any non-zero status as
+  //    "no signature found" lets a broken toolchain hand an APK to the key.
+  if (
+    /if\s+"\$apksigner"\s+verify\s+"\$apk"\s+>\/dev\/null\s+2>&1;\s+then/u.test(
+      signer,
+    )
+  ) {
+    fail(
+      `${signerPath} treats any non-zero apksigner status as proof the APK is unsigned`,
+    );
+  }
+  if (
+    !signer.includes(
+      "DOES NOT VERIFY|No JAR signature|Missing (APK Signature Scheme|META-INF)|not signed",
+    )
+  ) {
+    fail(
+      `${signerPath} does not read apksigner's own statement that the APK carries no signature`,
+    );
+  }
+
+  // 4. The filename AGP actually writes.
+  //
+  //    AGP appends `-unsigned` precisely when no signing config was applied,
+  //    so the name is itself the claim being checked. The candidate build
+  //    looked for the wrong one and died silently at `test -f` under `set -e`
+  //    for two rounds; the signer carried the same mistake.
+  if (/RUNNER_TEMP\/candidate\/app-physicalTest\.apk/u.test(signer)) {
+    fail(
+      `${signerPath} looks for app-physicalTest.apk; the candidate build writes app-physicalTest-unsigned.apk`,
+    );
+  }
+
+  // 5. Bounded formats for everything a candidate controls.
+  for (const [what, pattern] of [
+    ["source_sha", /source_sha must be a full 40-character lowercase SHA/u],
+    [
+      "expected_apk_sha256",
+      /expected_apk_sha256 must be a 64-character lowercase SHA-256/u,
+    ],
+    ["source_run_id", /source_run_id must be numeric/u],
+    ["artifact_id", /artifact_id must be numeric/u],
+    ["artifact_name", /artifact_name must be a plain artifact name/u],
+    ["versionCode", /APK versionCode is not a plain number/u],
+    ["versionName", /APK versionName is not a plain version string/u],
+  ]) {
+    if (!pattern.test(signer)) {
+      fail(`${signerPath} does not bound the format of ${what}`);
+    }
+  }
+
+  // 6. The build-tools that sign are the ones the workflow asked for, not
+  //    whatever happens to be newest on the runner image. apksigner's
+  //    signature-scheme defaults move between versions.
+  if (/ls -1 "\$ANDROID_HOME\/build-tools"/u.test(signer)) {
+    fail(
+      `${signerPath} picks build-tools by listing the directory; pin the version instead`,
+    );
+  }
+}
+
 const serialPath = "apps/web/src/hardware/serial.ts";
 if (!existsSync(serialPath)) {
   fail(`${serialPath} is missing`);
@@ -304,27 +419,124 @@ for (const [path, pattern, complaint] of durableRules) {
 // ---------------------------------------------------------------------------
 const signingSecretPattern = /secrets\.ELRS_(?:KEYSTORE|KEY)_[A-Z0-9_]+/u;
 
-// 1. The candidate branch carries no workflow that can read the key.
+// 1. Exactly one workflow may name the permanent secrets, and it is the
+//    reviewed signer. Every other workflow in this repository — the candidate
+//    build above all — must be unable to read the key even by accident.
+const trustedSignerName = "android-physical-test-signer.yml";
 for (const name of readdirSync(workflowDirectory)) {
+  if (name === trustedSignerName) continue;
   const contents = readFileSync(`${workflowDirectory}/${name}`, "utf8");
   if (signingSecretPattern.test(contents)) {
     fail(
-      `${name} references a permanent signing secret. No workflow here may: ` +
-        "the trusted signer lives on the default branch and is the only place " +
-        "those secrets are readable. See docs/ANDROID_SIGNING.md",
+      `${name} references a permanent signing secret. Only ${trustedSignerName} ` +
+        "may: it is the one reviewed place those secrets are readable, and it " +
+        "runs no candidate code. See docs/ANDROID_SIGNING.md",
     );
   }
 }
 
-// 2. The signing workflow must not be here either. It is deliberately not on
-//    this branch: a `workflow_dispatch` workflow is only dispatchable from the
-//    default branch, and keeping it out of the candidate diff is what makes
-//    "pull-request code cannot reach the key" a structural claim.
-if (existsSync(`${workflowDirectory}/android-release-candidate.yml`)) {
+// 2. That exemption is only safe while the signer keeps the shape it was
+//    reviewed with, so the shape is gated here rather than trusted.
+//
+//    This used to be a different rule. The signer lived only on the default
+//    branch, and this file failed if it appeared on a candidate branch at all,
+//    because "pull-request code cannot reach the key" then followed from its
+//    absence. That is no longer how the boundary is held: the signer is merged
+//    on main and therefore reaches every branch that merges main. What still
+//    holds it is that a `workflow_dispatch` workflow is only dispatchable from
+//    the default branch, and that the file itself cannot read candidate code.
+//    Each clause below is one half of that second claim.
+const trustedSignerPath = `${workflowDirectory}/${trustedSignerName}`;
+if (!existsSync(trustedSignerPath)) {
   fail(
-    "android-release-candidate.yml is present on this branch. The trusted " +
-      "signer belongs on the default branch only; see docs/ANDROID_SIGNING.md",
+    `${trustedSignerPath} is missing. The trusted signer is the only path to a ` +
+      "signed physical-test APK; see docs/ANDROID_SIGNING.md",
   );
+} else {
+  const trustedSigner = readFileSync(trustedSignerPath, "utf8");
+  // YAML comments explain the boundary at length; the rules must read the
+  // workflow, not the prose about it.
+  const signerYaml = trustedSigner.replace(/^[ \t]*#.*$/gmu, "");
+
+  //    a. Manual only. A `push:`, `pull_request:` or `schedule:` trigger would
+  //       put the key behind an event a candidate branch can raise.
+  const signerTriggers = [
+    ...(/\non:\n([\s\S]*?)\n[a-z]/u.exec(signerYaml)?.[1] ?? "").matchAll(
+      /^ {2}([a-z_]+):/gmu,
+    ),
+  ].map((match) => match[1]);
+  if (
+    signerTriggers.length !== 1 ||
+    signerTriggers[0] !== "workflow_dispatch"
+  ) {
+    fail(
+      `${trustedSignerName} must be triggered by workflow_dispatch alone; found ` +
+        `${signerTriggers.join(", ") || "no trigger"}`,
+    );
+  }
+
+  //    b. No write authority anywhere in it. The signer publishes nothing and
+  //       pushes nothing; a `write` scope here is how a leak leaves the runner.
+  const signerWriteScope = /^\s+[a-z-]+:\s*write\s*$/mu.exec(signerYaml);
+  if (signerWriteScope !== null) {
+    fail(
+      `${trustedSignerName} grants ${signerWriteScope[0].trim()}; the signer must ` +
+        "stay read-only",
+    );
+  }
+  if (!/^permissions:\n {2}contents: read\n/mu.test(signerYaml)) {
+    fail(
+      `${trustedSignerName} does not declare a read-only top-level permissions block`,
+    );
+  }
+
+  //    c. The key is materialised only inside a protected environment, and only
+  //       after the verify job has already accepted the artifact.
+  if (!/^ {4}environment: physical-test-signing$/mu.test(signerYaml)) {
+    fail(
+      `${trustedSignerName} does not gate the signing job on the ` +
+        "physical-test-signing environment",
+    );
+  }
+  if (!/^ {4}needs: verify$/mu.test(signerYaml)) {
+    fail(
+      `${trustedSignerName} signs without waiting for the unprivileged verify job`,
+    );
+  }
+
+  //    d. It never checks out the candidate. Every checkout pins the signer's
+  //       own commit, so no pull-request tree is ever on the runner's disk.
+  const signerCheckouts = [
+    ...signerYaml.matchAll(
+      /uses: actions\/checkout@[^\n]*\n((?: {8,}.*\n)*)/gu,
+    ),
+  ];
+  if (signerCheckouts.length === 0) {
+    fail(`${trustedSignerName} has no pinned checkout to audit`);
+  }
+  for (const checkout of signerCheckouts) {
+    if (!/^ {10}ref: \$\{\{ github\.sha \}\}$/mu.test(checkout[1] ?? "")) {
+      fail(
+        `${trustedSignerName} checks out a ref other than its own github.sha; the ` +
+          "signer must never place candidate code on the runner",
+      );
+    }
+  }
+
+  //    e. It runs no build tool. Gradle, pnpm and npm all execute code that
+  //       came from the tree they build; none of them may run beside the key.
+  for (const tool of ["gradle", "gradlew", "pnpm", "npm", "yarn"]) {
+    const invocation = new RegExp(
+      `^\\s+(?:-\\s+)?(?:run|uses):.*\\b${tool}\\b`,
+      "mu",
+    );
+    if (invocation.test(signerYaml)) {
+      fail(
+        `${trustedSignerName} invokes ${tool}; the signer must run no build tool ` +
+          "beside the key",
+      );
+    }
+  }
 }
 
 // 3. Gradle must actively refuse the permanent secrets rather than merely not
