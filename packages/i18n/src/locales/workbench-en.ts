@@ -446,6 +446,22 @@ export const workbenchEn = {
     "Type the same phrase into the transmitter and the receiver. Any difference between them means the link will not come up. The device does not report its UID over CRSF, so a matching phrase is proven by a live link, not by this write.",
   "wb.ui.bindPhraseInvalid":
     "The binding phrase is not valid: it is too long, only spaces, or contains a hidden character.",
+  "wb.ui.bindPhraseWeak":
+    "This phrase is easy to guess. It still works, and nothing here is withheld because of it.",
+  "wb.ui.bindPhraseWeakWhy":
+    "The UID is the first six bytes of an unsalted MD5 of a fixed, public string around your phrase. Anyone who sees the UID on the air can try candidate phrases offline as fast as their computer runs MD5, and a word, a name, a date or a short number falls at once. Recovering the phrase means being able to bind to your link.",
+  "wb.ui.bindPhraseGenerate": "Generate a strong phrase",
+  "wb.ui.bindPhraseGenerateHint":
+    "Draws {bits} bits from the browser's cryptographic random source, in characters that survive being read aloud.",
+  "wb.ui.bindPhraseReplaceHeading": "Generating replaces the phrase you typed.",
+  "wb.ui.bindPhraseReplaceBody":
+    "A phrase is already in the field. Generating replaces it, and the old one is not kept anywhere — if a receiver is already flashed with it, write it down first.",
+  "wb.ui.bindPhraseReplaceConfirm": "Replace it",
+  "wb.ui.bindPhraseReplaceCancel": "Keep what I typed",
+  "wb.ui.bindPhraseGenerated":
+    "A new phrase is in the field. Flash the transmitter and the receiver with this exact phrase — a generated phrase on one side only means they will not link.",
+  "wb.ui.bindPhraseReveal": "Show the phrase",
+  "wb.ui.bindPhraseHide": "Hide the phrase",
   "wb.ui.wifiSsid": "Wi-Fi network name",
   "wb.ui.wifiPassword": "Wi-Fi password",
   "wb.ui.wifiAutoOn": "Turn Wi-Fi on automatically after (seconds)",

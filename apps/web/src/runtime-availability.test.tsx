@@ -1,6 +1,6 @@
-import { strToU8, zipSync } from "fflate";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { installDurableStorageStub } from "./test/durable-storage";
+import { recoveryArchiveFor } from "./test/recovery-fixtures";
 import path from "node:path";
 
 import {
@@ -199,6 +199,10 @@ const unpackedReceiver: OfficialTarget = {
   },
 };
 
+const actualRecoveryPackage = await vi.importActual<
+  typeof import("./hardware/recovery-package")
+>("./hardware/recovery-package");
+
 const catalog: OfficialCatalog = {
   source: "EXPRESSLRS_WEB_FLASHER_MIRROR",
   loadedAt: "2026-09-09T00:00:00.000Z",
@@ -230,10 +234,7 @@ const preparedPackage: PreparedFirmwarePackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: zipSync({
-    "manifest.json": strToU8('{"schemaVersion":1}'),
-    "segments/firmware.bin": new Uint8Array([4, 5, 6]),
-  }),
+  recoveryArchive: await recoveryArchiveFor(espTransmitter),
   createdAt: "2026-09-09T00:00:00.000Z",
 };
 
@@ -444,7 +445,14 @@ describe("runtime availability, from the production entry point", () => {
     mocks.loadCheckpoint.mockResolvedValue(null);
     mocks.saveCheckpoint.mockResolvedValue(undefined);
     mocks.clearCheckpoint.mockResolvedValue(undefined);
-    mocks.validateRecoveryPackage.mockResolvedValue({ valid: true });
+    // The real implementation behind a spy, rather than a stand-in answer. The
+    // durable export validates the package it just wrote and compares the
+    // result's digest to what it sealed, so a placeholder makes every export
+    // fail for a reason none of these tests are about. Individual tests still
+    // override it where the import path is what they are exercising.
+    mocks.validateRecoveryPackage.mockImplementation(
+      actualRecoveryPackage.validateRecoveryPackage,
+    );
     mocks.preparePackage.mockResolvedValue(preparedPackage);
     mocks.downloadPreparedBytes.mockReturnValue(undefined);
     mocks.flashEspFirmware.mockResolvedValue({ status: "WRITE_VERIFIED" });
@@ -762,6 +770,9 @@ describe("runtime availability, from the production entry point", () => {
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
       target: { value: "bench-recovery-passphrase" },
     });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",
@@ -984,6 +995,9 @@ describe("runtime availability, from the production entry point", () => {
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
       target: { value: "bench-recovery-passphrase" },
     });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package where it will survive",
@@ -1158,6 +1172,9 @@ describe("runtime availability, from the production entry point", () => {
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
       target: { value: "bench-recovery-passphrase" },
     });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",
@@ -1206,6 +1223,9 @@ describe("runtime availability, from the production entry point", () => {
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
       target: { value: "bench-recovery-passphrase" },
     });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",
@@ -1239,6 +1259,9 @@ describe("runtime availability, from the production entry point", () => {
     );
     await settle();
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
       target: { value: RECOVERY_PASSPHRASE },
     });
     fireEvent.click(
@@ -1407,6 +1430,9 @@ describe("runtime availability, from the production entry point", () => {
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
       target: { value: RECOVERY_PASSPHRASE },
     });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Save the recovery package to durable storage",
@@ -1494,6 +1520,9 @@ describe("runtime availability, from the production entry point", () => {
     );
     await settle();
     fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
       target: { value: RECOVERY_PASSPHRASE },
     });
     fireEvent.click(

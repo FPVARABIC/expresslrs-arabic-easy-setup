@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   GENERATED_BIND_PHRASE_BITS,
@@ -55,13 +55,45 @@ describe("weak binding phrases are warned about, never refused", () => {
 });
 
 describe("the generator", () => {
-  it("produces at least the entropy it claims", () => {
+  it("produces at least the entropy it claims, measured the way the warning measures", () => {
     expect(GENERATED_BIND_PHRASE_BITS).toBeGreaterThanOrEqual(96);
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      expect(bindPhraseEntropyBits(generateBindPhrase())).toBeGreaterThanOrEqual(
+    // Many draws, not a few. An earlier generator was sized by arithmetic
+    // rather than by this estimator and fell under its own claim on roughly
+    // one draw in 375 — which a handful of samples would have missed, and
+    // which a sampled test can only catch by taking enough of them.
+    for (let attempt = 0; attempt < 2000; attempt += 1) {
+      const phrase = generateBindPhrase();
+      expect(bindPhraseEntropyBits(phrase)).toBeGreaterThanOrEqual(
         GENERATED_BIND_PHRASE_BITS,
       );
+      expect(bindPhraseStrength(phrase)).toBe("STRONG");
     }
+  });
+
+  it("never returns a phrase that misses the claim, whatever it draws", () => {
+    // The guarantee is structural, not statistical: the generator measures
+    // what it drew and draws again rather than returning something the
+    // interface would then warn about. Feeding it a source that produces the
+    // worst draw available — one character, repeated — proves it refuses
+    // rather than returns.
+    const stuck = vi
+      .spyOn(crypto, "getRandomValues")
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        if (array !== null) {
+          new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(
+            0,
+          );
+        }
+        return array;
+      });
+    try {
+      expect(() => generateBindPhrase()).toThrow(/failed its own validation/u);
+    } finally {
+      stuck.mockRestore();
+    }
+    // And the real source is back, so the refusal above was about the draw and
+    // not about a spy left installed.
+    expect(bindPhraseStrength(generateBindPhrase())).toBe("STRONG");
   });
 
   it("produces phrases the rest of the application accepts", () => {
@@ -82,11 +114,20 @@ describe("the generator", () => {
   });
 
   it("draws from crypto.getRandomValues and never Math.random", () => {
-    // Asserted against the source rather than mocked, because the point is
-    // that no code path can fall back to a predictable generator.
-    const source = generateBindPhrase.toString();
-    expect(source).toContain("getRandomValues");
-    expect(source).not.toContain("Math.random");
+    // Observed rather than read off the source text. A source assertion passes
+    // the moment the draw moves into a helper, whether or not that helper is
+    // still using a cryptographic source; watching the two functions cannot be
+    // fooled that way.
+    const random = vi.spyOn(Math, "random");
+    const secure = vi.spyOn(crypto, "getRandomValues");
+    try {
+      expect(generateBindPhrase().length).toBeGreaterThan(0);
+      expect(secure).toHaveBeenCalled();
+      expect(random).not.toHaveBeenCalled();
+    } finally {
+      random.mockRestore();
+      secure.mockRestore();
+    }
   });
 
   it("uses characters that survive being read aloud and retyped", () => {

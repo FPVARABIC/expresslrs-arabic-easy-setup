@@ -1,4 +1,3 @@
-import { strToU8, zipSync } from "fflate";
 import {
   act,
   fireEvent,
@@ -10,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installDurableStorageStub } from "../test/durable-storage";
+import { recoveryArchiveFor } from "../test/recovery-fixtures";
 
 import { CrsfAddress, type CrsfParameter } from "../hardware/crsf";
 import type {
@@ -173,6 +173,14 @@ const transportCatalog: OfficialCatalog = {
   ],
 };
 
+const actualRecoveryPackage = await vi.importActual<
+  typeof import("../hardware/recovery-package")
+>("../hardware/recovery-package");
+
+const realRecoveryArchive = await recoveryArchiveFor(
+  transportCatalog.targets[0]!,
+);
+
 const preparedPackage: PreparedFirmwarePackage = {
   schemaVersion: 1,
   release: catalog.releases[0]!,
@@ -197,10 +205,7 @@ const preparedPackage: PreparedFirmwarePackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: zipSync({
-    "manifest.json": strToU8('{"schemaVersion":1}'),
-    "segments/firmware.bin": new Uint8Array([4, 5, 6]),
-  }),
+  recoveryArchive: realRecoveryArchive,
   createdAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -413,6 +418,11 @@ async function saveRecoveryPackageDurably(): Promise<void> {
   fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
     target: { value: "bench-recovery-passphrase" },
   });
+  // Typed twice, because a passphrase that only exists in one field is one
+  // typo away from a file nobody can open.
+  fireEvent.change(screen.getByLabelText("أعد كتابة عبارة مرور الاستعادة"), {
+    target: { value: "bench-recovery-passphrase" },
+  });
   fireEvent.click(
     screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان دائم" }),
   );
@@ -455,9 +465,15 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       close: vi.fn().mockResolvedValue(undefined),
       ondisconnect: null,
     });
+    // The real implementation, wrapped in a spy rather than replaced by one.
+    // Two paths reach it now and they want opposite things: the import tests
+    // feed deliberate rubbish and are meant to stop here, while the durable
+    // export validates the package it just wrote and has to get a real answer.
+    // A blanket rejection would make the export fail for a reason that has
+    // nothing to do with what those tests are checking.
     mocks.validateRecoveryPackage
       .mockReset()
-      .mockRejectedValue(new Error("stop after confirmation gate"));
+      .mockImplementation(actualRecoveryPackage.validateRecoveryPackage);
   });
 
   afterEach(() => {
@@ -1749,6 +1765,10 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     mocks.preparePackage.mockReset().mockResolvedValue({
       ...preparedPackage,
       target: espReceiver,
+      // The archive has to describe the Target it was prepared for: the
+      // durable export validates what it wrote against the selected Target,
+      // and a package naming a different one is exactly what that refuses.
+      recoveryArchive: await recoveryArchiveFor(espReceiver),
       optionsSummary: {
         ...preparedPackage.optionsSummary,
         rxAsTxMode: "internal" as const,

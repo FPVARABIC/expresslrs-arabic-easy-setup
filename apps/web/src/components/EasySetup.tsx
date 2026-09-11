@@ -23,8 +23,11 @@ import {
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import type { CrsfParameter } from "../hardware/crsf";
 import {
+  GENERATED_BIND_PHRASE_BITS,
   MAX_BIND_PHRASE_LENGTH,
   bindPhraseIssue,
+  bindPhraseStrength,
+  generateBindPhrase,
 } from "../hardware/bind-phrase";
 import { isMachineVerifiedBinding } from "../hardware/binding-evidence";
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
@@ -151,6 +154,9 @@ export function EasySetup({
    * into. Never persisted, never put in application state that is serialised,
    * and never included in diagnostics.
    */
+  const [phraseVisible, setPhraseVisible] = useState(false);
+  const [phraseReplacePending, setPhraseReplacePending] = useState(false);
+  const [phraseGenerated, setPhraseGenerated] = useState(false);
   const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
   const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] =
     useState("");
@@ -324,6 +330,7 @@ export function EasySetup({
   );
   const evidenceLevel = operatorBindEvidence ?? bindEvidence;
   const phraseIssue = bindPhraseIssue(options.bindPhrase);
+  const phraseStrength = bindPhraseStrength(options.bindPhrase);
 
   if (operation === null) {
     return (
@@ -596,25 +603,101 @@ export function EasySetup({
                       </label>
                     )}
 
-                    <label>
+                    <label className="bind-phrase-field">
                       <span>{t("easy.fw.bindPhrase")}</span>
                       <input
-                        type="password"
+                        type={phraseVisible ? "text" : "password"}
                         autoComplete="off"
                         maxLength={MAX_BIND_PHRASE_LENGTH}
                         value={options.bindPhrase}
                         disabled={busy}
-                        onChange={(event) =>
-                          updateOption("bindPhrase", event.currentTarget.value)
-                        }
+                        onChange={(event) => {
+                          updateOption("bindPhrase", event.currentTarget.value);
+                          setPhraseGenerated(false);
+                          setPhraseReplacePending(false);
+                        }}
                       />
                     </label>
+                    <div className="bind-phrase-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhraseVisible(!phraseVisible);
+                        }}
+                      >
+                        {phraseVisible
+                          ? t("easy.fw.bindPhraseHide")
+                          : t("easy.fw.bindPhraseReveal")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // An existing phrase is never overwritten by a
+                          // single click: a receiver may already be flashed
+                          // with it, and nothing here can put it back.
+                          if (options.bindPhrase !== "") {
+                            setPhraseReplacePending(true);
+                            return;
+                          }
+                          updateOption("bindPhrase", generateBindPhrase());
+                          setPhraseVisible(true);
+                          setPhraseGenerated(true);
+                        }}
+                      >
+                        {t("easy.fw.bindPhraseGenerate")}
+                      </button>
+                    </div>
+                    <p className="easy-note">
+                      {t("easy.fw.bindPhraseGenerateHint", {
+                        bits: GENERATED_BIND_PHRASE_BITS,
+                      })}
+                    </p>
+                    {phraseReplacePending ? (
+                      <div className="bind-phrase-replace" role="group">
+                        <strong>{t("easy.fw.bindPhraseReplaceHeading")}</strong>
+                        <p className="easy-note">
+                          {t("easy.fw.bindPhraseReplaceBody")}
+                        </p>
+                        <div className="bind-phrase-actions">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateOption("bindPhrase", generateBindPhrase());
+                              setPhraseVisible(true);
+                              setPhraseGenerated(true);
+                              setPhraseReplacePending(false);
+                            }}
+                          >
+                            {t("easy.fw.bindPhraseReplaceConfirm")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPhraseReplacePending(false);
+                            }}
+                          >
+                            {t("easy.fw.bindPhraseReplaceCancel")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {phraseGenerated ? (
+                      <p className="easy-note">
+                        {t("easy.fw.bindPhraseGenerated")}
+                      </p>
+                    ) : null}
                     <p className="easy-note">{t("easy.fw.bindPhraseHint")}</p>
                     {phraseIssue === null ? null : (
                       <p className="easy-error">
                         {t(`easy.fw.bindPhrase.${phraseIssue}`)}
                       </p>
                     )}
+                    {phraseStrength === "WEAK" ? (
+                      <p className="easy-note bind-phrase-weak">
+                        {t("easy.fw.bindPhraseWeak")}{" "}
+                        {t("easy.fw.bindPhraseWeakWhy")}
+                      </p>
+                    ) : null}
                     {options.bindPhrase === "" ? null : (
                       <p className="easy-note">
                         {t("easy.fw.bindPhraseUnverifiable")}
@@ -774,9 +857,7 @@ export function EasySetup({
                           />
                         </label>
                         <label className="easy-field">
-                          <span>
-                            {t("easy.fw.recoveryPassphraseConfirm")}
-                          </span>
+                          <span>{t("easy.fw.recoveryPassphraseConfirm")}</span>
                           <input
                             type="password"
                             autoComplete="new-password"

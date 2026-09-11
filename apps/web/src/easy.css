@@ -464,3 +464,38 @@
   direction: ltr;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/*
+ * Easy Mode gets the same two controls beside the binding phrase as Advanced
+ * Mode. A generated phrase has to be readable, or it cannot be typed into the
+ * second device.
+ */
+.bind-phrase-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
+}
+
+.bind-phrase-actions button {
+  min-height: 40px;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--easy-line, #cbd5e1);
+  border-radius: 8px;
+  background: var(--easy-surface, #ffffff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.bind-phrase-replace {
+  margin-block-start: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--easy-line, #cbd5e1);
+  border-radius: 8px;
+}
+
+/* Advisory, not a refusal: the phrase works and nothing is withheld. */
+.bind-phrase-weak {
+  color: var(--easy-warn, #92400e);
+}

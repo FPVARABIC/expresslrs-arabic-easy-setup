@@ -1,6 +1,7 @@
-import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installDurableStorageStub } from "../test/durable-storage";
+import { recoveryArchiveFor } from "../test/recovery-fixtures";
+import type { OfficialTarget } from "../hardware/parity-types";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -241,10 +242,9 @@ const easyPackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: zipSync({
-    "manifest.json": strToU8('{"schemaVersion":1}'),
-    "segments/firmware.bin": new Uint8Array([4, 5, 6]),
-  }),
+  recoveryArchive: await recoveryArchiveFor(
+    (easyCatalog as unknown as { targets: OfficialTarget[] }).targets[0]!,
+  ),
   createdAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -543,6 +543,9 @@ describe("public product shell", () => {
     fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
       target: { value: "bench-recovery-passphrase" },
     });
+    fireEvent.change(screen.getByLabelText("أعد كتابة عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     await user.click(
       screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان يبقى" }),
     );
@@ -692,6 +695,9 @@ describe("public product shell", () => {
     // The passphrase is collected on this screen, so it is supplied the way
     // an operator supplies it. The button is never disabled for want of it.
     fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("أعد كتابة عبارة مرور الاستعادة"), {
       target: { value: "bench-recovery-passphrase" },
     });
     await user.click(

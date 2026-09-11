@@ -9,8 +9,11 @@ import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
 import type { RxAsTxMode } from "../hardware/rx-as-tx";
 import type { DeviceOperation } from "../hardware/useDeviceController";
 import {
+  GENERATED_BIND_PHRASE_BITS,
   MAX_BIND_PHRASE_LENGTH,
   bindPhraseIssue,
+  bindPhraseStrength,
+  generateBindPhrase,
 } from "../hardware/bind-phrase";
 import { regulatoryRegionByKey } from "../hardware/regulatory-domain";
 import type { HardwareDriverConnector } from "../hardware/userSession";
@@ -70,6 +73,9 @@ export function ExpressLrsParityWorkbenchView({
    * controller state, so nothing that assembles a diagnostics report can reach
    * them. They are never persisted and never sent anywhere.
    */
+  const [phraseVisible, setPhraseVisible] = useState(false);
+  const [phraseReplacePending, setPhraseReplacePending] = useState(false);
+  const [phraseGenerated, setPhraseGenerated] = useState(false);
   const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
   const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] =
     useState("");
@@ -737,25 +743,100 @@ export function ExpressLrsParityWorkbenchView({
         </div>
 
         <div className="form-grid">
-          <label>
-            <span>{t("wb.ui.bindPhrase")}</span>
-            <input
-              type="password"
-              autoComplete="off"
-              value={options.bindPhrase}
-              maxLength={MAX_BIND_PHRASE_LENGTH}
-              disabled={busy}
-              onChange={(event) =>
-                updateOption("bindPhrase", event.currentTarget.value)
-              }
-            />
+          <div className="bind-phrase-field">
+            <label>
+              <span>{t("wb.ui.bindPhrase")}</span>
+              <input
+                type={phraseVisible ? "text" : "password"}
+                autoComplete="off"
+                value={options.bindPhrase}
+                maxLength={MAX_BIND_PHRASE_LENGTH}
+                disabled={busy}
+                onChange={(event) => {
+                  updateOption("bindPhrase", event.currentTarget.value);
+                  setPhraseGenerated(false);
+                  setPhraseReplacePending(false);
+                }}
+              />
+            </label>
+            <div className="bind-phrase-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhraseVisible(!phraseVisible);
+                }}
+              >
+                {phraseVisible
+                  ? t("wb.ui.bindPhraseHide")
+                  : t("wb.ui.bindPhraseReveal")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // An existing phrase is never overwritten by a single click:
+                  // a receiver may already be flashed with it, and it is not
+                  // stored anywhere this could put it back from.
+                  if (options.bindPhrase !== "") {
+                    setPhraseReplacePending(true);
+                    return;
+                  }
+                  updateOption("bindPhrase", generateBindPhrase());
+                  setPhraseVisible(true);
+                  setPhraseGenerated(true);
+                }}
+              >
+                {t("wb.ui.bindPhraseGenerate")}
+              </button>
+            </div>
+            <small>
+              {t("wb.ui.bindPhraseGenerateHint", {
+                bits: GENERATED_BIND_PHRASE_BITS,
+              })}
+            </small>
+            {phraseReplacePending ? (
+              <div className="bind-phrase-replace" role="group">
+                <strong>{t("wb.ui.bindPhraseReplaceHeading")}</strong>
+                <small>{t("wb.ui.bindPhraseReplaceBody")}</small>
+                <div className="bind-phrase-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateOption("bindPhrase", generateBindPhrase());
+                      setPhraseVisible(true);
+                      setPhraseGenerated(true);
+                      setPhraseReplacePending(false);
+                    }}
+                  >
+                    {t("wb.ui.bindPhraseReplaceConfirm")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhraseReplacePending(false);
+                    }}
+                  >
+                    {t("wb.ui.bindPhraseReplaceCancel")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {phraseGenerated ? (
+              <small className="parity-note">
+                {t("wb.ui.bindPhraseGenerated")}
+              </small>
+            ) : null}
             <small>{t("wb.ui.bindPhraseNote")}</small>
             {bindPhraseIssue(options.bindPhrase) === null ? null : (
               <small className="parity-error">
                 {t("wb.ui.bindPhraseInvalid")}
               </small>
             )}
-          </label>
+            {bindPhraseStrength(options.bindPhrase) === "WEAK" ? (
+              <small className="parity-note bind-phrase-weak">
+                {t("wb.ui.bindPhraseWeak")} {t("wb.ui.bindPhraseWeakWhy")}
+              </small>
+            ) : null}
+          </div>
           <label>
             <span>{t("wb.ui.wifiSsid")}</span>
             <input

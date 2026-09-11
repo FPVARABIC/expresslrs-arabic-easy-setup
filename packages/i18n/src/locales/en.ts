@@ -212,6 +212,23 @@ export const en = {
     "The phrase is only spaces. Leave it empty to set none, or type a phrase you can retype exactly on the other side.",
   "easy.fw.bindPhrase.CONTROL_CHARACTER":
     "The phrase contains an invisible control character. Retype it as plain text.",
+  "easy.fw.bindPhraseWeak":
+    "This phrase is easy to guess. It still works, and nothing here is withheld because of it.",
+  "easy.fw.bindPhraseWeakWhy":
+    "The UID is the first six bytes of an unsalted MD5 of a fixed, public string around your phrase. Anyone who sees the UID on the air can try candidate phrases offline as fast as their computer runs MD5, and a word, a name, a date or a short number falls at once. Recovering the phrase means being able to bind to your link.",
+  "easy.fw.bindPhraseGenerate": "Generate a strong phrase",
+  "easy.fw.bindPhraseGenerateHint":
+    "Draws {bits} bits from the browser's cryptographic random source, in characters that survive being read aloud.",
+  "easy.fw.bindPhraseReplaceHeading":
+    "Generating replaces the phrase you typed.",
+  "easy.fw.bindPhraseReplaceBody":
+    "A phrase is already in the field. Generating replaces it, and the old one is not kept anywhere — if a receiver is already flashed with it, write it down first.",
+  "easy.fw.bindPhraseReplaceConfirm": "Replace it",
+  "easy.fw.bindPhraseReplaceCancel": "Keep what I typed",
+  "easy.fw.bindPhraseGenerated":
+    "A new phrase is in the field. Flash the transmitter and the receiver with this exact phrase — a generated phrase on one side only means they will not link.",
+  "easy.fw.bindPhraseReveal": "Show the phrase",
+  "easy.fw.bindPhraseHide": "Hide the phrase",
   "easy.fw.loadCatalog": "Prepare the official update source",
   "easy.fw.catalogReady":
     "Loaded {releases} buildable versions and {targets} official Targets.",

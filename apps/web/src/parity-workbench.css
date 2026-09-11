@@ -424,3 +424,49 @@ button:disabled,
   grid-column: 1 / -1;
   margin-block-start: 0;
 }
+
+/*
+ * The binding phrase needs more than one control beside it: a reveal toggle,
+ * because a generated phrase nobody can read cannot be typed into the second
+ * device, and a generator. It therefore spans the row rather than sitting in
+ * one grid cell.
+ */
+.bind-phrase-field {
+  display: grid;
+  gap: 0.38rem;
+  grid-column: 1 / -1;
+}
+
+.bind-phrase-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bind-phrase-actions button {
+  min-height: 38px;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--line-strong, #3a4452);
+  border-radius: 6px;
+  background: var(--surface-strong, #1c2128);
+  color: var(--text, #e6edf3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.bind-phrase-replace {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line-strong, #3a4452);
+  border-radius: 6px;
+  background: var(--surface, #161b22);
+}
+
+/*
+ * Advisory, not an error. It is deliberately not styled like a refusal: the
+ * phrase works, and every operation stays available with it.
+ */
+.bind-phrase-weak {
+  color: var(--warn, #d29922);
+}
