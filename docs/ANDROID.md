@@ -272,15 +272,23 @@ that it works. An export derives a key **twice** — once to seal the file, once
 to open what it wrote and check it is a package that would actually restore the
 device — so this figure is paid twice per export.
 
-| | Measured |
-| --- | --- |
-| PBKDF2-HMAC-SHA-256, 600,000 iterations | **252 ms** |
-| AES-GCM seal, complete | **0.1 ms** |
-| AES-GCM open, complete | **0 ms** (below the timer's resolution) |
-| Event-loop ticks while the derivation was pending | **10** |
-| Longest event-loop gap during it | **32 ms** |
-| Round trip | plaintext returned intact |
-| Ciphertext with one flipped tag bit | refused |
+Two runs of the identical code on the identical image, because one number from
+a shared CI runner implies a precision it does not have:
+
+| | Run [34547975003](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34547975003) | Run [34549603481](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34549603481) |
+| --- | --- | --- |
+| PBKDF2-HMAC-SHA-256, 600,000 iterations | **252 ms** | **318 ms** |
+| AES-GCM seal, complete | 0.1 ms | 0.2 ms |
+| AES-GCM open, complete | 0 ms | 0.2 ms |
+| Event-loop ticks while the derivation was pending | **10** | **13** |
+| Longest event-loop gap during it | 32 ms | 26 ms |
+| Round trip | intact | intact |
+| Ciphertext with one flipped tag bit | refused | refused |
+
+A quarter of a second either way between two runs minutes apart, on a
+virtualised two-core runner sharing a host with whatever else is on it. Read
+the derivation as **roughly a third of a second here**, not as 252 ms; the
+spread is the measurement, not noise around a true value.
 
 The ten ticks are the load-bearing number. WebCrypto does not block the main
 thread here, so the interface can report progress and stay cancellable across
@@ -298,7 +306,7 @@ Measured on:
 | Cores available to the VM | 2 |
 | GPU | `swiftshader_indirect`, `-no-window`, KVM acceleration on |
 | WebView | `com.google.android.webview 113.0.5672.136` |
-| Run | [34547975003](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34547975003) — 67 instrumentation tests, 0 skipped, 0 failed |
+| Runs | [34547975003](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34547975003) and [34549603481](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34549603481) — 67 instrumentation tests each, 0 skipped, 0 failed |
 
 **This is one emulator image on one CI runner, and nothing more.** It is not a
 figure for any particular Android phone: WebView updates independently of the
@@ -307,9 +315,10 @@ low-end device will be slower while a recent one will be faster. Neither has
 been measured, because no physical Android device has run this application.
 
 For scale rather than for comparison, the same probe in desktop Chromium on the
-development machine reported 301 ms for the identical derivation — the emulator
-is not the slow case here, which is itself a reason not to read either number
-as a bound.
+development machine reported 301 ms for the identical derivation — inside the
+emulator's own run-to-run spread, so the emulator is not even reliably the
+slower of the two. That alone is reason enough not to read any of these
+numbers as a bound for a phone.
 
 ### APK identity
 
