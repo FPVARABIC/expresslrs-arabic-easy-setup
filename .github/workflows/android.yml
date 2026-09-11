@@ -542,7 +542,12 @@ jobs:
               echo "device will be slower and a recent one faster, and neither"
               echo "has been measured."
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # Also in the job log, so the value is readable from the API without
+          # opening the summary page or unpacking an artifact.
+          if [ -z "$measurement" ]; then
+            echo "::warning::the WebCrypto measurement did not reach any log the runner kept"
+          fi
 
       - name: Preserve the instrumentation reports
         if: always()

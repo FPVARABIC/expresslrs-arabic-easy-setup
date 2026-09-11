@@ -220,7 +220,7 @@ class PackagedApplicationInstrumentedTest {
             // about this platform build, not a figure that transfers to any
             // particular phone — a low-end device will be slower and a recent
             // flagship faster, and neither has been measured.
-            println(
+            val measurement =
                 "ELRS_WEBCRYPTO_MEASUREMENT " + JSONObject()
                     .put("device", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
                     .put("fingerprint", android.os.Build.FINGERPRINT)
@@ -234,8 +234,13 @@ class PackagedApplicationInstrumentedTest {
                     .put("aesGcmOpenMs", openMs)
                     .put("eventLoopBeatsDuringDerivation", beats)
                     .put("worstEventLoopGapMs", worstGapMs)
-                    .toString(),
-            )
+                    .toString()
+            // Both, deliberately. `println` reaches the instrumentation result
+            // XML; `Log.i` reaches logcat. Which of the two a given Gradle
+            // version keeps is not worth depending on for the one output this
+            // test exists to produce.
+            println(measurement)
+            android.util.Log.i("ElrsWebCrypto", measurement)
 
             // The one thing worth failing on besides correctness: whether the
             // interface can still respond while a key is being derived. An
