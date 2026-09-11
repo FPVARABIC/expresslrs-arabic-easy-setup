@@ -163,6 +163,7 @@ was proven by reintroducing the defect it names and watching the check fail.
 | `apksigner`'s answer is read, not its exit status | `apksigner verify` exits non-zero for a missing file, an unreadable zip or a JVM that would not start | any of those read as "no signature found", which is how a broken toolchain hands an APK to the key |
 | Bounded formats for every candidate-controlled value | a field with no shape is a field with no meaning | `versionCode` and `versionName` were unbounded |
 | The APK is `app-physicalTest-unsigned.apk` | AGP appends the suffix exactly when no signing config was applied, so the name is the claim | the signer looked for `app-physicalTest.apk` and would have died silently at `test -f` on its first real run |
+| The extracted artifact has exactly the producer's two-file layout | selecting a convenient-looking file from an archive is ambiguous, and following a symlink can leave the extraction root | the first live rehearsal found the APK under its preserved `app/build/outputs/…` path while the signer incorrectly assumed it was at the root |
 | Build-tools pinned, not "newest present" | apksigner's signature-scheme defaults move between versions | the version was chosen by `ls | sort -V | tail -1` |
 | Exactly one signer certificate | `head -1` on a multiply-signed APK checks the first and says nothing about the rest | the fingerprint check read only the first digest |
 
@@ -181,7 +182,7 @@ and leaves the record intact.
 ## Dispatching a signing run
 
 **Actions → Android physical-test signer → Run workflow**, from `main`, with the
-four values the candidate build printed in its run summary:
+five values the candidate build printed in its run summary:
 
 | Input | Where it comes from |
 | --- | --- |
@@ -229,18 +230,24 @@ reachable by hand, and the security properties are actually *better* — the key
 never leaves your machine. What you give up is the audit trail and the
 enforced verification.
 
-Download the unsigned candidate from the `android.yml` run's artifacts, then:
+Download the unsigned candidate from the `android.yml` run's artifacts, then.
+The archive preserves both uploaded paths relative to their common `android/`
+ancestor; it does not flatten the APK into the extraction root.
 
 ```sh
 # 0. What the run summary said the unsigned APK should be.
 EXPECTED=<expected_apk_sha256 from the run summary>
 
-unzip elrs-android-physicaltest-unsigned-<sha>.zip
-sha256sum app-physicalTest-unsigned.apk
+WORKDIR="$(mktemp -d)"
+unzip elrs-android-physicaltest-unsigned-<sha>.zip -d "$WORKDIR"
+node scripts/verify-unsigned-candidate-layout.mjs "$WORKDIR"
+APK="$WORKDIR/app/build/outputs/apk/physicalTest/app-physicalTest-unsigned.apk"
+MANIFEST="$WORKDIR/app-physicalTest-unsigned.provenance.json"
+sha256sum "$APK"
 
 # 1. Refuse to continue on a mismatch. This is the check the verify job runs;
 #    doing it by hand means actually doing it.
-test "$(sha256sum app-physicalTest-unsigned.apk | cut -d' ' -f1)" = "$EXPECTED" \
+test "$(sha256sum "$APK" | cut -d' ' -f1)" = "$EXPECTED" \
   || { echo "digest mismatch — do not sign this"; exit 1; }
 
 # 2. Confirm it is unsigned — and read the answer rather than the exit status.
@@ -249,7 +256,7 @@ test "$(sha256sum app-physicalTest-unsigned.apk | cut -d' ' -f1)" = "$EXPECTED" 
 #    zip or a JVM that would not start, and none of those is a statement about
 #    signatures. "It failed, so it must be unsigned" is how a broken toolchain
 #    talks you into signing something.
-out="$(apksigner verify app-physicalTest-unsigned.apk 2>&1)"; status=$?
+out="$(apksigner verify "$APK" 2>&1)"; status=$?
 if [ "$status" -eq 0 ]; then
   echo "ALREADY SIGNED — stop"; exit 1
 fi
@@ -259,11 +266,11 @@ case "$out" in
 esac
 
 # 3. Check the manifest describes this APK.
-cat app-physicalTest-unsigned.provenance.json
-aapt2 dump badging app-physicalTest-unsigned.apk | head -1
+cat "$MANIFEST"
+aapt2 dump badging "$APK" | head -1
 
 # 4. Align, then sign. Aligning after signing invalidates the v2 signature.
-zipalign -p -f 4 app-physicalTest-unsigned.apk app-physicalTest-aligned.apk
+zipalign -p -f 4 "$APK" app-physicalTest-aligned.apk
 zipalign -c -v 4 app-physicalTest-aligned.apk
 
 apksigner sign \
@@ -281,7 +288,7 @@ apksigner verify --print-certs app-physicalTest-signed.apk \
 cat android/signing/physical-test-certificate.sha256
 
 # 6. Record what you produced, so a phone can be traced back to a tree.
-sha256sum app-physicalTest-unsigned.apk app-physicalTest-signed.apk
+sha256sum "$APK" app-physicalTest-signed.apk
 ```
 
 Keep step 6's output with the APK. Without it there is no link between what a
@@ -292,10 +299,10 @@ manifest, which is less error-prone than reading it:
 
 ```sh
 node scripts/verify-unsigned-candidate.mjs \
-  --manifest app-physicalTest-unsigned.provenance.json \
+  --manifest "$MANIFEST" \
   --source-sha <sha> --run-id <run id> \
   --artifact-name elrs-android-physicaltest-unsigned-<sha> \
-  --apk-sha256 "$(sha256sum app-physicalTest-unsigned.apk | cut -d' ' -f1)" \
+  --apk-sha256 "$(sha256sum "$APK" | cut -d' ' -f1)" \
   --application-id com.fpvarabic.elrs.bridge \
   --version-code <from aapt2> --version-name <from aapt2>
 ```
