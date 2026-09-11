@@ -772,6 +772,11 @@ export function ExpressLrsParityWorkbenchView({
               </button>
               <button
                 type="button"
+                // Follows the field it writes into. `busy` is transient
+                // in-flight state, not a policy: an enabled button that writes
+                // into a disabled field is the inconsistency, not the
+                // disabling.
+                disabled={busy}
                 onClick={() => {
                   // An existing phrase is never overwritten by a single click:
                   // a receiver may already be flashed with it, and it is not
@@ -800,6 +805,7 @@ export function ExpressLrsParityWorkbenchView({
                 <div className="bind-phrase-actions">
                   <button
                     type="button"
+                    disabled={busy}
                     onClick={() => {
                       updateOption("bindPhrase", generateBindPhrase());
                       setPhraseVisible(true);
