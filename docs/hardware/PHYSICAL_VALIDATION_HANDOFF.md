@@ -162,7 +162,7 @@ being complete is not the same as the rows being done.
 | --- | --- | --- |
 | 1 — install and detect | A1, A2, H25 | nothing; read-only |
 | 2 — identity and diagnostics | H1–H5, H21, A3–A5 | nothing; read-only |
-| 3 — **durable recovery** | D1–D8 | nothing; it is the safety net for stage 6 |
+| 3 — **durable recovery** | D1–D9 | nothing; it is the safety net for stage 6 |
 | 4 — reversible settings | H6–H8 | a write that is put straight back |
 | 5 — binding and telemetry | H9–H11 | RF |
 | 6 — firmware | H12–H15 | a destructive write |
@@ -207,7 +207,7 @@ Nothing is written. Safe on any device, including ones you care about.
 | A4 | Deny the permission on a second device | A named refusal. No port is held; the next attempt still works | It hangs, or a later attempt fails because something was left open |
 | A5 | Grant, then revoke in Android settings, then retry | The stale handle is refused rather than used | It carries on with a handle it no longer has |
 
-### Stage 3 — durable recovery export and re-import (D1–D8)
+### Stage 3 — durable recovery export and re-import (D1–D9)
 
 **Run this before any firmware write.** It is the stage that decides whether
 stage 6 has a way back. Nothing here touches the device: it is entirely about
@@ -216,15 +216,16 @@ whether a file survives.
 | Step | Do | Expect | Fails if |
 | --- | --- | --- | --- |
 | D1 | Build a package, then press *Save the recovery package where it will survive* **with the passphrase field empty** | Refused, naming the passphrase and its minimum length. The button is not greyed out — it answers | The button is dead, or it saves an unprotected file |
-| D2 | Type a recovery passphrase — **write it down first** — and save. Choose a location **outside the app**: Downloads, an SD card, a cloud folder | Android's file picker opens. The app then reports the exact location and a SHA-256, having written the file, reopened it and hashed it | No picker appears, it offers only app-private storage, or it reports success without a digest |
-| D3 | Open the saved file in a text viewer or unzip tool | It is **not** a readable zip. It begins with `ELRSRCV1` and the rest is unreadable | You can list its contents, or you can find your Wi-Fi password in it |
-| D4 | Dismiss the picker instead of choosing | A cancellation, named as such — not an error, and not a silent success | It reports success, or an unexplained failure |
-| D5 | With the save cancelled, try to start a firmware write | Refused, naming the missing durable copy. **Identity, diagnostics and reversible settings all still work** | The write is allowed, or the whole application locks up |
-| D6 | Press *Choose a saved recovery file*, pick the file, and enter a **wrong** passphrase | Refused, saying the passphrase is wrong or the file was modified. Nothing is imported | It imports anything, or reports a different kind of error |
-| D7 | **Uninstall the app, reinstall it**, then press *Choose a saved recovery file* — **before building anything** | The control is there on a fresh install with nothing prepared, and shows which device and date the file came from | The control is missing, or it demands a firmware package first |
-| D8 | Enter the correct passphrase, then confirm the recovered identity | It reports the package imported and verified, and *Restore the device from this package* becomes available with no earlier app data at all | It cannot be imported, or the restore stays unavailable after confirming |
+| D2 | Type a passphrase in the first field and something **different** in the second, then save | Refused on the spot, saying the two do not match. **No file is created** — check the folder. Both fields keep what you typed and stay editable | It saves anything, it clears the fields, or the button is greyed out instead of answering |
+| D3 | Type the same recovery passphrase in **both** fields — **write it down first** — and save. Choose a location **outside the app**: Downloads, an SD card, a cloud folder | Android's file picker opens. The app then reports the exact location and a SHA-256, having written the file, **reopened it, decrypted it with the passphrase you typed, and checked that the package inside would actually restore this device** | No picker appears, it offers only app-private storage, or it reports success without a digest |
+| D4 | Open the saved file in a text viewer or unzip tool | It is **not** a readable zip. It begins with `ELRSRCV1` and the rest is unreadable | You can list its contents, or you can find your Wi-Fi password in it |
+| D5 | Dismiss the picker instead of choosing | A cancellation, named as such — not an error, and not a silent success | It reports success, or an unexplained failure |
+| D6 | With the save cancelled, try to start a firmware write | Refused, naming the missing durable copy. **Identity, diagnostics and reversible settings all still work** | The write is allowed, or the whole application locks up |
+| D7 | Press *Choose a saved recovery file*, pick the file, and enter a **wrong** passphrase | Refused, saying the passphrase is wrong or the file was modified. Nothing is imported | It imports anything, or reports a different kind of error |
+| D8 | **Uninstall the app, reinstall it**, then press *Choose a saved recovery file* — **before building anything** | The control is there on a fresh install with nothing prepared, and shows which device and date the file came from | The control is missing, or it demands a firmware package first |
+| D9 | Enter the correct passphrase, then confirm the recovered identity | It reports the package imported and verified, and *Restore the device from this package* becomes available with no earlier app data at all | It cannot be imported, or the restore stays unavailable after confirming |
 
-D7 and D8 are the whole point of this stage. Record the location and the digest from D2
+D8 and D9 are the whole point of this stage. Record the location and the digest from D3
 on the recording sheet — you will need them again at stage 7.
 
 ### Stage 4 — reversible settings (H6–H8)
@@ -269,7 +270,7 @@ a device on purpose.
 | --- | --- | --- | --- |
 | H16 | Start a write and pull the cable during `WRITING` | `RECOVERY_REQUIRED` appears and the checkpoint is kept. Recovery from the archive restores the original, and the identity and version return | The checkpoint is lost, recovery is unavailable, or the device cannot be restored |
 | A6 | Repeat H16 on Android, detaching mid-write | The port closes, the checkpoint survives, and the app says what happened | The app hangs, or claims success |
-| A11 | Recover the interrupted device on Android **using the file from D2 and its passphrase** | The original firmware returns, restored from the durable copy rather than from anything inside the app | It cannot be restored, or it needs app data the reinstall in D6 removed |
+| A11 | Recover the interrupted device on Android **using the file from D3 and its passphrase** | The original firmware returns, restored from the durable copy rather than from anything inside the app | It cannot be restored, or it needs app data the reinstall in D7 removed |
 
 Reconnect the interrupted device before recovering it, so the recovery writes
 to a device whose identity has been confirmed.
