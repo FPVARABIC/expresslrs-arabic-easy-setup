@@ -145,6 +145,24 @@
     },
     {
       "operation": "firmwareWrite",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Start the real flash, with a deliberately weak binding phrase",
+      "readinessInputs": [
+        "exactly the inputs firmwareWrite always requires",
+        "binding-phrase strength is not among them, by design"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.flashPreparedFirmware",
+      "driver": "as firmwareWrite: the phrase shapes the package, never the gate",
+      "writeAuthority": "single-use capability for FIRMWARE_WRITE, TTL 180s",
+      "recoveryCheckpoint": "as firmwareWrite",
+      "verification": "as firmwareWrite",
+      "onFailure": "as firmwareWrite"
+    },
+    {
+      "operation": "firmwareWrite",
       "surface": "easy",
       "transport": "browser",
       "control": "Write the firmware to the device",

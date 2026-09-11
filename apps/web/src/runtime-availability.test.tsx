@@ -824,6 +824,281 @@ describe("runtime availability, from the production entry point", () => {
     });
   });
 
+  it("easy mode has exactly the same phrase warning and the same generator", async () => {
+    mountEasy();
+    const card = screen
+      .getAllByRole("button", { name: "Start" })
+      .map((start) => start.closest("li"))
+      .find((node) => node?.textContent?.includes("Firmware update"));
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Start" }),
+    );
+    await settle(6);
+    fireEvent.click(screen.getByRole("button", { name: "Identify my device" }));
+    await settle(10);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Prepare the official update source",
+      }),
+    );
+    await settle(12);
+    fireEvent.change(targetSelect(), { target: { value: espTransmitter.id } });
+    await settle(4);
+    fireEvent.change(screen.getByLabelText(/Regulatory region/u), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+
+    // Recorded with no phrase at all, so the comparison below is against this
+    // screen rather than against an assumption about it.
+    const prepare = screen.getByRole("button", {
+      name: "Prepare and verify the official package",
+    });
+    const enabledWithNoPhrase = !prepare.hasAttribute("disabled");
+    expect(enabledWithNoPhrase).toBe(true);
+
+    // The point of this test: Easy Mode is not a reduced version of the same
+    // screen. The warning, its explanation, the generator and the replacement
+    // confirmation are all here, and none of them withholds anything.
+    const phraseField = screen.getByLabelText(
+      /Binding phrase/u,
+    ) as HTMLInputElement;
+    fireEvent.change(phraseField, { target: { value: "password" } });
+    await settle(2);
+    expect(screen.getAllByText(/easy to guess/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/unsalted MD5/u).length).toBeGreaterThan(0);
+    expect(document.querySelector(".bind-phrase-weak")).not.toBeNull();
+    expect(document.querySelector(".bind-phrase-weak.easy-error")).toBeNull();
+    expect(phraseField.value).toBe("password");
+    expect(phraseField).toBeEnabled();
+
+    // Preparing a package is exactly as available with the weak phrase typed
+    // as it was with no phrase at all.
+    expect(!prepare.hasAttribute("disabled")).toBe(enabledWithNoPhrase);
+
+    // The generator asks before replacing what the operator typed, here too.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    expect(phraseField.value).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Keep what I typed" }));
+    await settle(2);
+    expect(phraseField.value).toBe("password");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    fireEvent.click(screen.getByRole("button", { name: "Replace it" }));
+    await settle(2);
+    expect(phraseField.value).not.toBe("password");
+    expect(phraseField.type).toBe("text");
+    expect(screen.queryByText(/easy to guess/u)).toBeNull();
+    expect(
+      screen.getAllByText(/Flash the transmitter and the receiver with this/u)
+        .length,
+    ).toBeGreaterThan(0);
+    expect(prepare).toBeEnabled();
+  });
+
+  it("a mistyped export passphrase is corrected on the spot and writes no file", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrasf" },
+    });
+    const save = screen.getByRole("button", {
+      name: "Save the recovery package to durable storage",
+    });
+    // Not disabled for the mismatch. Pressing it is what names the problem;
+    // the two fields are input validation, not a gate.
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await settleUntil(/two recovery passphrases do not match/u);
+
+    // No file exists. A sealed file made with a mistyped passphrase would hash
+    // and verify perfectly and be unopenable, and the operator would find out
+    // on a device that is already bricked.
+    expect(durableStorage.files.size).toBe(0);
+    // Both fields stay editable and keep what was typed, so the correction is
+    // one keystroke rather than a retype.
+    const again = screen.getByLabelText(
+      "Recovery passphrase again",
+    ) as HTMLInputElement;
+    expect(again).toBeEnabled();
+    expect(again.value).toBe("bench-recovery-passphrasf");
+
+    // Correcting it exports, and the export is verified the whole way.
+    fireEvent.change(again, { target: { value: RECOVERY_PASSPHRASE } });
+    fireEvent.click(save);
+    await settleUntil(/Verified copy/u);
+    expect(durableStorage.files.size).toBe(1);
+  });
+
+  it("a weak binding phrase is warned about and withholds nothing", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+
+    // The weakest phrase there is: a dictionary word an offline search against
+    // the six-byte UID finds immediately.
+    const phraseField = screen.getByLabelText("Binding phrase");
+    fireEvent.change(phraseField, { target: { value: "fpv" } });
+    await settle(2);
+
+    // Said plainly, and said as a warning rather than as a refusal — no error
+    // styling, and the reason is given rather than asserted.
+    expect(screen.getAllByText(/easy to guess/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/unsalted MD5/u).length).toBeGreaterThan(0);
+    expect(document.querySelector(".bind-phrase-weak")).not.toBeNull();
+    expect(document.querySelector(".bind-phrase-weak.parity-error")).toBeNull();
+    // The field itself is untouched: not marked invalid, not cleared, not
+    // rewritten.
+    expect((phraseField as HTMLInputElement).value).toBe("fpv");
+    expect(phraseField).toBeEnabled();
+
+    // And every operation that exists on this screen behaves exactly as it
+    // does without a phrase. This is the property the warning must never
+    // acquire: an advisory that quietly became a gate.
+    const build = screen.getByRole("button", {
+      name: "Build the official firmware",
+    });
+    expect(build).toBeEnabled();
+    fireEvent.click(build);
+    await settle();
+
+    const flash = screen.getByRole("button", { name: "Start the real flash" });
+    const disabledBefore = flash.hasAttribute("disabled");
+
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Power stays stable throughout the flash",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "The transmitter's antenna is fitted",
+      }),
+    );
+    await settle(2);
+
+    // Weak phrase and all, the firmware write reaches exactly the state it
+    // reaches without one.
+    expect(flash).toBeEnabled();
+    // Nothing anywhere on the page blames the phrase for a refusal.
+    expect(screen.queryByText(/Flashing is waiting on:/u)).toBeNull();
+    // The warning is gone here because the phrase is: it was compiled into the
+    // package and dropped from memory, which is the behaviour the field
+    // documents. The field is still there and still editable — the phrase went
+    // away, not the control.
+    expect(phraseField).toBeEnabled();
+    expect((phraseField as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText(/easy to guess/u)).toBeNull();
+
+    record({
+      operation: "firmwareWrite",
+      surface: "advanced",
+      transport: "browser",
+      control: "Start the real flash, with a deliberately weak binding phrase",
+      readinessInputs: [
+        "exactly the inputs firmwareWrite always requires",
+        "binding-phrase strength is not among them, by design",
+      ],
+      disabledBefore,
+      enabledAfter: !flash.hasAttribute("disabled"),
+      handler: "useDeviceController.flashPreparedFirmware",
+      driver: "as firmwareWrite: the phrase shapes the package, never the gate",
+      writeAuthority: "single-use capability for FIRMWARE_WRITE, TTL 180s",
+      recoveryCheckpoint: "as firmwareWrite",
+      verification: "as firmwareWrite",
+      onFailure: "as firmwareWrite",
+    });
+  });
+
+  it("generating a phrase never overwrites one without being told to", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+
+    const phraseField = screen.getByLabelText(
+      "Binding phrase",
+    ) as HTMLInputElement;
+    // Empty field: one click fills it, because there is nothing to lose.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    const generated = phraseField.value;
+    expect(generated.length).toBeGreaterThan(0);
+    // Revealed, because a phrase nobody can read cannot be typed into the
+    // receiver, and the operator is told both devices need this exact phrase.
+    expect(phraseField.type).toBe("text");
+    expect(
+      screen.getAllByText(/Flash the transmitter and the receiver with this/u)
+        .length,
+    ).toBeGreaterThan(0);
+
+    // Now the field is occupied. A second click must not replace it: a
+    // receiver may already be flashed with what is there, and nothing here
+    // could put it back.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    expect(phraseField.value).toBe(generated);
+    expect(
+      screen.getAllByText(/Generating replaces the phrase you typed/u).length,
+    ).toBeGreaterThan(0);
+
+    // Declining leaves it exactly as it was.
+    fireEvent.click(screen.getByRole("button", { name: "Keep what I typed" }));
+    await settle(2);
+    expect(phraseField.value).toBe(generated);
+
+    // Accepting is the only thing that replaces it, and what it puts there is
+    // a different phrase the application accepts.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    fireEvent.click(screen.getByRole("button", { name: "Replace it" }));
+    await settle(2);
+    expect(phraseField.value).not.toBe(generated);
+    expect(phraseField.value.length).toBe(generated.length);
+    // A generated phrase is never one the interface then warns about.
+    expect(screen.queryByText(/easy to guess/u)).toBeNull();
+  });
+
   it("rxAsTx: the modes a platform supports become selectable, and the rest stay visible with the reason", async () => {
     mountAdvanced();
     const before = screen.queryByTestId("rx-as-tx-mode");

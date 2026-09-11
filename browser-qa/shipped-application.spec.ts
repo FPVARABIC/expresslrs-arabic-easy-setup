@@ -272,6 +272,84 @@ test("every core operation is present and reachable in Advanced Mode", async ({
   await expect(airport).toBeEnabled();
 });
 
+test("a weak binding phrase warns in a real browser and blocks nothing", async ({
+  page,
+}) => {
+  await openAdvanced(page, "en");
+
+  const phrase = page.getByLabel("Binding phrase");
+  await expect(phrase).toBeVisible();
+  await expect(phrase).toBeEnabled();
+
+  // Nothing weak typed yet, so nothing is said about it.
+  await expect(page.locator(".bind-phrase-weak")).toHaveCount(0);
+
+  const readyBefore = await readiness(page);
+  expect(readyBefore.length).toBeGreaterThan(0);
+
+  await phrase.fill("fpv");
+  const warning = page.locator(".bind-phrase-weak");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("easy to guess");
+  await expect(warning).toContainText("unsalted MD5");
+  // Advice, not a refusal: the copy must not tell the operator they cannot
+  // continue, and must not wear the styling this application uses for one.
+  await expect(warning).not.toHaveClass(/parity-error/u);
+  await expect(warning).not.toContainText(
+    /cannot|not allowed|unavailable|locked/iu,
+  );
+
+  // The live readiness of every operation is identical to what it was before
+  // the weak phrase existed. This is read out of the shipped DOM, which is the
+  // application's own account of what it will do right now.
+  expect(await readiness(page)).toEqual(readyBefore);
+  // And no operation names the phrase as something it is waiting on.
+  for (const row of await readiness(page)) {
+    expect(row.reasons).not.toMatch(/phrase/iu);
+  }
+});
+
+test("the generator produces a usable phrase in a real browser", async ({
+  page,
+}) => {
+  // Real Web Crypto, not jsdom's. `crypto.getRandomValues` needs no secure
+  // context, but the generator is only worth having if it runs where the
+  // application actually runs.
+  await openAdvanced(page, "en");
+
+  const phrase = page.getByLabel("Binding phrase");
+  await expect(phrase).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Generate a strong phrase" }).click();
+
+  // Revealed, because a phrase nobody can read cannot be typed into the
+  // receiver, and both devices need this exact phrase.
+  await expect(phrase).toHaveAttribute("type", "text");
+  const generated = await phrase.inputValue();
+  expect(generated).toMatch(/^[a-z2-9]{24}$/u);
+  expect(generated).not.toMatch(/[01lio]/u);
+  await expect(page.locator(".bind-phrase-weak")).toHaveCount(0);
+  await expect(
+    page.getByText(/Flash the transmitter and the receiver with this/u),
+  ).toBeVisible();
+
+  // A second press does not replace it. Nothing here can put the old phrase
+  // back, and a receiver may already be flashed with it.
+  await page.getByRole("button", { name: "Generate a strong phrase" }).click();
+  expect(await phrase.inputValue()).toBe(generated);
+  await expect(
+    page.getByText(/Generating replaces the phrase you typed/u),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Keep what I typed" }).click();
+  expect(await phrase.inputValue()).toBe(generated);
+
+  await page.getByRole("button", { name: "Generate a strong phrase" }).click();
+  await page.getByRole("button", { name: "Replace it" }).click();
+  const replaced = await phrase.inputValue();
+  expect(replaced).toMatch(/^[a-z2-9]{24}$/u);
+  expect(replaced).not.toBe(generated);
+});
+
 test("no control is disabled without a stated reason beside it", async ({
   page,
 }) => {
