@@ -509,6 +509,41 @@ jobs:
         if: always()
         run: timeout 120 adb logcat -d > android-logcat.txt || true
 
+      # The WebCrypto measurement is a number, not a pass/fail, so it has to
+      # leave the runner or it is not evidence. The test prints one line of
+      # JSON; this lifts it into the run summary where a reader can find it
+      # without downloading an artifact.
+      - name: Report the measured WebCrypto timings
+        if: always()
+        run: |
+          set -euo pipefail
+          measurement=""
+          for source in android-logcat.txt \
+            $(find android/app/build/outputs/androidTest-results -type f 2>/dev/null); do
+            [ -f "$source" ] || continue
+            line="$(grep -o 'ELRS_WEBCRYPTO_MEASUREMENT {.*}' "$source" | head -n 1 || true)"
+            if [ -n "$line" ]; then
+              measurement="${line#ELRS_WEBCRYPTO_MEASUREMENT }"
+              break
+            fi
+          done
+          {
+            echo "### WebCrypto inside the packaged WebView"
+            echo
+            if [ -z "$measurement" ]; then
+              echo "No measurement was recorded."
+            else
+              echo '```json'
+              echo "$measurement"
+              echo '```'
+              echo
+              echo "Measured on this emulator image and this WebView build."
+              echo "It is not a figure for any particular phone: a low-end"
+              echo "device will be slower and a recent one faster, and neither"
+              echo "has been measured."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Preserve the instrumentation reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

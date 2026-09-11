@@ -8,6 +8,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
+import org.json.JSONTokener
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -76,8 +77,25 @@ class PackagedApplicationInstrumentedTest {
 
             scenario.evaluate(
                 """
-                window.__vaultProbe = 'pending';
+                window.__vaultProbe = { state: 'pending' };
                 (async function () {
+                  const clock = () => performance.now();
+                  // A heartbeat on the event loop, started before the
+                  // derivation and stopped after it. If WebCrypto blocked the
+                  // main thread here, none of these would run while the key
+                  // was being derived, and every progress message, cancel
+                  // button and animation in the application would freeze for
+                  // however long the derivation takes. Counting them is the
+                  // only way to know which of the two it is on this platform.
+                  let beats = 0;
+                  let lastBeat = clock();
+                  let worstGap = 0;
+                  const heart = setInterval(function () {
+                    const now = clock();
+                    worstGap = Math.max(worstGap, now - lastBeat);
+                    lastBeat = now;
+                    beats += 1;
+                  }, 25);
                   try {
                     const encoder = new TextEncoder();
                     const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -86,68 +104,156 @@ class PackagedApplicationInstrumentedTest {
                       'raw', encoder.encode('a-real-recovery-passphrase'),
                       'PBKDF2', false, ['deriveKey'],
                     );
-                    // The production work factor, not a reduced one: this is
-                    // also the only measurement of how long it takes here.
+                    // The production work factor, not a reduced one. This is
+                    // the measurement: an operator waits exactly this long,
+                    // twice, every time they export a recovery package.
+                    const derivationStarted = clock();
+                    const beatsBeforeDerivation = beats;
                     const key = await crypto.subtle.deriveKey(
                       { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 600000 },
                       material, { name: 'AES-GCM', length: 256 }, false,
                       ['encrypt', 'decrypt'],
                     );
+                    const pbkdf2Ms = clock() - derivationStarted;
+                    const beatsDuringDerivation = beats - beatsBeforeDerivation;
+
                     const plaintext = encoder.encode('wifi-password=hunter2-hunter2');
                     const prefix = encoder.encode('ELRSRCV1-header');
+                    const sealStarted = clock();
                     const sealed = new Uint8Array(await crypto.subtle.encrypt(
                       { name: 'AES-GCM', iv: nonce, additionalData: prefix, tagLength: 128 },
                       key, plaintext,
                     ));
+                    const sealMs = clock() - sealStarted;
                     // The secret must not survive in the ciphertext.
                     const asText = String.fromCharCode(...sealed);
                     if (asText.includes('hunter2')) {
-                      window.__vaultProbe = 'leaked';
+                      window.__vaultProbe = { state: 'leaked' };
                       return;
                     }
+                    const openStarted = clock();
                     const opened = new Uint8Array(await crypto.subtle.decrypt(
                       { name: 'AES-GCM', iv: nonce, additionalData: prefix, tagLength: 128 },
                       key, sealed,
                     ));
+                    const openMs = clock() - openStarted;
                     if (new TextDecoder().decode(opened) !== 'wifi-password=hunter2-hunter2') {
-                      window.__vaultProbe = 'round-trip-mismatch';
+                      window.__vaultProbe = { state: 'round-trip-mismatch' };
                       return;
                     }
                     // And a flipped bit in the tag must be refused rather than
                     // returning plaintext.
                     const tampered = sealed.slice();
                     tampered[tampered.length - 1] ^= 1;
+                    let tamperRefused = false;
                     try {
                       await crypto.subtle.decrypt(
                         { name: 'AES-GCM', iv: nonce, additionalData: prefix, tagLength: 128 },
                         key, tampered,
                       );
-                      window.__vaultProbe = 'tamper-accepted';
-                      return;
                     } catch {
-                      window.__vaultProbe = 'ok';
+                      tamperRefused = true;
                     }
+                    if (!tamperRefused) {
+                      window.__vaultProbe = { state: 'tamper-accepted' };
+                      return;
+                    }
+                    window.__vaultProbe = {
+                      state: 'ok',
+                      pbkdf2Ms: Math.round(pbkdf2Ms),
+                      sealMs: Math.round(sealMs * 1000) / 1000,
+                      openMs: Math.round(openMs * 1000) / 1000,
+                      beatsDuringDerivation,
+                      worstGapMs: Math.round(worstGap),
+                      sealedBytes: sealed.length,
+                    };
                   } catch (error) {
-                    window.__vaultProbe = 'threw: ' + String(error);
+                    window.__vaultProbe = { state: 'threw: ' + String(error) };
+                  } finally {
+                    clearInterval(heart);
                   }
                 })();
                 """.trimIndent(),
             )
 
-            // 600,000 PBKDF2 iterations on an emulator is slow, and that is
-            // the point of measuring it here rather than assuming a desktop
-            // figure carries over.
+            // Deliberately generous. 600,000 PBKDF2 iterations on an emulated
+            // ARM-on-x86 core is far slower than on the phone this will run
+            // on, and a tight bound here would turn a slow CI runner into a
+            // red build about nothing. The timeout is a liveness check; the
+            // measurement below is the result.
             val deadline = System.currentTimeMillis() + 120_000
-            var last = "\"pending\""
+            var last = "null"
             while (System.currentTimeMillis() < deadline) {
-                last = scenario.evaluate("window.__vaultProbe")
-                if (last != "\"pending\"") break
+                last = scenario.evaluate("JSON.stringify(window.__vaultProbe)")
+                if (!last.contains("pending")) break
                 Thread.sleep(250)
             }
+
+            // `evaluateJavascript` hands back a JSON value, and the value here
+            // is itself a JSON string, so it is unwrapped once before parsing
+            // rather than by trimming quotes by hand. A probe that never ran
+            // at all comes back as the literal `null`, which is a different
+            // failure from a probe that ran and reported a problem.
+            val encoded = JSONTokener(last).nextValue()
+            assertTrue(
+                "the probe never reported: the page returned $last within 120s",
+                encoded is String,
+            )
+            val probe = JSONObject(encoded as String)
             assertEquals(
                 "the envelope's construction must work in the packaged WebView",
-                "\"ok\"",
-                last,
+                "ok",
+                probe.optString("state"),
+            )
+
+            val pbkdf2Ms = probe.getInt("pbkdf2Ms")
+            val sealMs = probe.getDouble("sealMs")
+            val openMs = probe.getDouble("openMs")
+            val beats = probe.getInt("beatsDuringDerivation")
+            val worstGapMs = probe.getInt("worstGapMs")
+
+            // Recorded rather than only asserted: the numbers are the point of
+            // this test, and a report that says "it works" without them tells
+            // an operator nothing about how long they will be waiting.
+            //
+            // This is one emulator image on one CI runner. It is evidence
+            // about this platform build, not a figure that transfers to any
+            // particular phone — a low-end device will be slower and a recent
+            // flagship faster, and neither has been measured.
+            println(
+                "ELRS_WEBCRYPTO_MEASUREMENT " + JSONObject()
+                    .put("device", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                    .put("fingerprint", android.os.Build.FINGERPRINT)
+                    .put("sdkInt", android.os.Build.VERSION.SDK_INT)
+                    .put("abis", android.os.Build.SUPPORTED_ABIS.joinToString(","))
+                    .put("cores", Runtime.getRuntime().availableProcessors())
+                    .put("webViewVersion", webViewVersion())
+                    .put("pbkdf2Iterations", 600_000)
+                    .put("pbkdf2Ms", pbkdf2Ms)
+                    .put("aesGcmSealMs", sealMs)
+                    .put("aesGcmOpenMs", openMs)
+                    .put("eventLoopBeatsDuringDerivation", beats)
+                    .put("worstEventLoopGapMs", worstGapMs)
+                    .toString(),
+            )
+
+            // The one thing worth failing on besides correctness: whether the
+            // interface can still respond while a key is being derived. An
+            // export derives twice — once to seal, once to open what it wrote
+            // — so a blocking implementation would freeze the application for
+            // the whole of both, with no way to say so and no way to cancel.
+            assertTrue(
+                "the event loop must keep running while PBKDF2 is pending, " +
+                    "or the interface freezes for the whole derivation " +
+                    "(pbkdf2Ms=$pbkdf2Ms, beats=$beats, worstGapMs=$worstGapMs)",
+                beats > 0,
+            )
+            // A sanity floor on the measurement itself. A derivation that
+            // reports near-zero milliseconds did not run 600,000 iterations,
+            // and a measurement that cannot be trusted is worse than none.
+            assertTrue(
+                "600,000 iterations cannot take $pbkdf2Ms ms; the measurement is wrong",
+                pbkdf2Ms >= 20,
             )
         }
     }
@@ -407,6 +513,21 @@ class PackagedApplicationInstrumentedTest {
             " | lang=${probe("document.documentElement.lang")}" +
             " | head=${probe("document.head && document.head.innerHTML.slice(0, 300)")}"
     }
+
+    /**
+     * Which WebView actually rendered the page.
+     *
+     * WebView is a separately updatable system component, so "API 34" does not
+     * pin it: the same emulator image can run a two-year-old WebView or
+     * yesterday's. A timing measurement that does not name the engine that
+     * produced it cannot be compared with anything later.
+     */
+    private fun webViewVersion(): String =
+        runCatching {
+            android.webkit.WebView.getCurrentWebViewPackage()
+                ?.let { "${it.packageName} ${it.versionName}" }
+                ?: "unknown"
+        }.getOrElse { "unavailable" }
 
     private fun ActivityScenario<MainActivity>.evaluate(script: String): String {
         val latch = CountDownLatch(1)
