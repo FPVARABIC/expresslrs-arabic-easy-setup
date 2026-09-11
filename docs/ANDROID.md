@@ -259,6 +259,58 @@ than a flake:
 | USB CDC-ACM byte transport | `IMPLEMENTED` | **not executed anywhere** — `AndroidUsbBackend` is the one part a fake stands in for |
 | Anything over real USB OTG | **`UNVERIFIED`** | none |
 
+### What the recovery envelope costs inside the packaged WebView
+
+`crypto.subtle` is only defined in a secure context, and this host serves the
+application from `https://appassets.androidplatform.net/` through
+`WebViewAssetLoader` rather than from a real origin. That it counts as secure
+is not a thing to assume: if it did not, every recovery export on Android would
+fail at the moment of saving, which is the moment an operator is relying on it.
+
+It does, and the instrumentation suite measures what it costs rather than only
+that it works. An export derives a key **twice** — once to seal the file, once
+to open what it wrote and check it is a package that would actually restore the
+device — so this figure is paid twice per export.
+
+| | Measured |
+| --- | --- |
+| PBKDF2-HMAC-SHA-256, 600,000 iterations | **252 ms** |
+| AES-GCM seal, complete | **0.1 ms** |
+| AES-GCM open, complete | **0 ms** (below the timer's resolution) |
+| Event-loop ticks while the derivation was pending | **10** |
+| Longest event-loop gap during it | **32 ms** |
+| Round trip | plaintext returned intact |
+| Ciphertext with one flipped tag bit | refused |
+
+The ten ticks are the load-bearing number. WebCrypto does not block the main
+thread here, so the interface can report progress and stay cancellable across
+both derivations; a blocking implementation would freeze the application for
+roughly half a second per export with no way to say so. That is asserted, not
+just recorded — the test fails if the heartbeat stops.
+
+Measured on:
+
+| | |
+| --- | --- |
+| Image | `system-images;android-34;google_apis;x86_64`, `pixel_6` profile |
+| Fingerprint | `google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys` |
+| ABIs | `x86_64,arm64-v8a` |
+| Cores available to the VM | 2 |
+| GPU | `swiftshader_indirect`, `-no-window`, KVM acceleration on |
+| WebView | `com.google.android.webview 113.0.5672.136` |
+| Run | [34547975003](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34547975003) — 67 instrumentation tests, 0 skipped, 0 failed |
+
+**This is one emulator image on one CI runner, and nothing more.** It is not a
+figure for any particular Android phone: WebView updates independently of the
+system image, so even the same API level can carry a different engine, and a
+low-end device will be slower while a recent one will be faster. Neither has
+been measured, because no physical Android device has run this application.
+
+For scale rather than for comparison, the same probe in desktop Chromium on the
+development machine reported 301 ms for the identical derivation — the emulator
+is not the slow case here, which is itself a reason not to read either number
+as a bound.
+
 ### APK identity
 
 Recomputed on every head and never carried over from a previous commit. CI
