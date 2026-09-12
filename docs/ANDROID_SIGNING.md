@@ -49,10 +49,57 @@ code. Gradle also refuses to run at all if any of the four secret names appears
 in its environment, which turns "we do not pass the key to Gradle" from a
 promise into a build failure.
 
+## Stage 3: disposable proof before a permanent key exists
+
+`android-physical-test-rehearsal.yml` is a separate, manual-only rehearsal. It
+exists to prove the mechanical half of the signer — receive the exact bytes
+Stage 2 verified, align them, sign once, read the certificate back, and destroy
+everything — before a permanent key or signing secret exists.
+
+This is intentionally **not** another release path:
+
+- it uses the separate `physical-test-signing-rehearsal` environment;
+- it references no secret and generates a one-day disposable key inside the
+  approved job;
+- the certificate subject contains `DISPOSABLE Stage 3 DO NOT INSTALL`;
+- it destroys the keystore, unsigned input, aligned APK and signed APK before
+  any artifact upload action runs;
+- its only final artifact is
+  `REHEARSAL-PROOF-ONLY-NO-APK-<sha>`, containing JSON proof and apksigner's
+  public certificate report — **no APK and no private key** — retained for one
+  day.
+
+The two jobs independently download the already-existing Stage 2 artifact by
+its verified numeric id. Stage 3 creates no intermediate handoff artifact, so
+the proof-only record is the workflow's sole new artifact.
+
+Before its first run, create `physical-test-signing-rehearsal` with the same
+reviewer, admin-bypass and `main`-only branch rules documented below for the
+permanent environment. Add **no secrets and no variables**. The workflow will
+wait for approval, but there is nothing privileged for the environment to
+release.
+
+Stage 3 consumes the output of a completed Stage 2 run. Its seven inputs are
+the Stage 2 run id, Stage 2 verified-artifact id, Stage 2 signer SHA, original
+candidate SHA, original Android-host run id, original artifact name, and the
+unsigned APK SHA-256. Before downloading anything it verifies the Stage 2 run's
+repository, workflow, event, branch, head SHA and exact two-job outcome: the
+secret-free verify job succeeded, key materialisation failed, signing and
+publishing were skipped, and cleanup succeeded. It also proves the permanent
+signer file has the same Git blob at the Stage 2 SHA and the current trusted
+SHA.
+
+If a permanent certificate fingerprint is later committed, Stage 3 additionally
+refuses a disposable certificate equal to it. Before the first permanent key,
+the proof records `NO_PERMANENT_FINGERPRINT_COMMITTED` rather than inventing a
+comparison it cannot make.
+
 ## What you need to do
 
-Nothing here can create a keystore for you, and nothing here will invent
-credentials. These steps are yours.
+Nothing in the permanent signing path can create its keystore for you, and
+nothing here will invent permanent credentials. The disposable Stage 3 key
+above is intentionally unrelated and can never satisfy the permanent
+fingerprint check. These permanent-key steps are yours.
 
 ### 1. Create the keystore
 

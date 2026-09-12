@@ -1,0 +1,469 @@
+# Disposable Stage 3 signing rehearsal.
+#
+# This workflow proves that a verified unsigned candidate can be aligned,
+# signed and independently verified without ever touching the permanent key.
+# It deliberately publishes no APK: the only artifact created by Stage 3 is a
+# one-day proof record and apksigner's public certificate report. The
+# disposable keystore, the unsigned input and the signed rehearsal APK are
+# destroyed first.
+name: Android disposable signing rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage2_run_id:
+        description: Run id of the completed Stage 2 signer rehearsal
+        required: true
+        type: string
+      stage2_artifact_id:
+        description: Numeric id of Stage 2's verified-unsigned artifact
+        required: true
+        type: string
+      stage2_signer_sha:
+        description: Full main SHA that executed Stage 2
+        required: true
+        type: string
+      source_sha:
+        description: Full candidate SHA recorded in the unsigned provenance
+        required: true
+        type: string
+      source_run_id:
+        description: Original Android host run id
+        required: true
+        type: string
+      source_artifact_name:
+        description: Original unsigned-candidate artifact name
+        required: true
+        type: string
+      expected_apk_sha256:
+        description: SHA-256 of the unsigned APK
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-disposable-signing-rehearsal
+  cancel-in-progress: false
+
+env:
+  EXPECTED_APPLICATION_ID: com.fpvarabic.elrs.bridge
+  SIGNER_BUILD_TOOLS: 35.0.0
+
+jobs:
+  verify-stage2:
+    name: Verify Stage 2 without a key
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      apk-sha256: ${{ steps.inspect.outputs.apk-sha256 }}
+      version-code: ${{ steps.inspect.outputs.version-code }}
+      version-name: ${{ steps.inspect.outputs.version-name }}
+    steps:
+      - name: Refuse to run from anywhere but the default branch
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Stage 3 may only run from the default branch" \
+                 "($DEFAULT_BRANCH), not $REF_NAME." >&2
+            exit 1
+          fi
+
+      - name: Check out the trusted branch only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Reject malformed inputs before fetching anything
+        env:
+          STAGE2_RUN_ID: ${{ inputs.stage2_run_id }}
+          STAGE2_ARTIFACT_ID: ${{ inputs.stage2_artifact_id }}
+          STAGE2_SIGNER_SHA: ${{ inputs.stage2_signer_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ARTIFACT_NAME: ${{ inputs.source_artifact_name }}
+          EXPECTED_APK_SHA256: ${{ inputs.expected_apk_sha256 }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1" >&2; exit 1; }
+          printf '%s' "$STAGE2_RUN_ID" | grep -Eq '^[0-9]{1,20}$' \
+            || fail "stage2_run_id must be numeric"
+          printf '%s' "$STAGE2_ARTIFACT_ID" | grep -Eq '^[0-9]{1,20}$' \
+            || fail "stage2_artifact_id must be numeric"
+          printf '%s' "$STAGE2_SIGNER_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+            || fail "stage2_signer_sha must be a full lowercase SHA"
+          printf '%s' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+            || fail "source_sha must be a full lowercase SHA"
+          printf '%s' "$SOURCE_RUN_ID" | grep -Eq '^[0-9]{1,20}$' \
+            || fail "source_run_id must be numeric"
+          printf '%s' "$SOURCE_ARTIFACT_NAME" | grep -Eq '^[A-Za-z0-9._-]{1,200}$' \
+            || fail "source_artifact_name must be a plain artifact name"
+          printf '%s' "$EXPECTED_APK_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
+            || fail "expected_apk_sha256 must be a lowercase SHA-256"
+
+      - name: Verify Stage 2 and fetch only its verified artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          STAGE2_RUN_ID: ${{ inputs.stage2_run_id }}
+          STAGE2_ARTIFACT_ID: ${{ inputs.stage2_artifact_id }}
+          STAGE2_SIGNER_SHA: ${{ inputs.stage2_signer_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          api() {
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+          }
+          mkdir -p "$RUNNER_TEMP/stage2"
+          api "https://api.github.com/repos/$REPOSITORY/actions/runs/$STAGE2_RUN_ID" \
+            > "$RUNNER_TEMP/stage2-run.json"
+          api "https://api.github.com/repos/$REPOSITORY/actions/runs/$STAGE2_RUN_ID/jobs?per_page=20" \
+            > "$RUNNER_TEMP/stage2-jobs.json"
+          api "https://api.github.com/repos/$REPOSITORY/actions/artifacts/$STAGE2_ARTIFACT_ID" \
+            > "$RUNNER_TEMP/stage2-artifact.json"
+          api "https://api.github.com/repos/$REPOSITORY/contents/.github/workflows/android-physical-test-signer.yml?ref=$STAGE2_SIGNER_SHA" \
+            > "$RUNNER_TEMP/old-signer.json"
+          api "https://api.github.com/repos/$REPOSITORY/contents/.github/workflows/android-physical-test-signer.yml?ref=$CURRENT_SHA" \
+            > "$RUNNER_TEMP/current-signer.json"
+
+          node scripts/verify-stage2-rehearsal-source.mjs \
+            --run "$RUNNER_TEMP/stage2-run.json" \
+            --jobs "$RUNNER_TEMP/stage2-jobs.json" \
+            --artifact "$RUNNER_TEMP/stage2-artifact.json" \
+            --old-signer "$RUNNER_TEMP/old-signer.json" \
+            --current-signer "$RUNNER_TEMP/current-signer.json" \
+            --repository "$REPOSITORY" \
+            --stage2-run-id "$STAGE2_RUN_ID" \
+            --stage2-artifact-id "$STAGE2_ARTIFACT_ID" \
+            --stage2-signer-sha "$STAGE2_SIGNER_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --default-branch "$DEFAULT_BRANCH"
+
+          api -L \
+            "https://api.github.com/repos/$REPOSITORY/actions/artifacts/$STAGE2_ARTIFACT_ID/zip" \
+            --output "$RUNNER_TEMP/stage2.zip"
+          unzip -o -d "$RUNNER_TEMP/stage2" "$RUNNER_TEMP/stage2.zip"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android build tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: build-tools;${{ env.SIGNER_BUILD_TOOLS }} platform-tools
+
+      - name: Re-confirm the APK and its unsigned provenance
+        id: inspect
+        env:
+          EXPECTED_APK_SHA256: ${{ inputs.expected_apk_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ARTIFACT_NAME: ${{ inputs.source_artifact_name }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1" >&2; exit 1; }
+          layout="$(node scripts/verify-stage2-artifact-layout.mjs "$RUNNER_TEMP/stage2")"
+          apk="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).apk)' "$layout")"
+          manifest="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).manifest)' "$layout")"
+
+          actual="$(sha256sum "$apk" | cut -d' ' -f1)"
+          [ "$actual" = "$EXPECTED_APK_SHA256" ] \
+            || fail "Stage 2 APK digest changed ($actual vs $EXPECTED_APK_SHA256)"
+
+          tools="$ANDROID_HOME/build-tools/$SIGNER_BUILD_TOOLS"
+          test -x "$tools/aapt2" && test -x "$tools/apksigner" \
+            || fail "pinned Android build-tools are unavailable"
+          badging="$("$tools/aapt2" dump badging "$apk")"
+          read_badge() { printf '%s' "$badging" | sed -n "$1" | head -1; }
+          application_id="$(read_badge "s/^package: name='\([^']*\)'.*/\1/p")"
+          version_code="$(read_badge "s/^package:.*versionCode='\([^']*\)'.*/\1/p")"
+          version_name="$(read_badge "s/^package:.*versionName='\([^']*\)'.*/\1/p")"
+          [ "$application_id" = "$EXPECTED_APPLICATION_ID" ] \
+            || fail "unexpected application id: $application_id"
+          printf '%s' "$version_code" | grep -Eq '^[0-9]{1,9}$' \
+            || fail "invalid versionCode: $version_code"
+          printf '%s' "$version_name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$' \
+            || fail "invalid versionName: $version_name"
+
+          set +e
+          verify_output="$("$tools/apksigner" verify "$apk" 2>&1)"
+          verify_status=$?
+          set -e
+          [ "$verify_status" -ne 0 ] \
+            || fail "Stage 2 handed Stage 3 an already-signed APK"
+          printf '%s' "$verify_output" | grep -Eqi \
+            'DOES NOT VERIFY|No JAR signature|Missing (APK Signature Scheme|META-INF)|not signed' \
+            || fail "apksigner did not positively identify the input as unsigned: $verify_output"
+
+          node scripts/verify-unsigned-candidate.mjs \
+            --manifest "$manifest" \
+            --source-sha "$SOURCE_SHA" \
+            --run-id "$SOURCE_RUN_ID" \
+            --artifact-name "$SOURCE_ARTIFACT_NAME" \
+            --apk-sha256 "$actual" \
+            --application-id "$application_id" \
+            --version-code "$version_code" \
+            --version-name "$version_name"
+
+          {
+            echo "apk-sha256=$actual"
+            echo "version-code=$version_code"
+            echo "version-name=$version_name"
+          } >> "$GITHUB_OUTPUT"
+
+  rehearse:
+    name: Sign once with a disposable key and publish proof only
+    needs: verify-stage2
+    runs-on: ubuntu-latest
+    environment: physical-test-signing-rehearsal
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the trusted branch only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android build tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: build-tools;${{ env.SIGNER_BUILD_TOOLS }}
+
+      - name: Collect the exact Stage 2 artifact verified by the first job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          STAGE2_ARTIFACT_ID: ${{ inputs.stage2_artifact_id }}
+        run: |
+          set -euo pipefail
+          api() {
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+          }
+          mkdir -p "$RUNNER_TEMP/rehearsal-input"
+          api -L \
+            "https://api.github.com/repos/$REPOSITORY/actions/artifacts/$STAGE2_ARTIFACT_ID/zip" \
+            --output "$RUNNER_TEMP/rehearsal-input.zip"
+          unzip -o -d "$RUNNER_TEMP/rehearsal-input" \
+            "$RUNNER_TEMP/rehearsal-input.zip"
+          rm -f "$RUNNER_TEMP/rehearsal-input.zip"
+          node scripts/verify-stage2-artifact-layout.mjs \
+            "$RUNNER_TEMP/rehearsal-input" > "$RUNNER_TEMP/rehearsal-layout.json"
+
+      - name: Re-confirm the digest immediately before the disposable key exists
+        env:
+          EXPECTED_APK_SHA256: ${{ needs.verify-stage2.outputs.apk-sha256 }}
+        run: |
+          set -euo pipefail
+          apk="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).apk)' "$RUNNER_TEMP/rehearsal-layout.json")"
+          actual="$(sha256sum "$apk" | cut -d' ' -f1)"
+          if [ "$actual" != "$EXPECTED_APK_SHA256" ]; then
+            echo "::error::verified bytes changed before the disposable rehearsal" >&2
+            exit 1
+          fi
+
+      - name: Generate an in-run disposable key
+        id: key
+        env:
+          REHEARSAL_PASSWORD: stage3-disposable-not-a-secret
+        run: |
+          set -euo pipefail
+          store="$RUNNER_TEMP/STAGE3-DISPOSABLE-DO-NOT-KEEP.p12"
+          keytool -genkeypair -noprompt \
+            -alias stage3-disposable \
+            -keyalg RSA -keysize 4096 -validity 1 \
+            -storetype PKCS12 -keystore "$store" \
+            -storepass "$REHEARSAL_PASSWORD" -keypass "$REHEARSAL_PASSWORD" \
+            -dname "CN=DISPOSABLE Stage 3 DO NOT INSTALL,O=FPVARABIC,C=NL"
+          chmod 600 "$store"
+          test -s "$store"
+          echo "path=$store" >> "$GITHUB_OUTPUT"
+
+      - name: Align and sign the disposable copy
+        id: signed
+        env:
+          KEYSTORE_PATH: ${{ steps.key.outputs.path }}
+          REHEARSAL_PASSWORD: stage3-disposable-not-a-secret
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/$SIGNER_BUILD_TOOLS"
+          test -x "$tools/zipalign" && test -x "$tools/apksigner"
+          unsigned="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).apk)' "$RUNNER_TEMP/rehearsal-layout.json")"
+          aligned="$RUNNER_TEMP/STAGE3-DISPOSABLE-aligned.apk"
+          signed="$RUNNER_TEMP/STAGE3-DISPOSABLE-DO-NOT-INSTALL.apk"
+          "$tools/zipalign" -p -f 4 "$unsigned" "$aligned"
+          "$tools/zipalign" -c -v 4 "$aligned" > /dev/null
+          "$tools/apksigner" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-pass "env:REHEARSAL_PASSWORD" \
+            --key-pass "env:REHEARSAL_PASSWORD" \
+            --ks-key-alias stage3-disposable \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --out "$signed" "$aligned"
+          echo "path=$signed" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the disposable signature is unmistakably non-production
+        id: verify-signature
+        env:
+          SIGNED: ${{ steps.signed.outputs.path }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1" >&2; exit 1; }
+          apksigner="$ANDROID_HOME/build-tools/$SIGNER_BUILD_TOOLS/apksigner"
+          report="$RUNNER_TEMP/stage3-disposable.apksigner.txt"
+          "$apksigner" verify --verbose --print-certs "$SIGNED" | tee "$report"
+          certs="$RUNNER_TEMP/stage3-disposable-certs.txt"
+          "$apksigner" verify --print-certs "$SIGNED" > "$certs" 2>&1
+          signers="$(grep -c '^Signer #[0-9]* certificate SHA-256 digest:' "$certs" || true)"
+          [ "$signers" = "1" ] \
+            || fail "expected exactly one disposable signer, found $signers"
+          observed="$(sed -n 's/^Signer #1 certificate SHA-256 digest: *\([0-9a-fA-F]\{64\}\).*/\1/p' "$certs" | tr 'A-F' 'a-f')"
+          printf '%s' "$observed" | grep -Eq '^[0-9a-f]{64}$' \
+            || fail "could not read the disposable certificate fingerprint"
+          grep -Fq 'CN=DISPOSABLE Stage 3 DO NOT INSTALL' "$certs" \
+            || fail "the rehearsal certificate is not visibly marked disposable"
+
+          permanent_state="NO_PERMANENT_FINGERPRINT_COMMITTED"
+          recorded_file="android/signing/physical-test-certificate.sha256"
+          if [ -f "$recorded_file" ]; then
+            recorded="$(tr -d '[:space:]' < "$recorded_file" | tr 'A-F' 'a-f')"
+            printf '%s' "$recorded" | grep -Eq '^[0-9a-f]{64}$' \
+              || fail "the committed permanent fingerprint is malformed"
+            [ "$observed" != "$recorded" ] \
+              || fail "the disposable certificate unexpectedly equals the permanent certificate"
+            permanent_state="DIFFERENT_FROM_RECORDED_PERMANENT"
+          fi
+          {
+            echo "certificate=$observed"
+            echo "signed-sha256=$(sha256sum "$SIGNED" | cut -d' ' -f1)"
+            echo "permanent-state=$permanent_state"
+            echo "report=$report"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Destroy every APK and the disposable key
+        id: cleanup
+        if: always()
+        env:
+          KEYSTORE_PATH: ${{ steps.key.outputs.path }}
+          SIGNED_PATH: ${{ steps.signed.outputs.path }}
+        run: |
+          set -euo pipefail
+          disposable_store="$RUNNER_TEMP/STAGE3-DISPOSABLE-DO-NOT-KEEP.p12"
+          if [ -f "$disposable_store" ]; then
+            shred -u "$disposable_store" 2>/dev/null || rm -f "$disposable_store"
+          fi
+          if [ -n "${KEYSTORE_PATH:-}" ] && [ "$KEYSTORE_PATH" != "$disposable_store" ]; then
+            if [ -f "$KEYSTORE_PATH" ]; then
+              shred -u "$KEYSTORE_PATH" 2>/dev/null || rm -f "$KEYSTORE_PATH"
+            fi
+          fi
+          rm -f \
+            "$RUNNER_TEMP/STAGE3-DISPOSABLE-aligned.apk" \
+            "$RUNNER_TEMP/STAGE3-DISPOSABLE-DO-NOT-INSTALL.apk" \
+            "${SIGNED_PATH:-}" \
+            "$RUNNER_TEMP/rehearsal-input/verified-unsigned.apk" \
+            "$RUNNER_TEMP/rehearsal-input.zip"
+          test ! -e "$disposable_store"
+          test ! -e "$RUNNER_TEMP/STAGE3-DISPOSABLE-aligned.apk"
+          test ! -e "$RUNNER_TEMP/STAGE3-DISPOSABLE-DO-NOT-INSTALL.apk"
+          [ -z "${SIGNED_PATH:-}" ] || test ! -e "$SIGNED_PATH"
+          test ! -e "$RUNNER_TEMP/rehearsal-input/verified-unsigned.apk"
+          test ! -e "$RUNNER_TEMP/rehearsal-input.zip"
+          echo "destroyed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Write proof that contains no APK and no private key
+        env:
+          OUT: ${{ runner.temp }}/stage3-rehearsal-proof.json
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          STAGE2_RUN_ID: ${{ inputs.stage2_run_id }}
+          STAGE2_ARTIFACT_ID: ${{ inputs.stage2_artifact_id }}
+          REHEARSAL_RUN_ID: ${{ github.run_id }}
+          REHEARSAL_SHA: ${{ github.sha }}
+          UNSIGNED_SHA: ${{ needs.verify-stage2.outputs.apk-sha256 }}
+          SIGNED_SHA: ${{ steps.verify-signature.outputs.signed-sha256 }}
+          CERTIFICATE: ${{ steps.verify-signature.outputs.certificate }}
+          PERMANENT_STATE: ${{ steps.verify-signature.outputs.permanent-state }}
+          KEY_DESTROYED: ${{ steps.cleanup.outputs.destroyed }}
+          VERSION_CODE: ${{ needs.verify-stage2.outputs.version-code }}
+          VERSION_NAME: ${{ needs.verify-stage2.outputs.version-name }}
+        run: |
+          set -euo pipefail
+          SIGNED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          node -e '
+            const field = (name) => {
+              const value = process.env[name];
+              if (typeof value !== "string" || value.length === 0) {
+                console.error(`::error::proof field ${name} is empty`);
+                process.exit(1);
+              }
+              return value;
+            };
+            if (field("KEY_DESTROYED") !== "true") {
+              console.error("::error::the disposable key was not proven destroyed");
+              process.exit(1);
+            }
+            require("fs").writeFileSync(process.env.OUT, JSON.stringify({
+              schemaVersion: 1,
+              channel: "stage3-disposable-key-proof-only",
+              rehearsal: true,
+              publishable: false,
+              signedApkPublished: false,
+              disposableKeyDestroyed: true,
+              repository: field("REPOSITORY"),
+              sourceSha: field("SOURCE_SHA"),
+              sourceRunId: field("SOURCE_RUN_ID"),
+              stage2RunId: field("STAGE2_RUN_ID"),
+              stage2ArtifactId: field("STAGE2_ARTIFACT_ID"),
+              rehearsalRunId: field("REHEARSAL_RUN_ID"),
+              rehearsalWorkflowSha: field("REHEARSAL_SHA"),
+              unsignedApkSha256: field("UNSIGNED_SHA"),
+              destroyedSignedApkSha256: field("SIGNED_SHA"),
+              disposableCertificateSha256: field("CERTIFICATE"),
+              permanentFingerprintComparison: field("PERMANENT_STATE"),
+              applicationId: field("EXPECTED_APPLICATION_ID"),
+              versionCode: field("VERSION_CODE"),
+              versionName: field("VERSION_NAME"),
+              signedAt: field("SIGNED_AT"),
+              retentionDays: 1,
+            }, null, 2) + "\n");
+          '
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$OUT"
+          cat "$OUT"
+
+      - name: Publish proof only — no APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: REHEARSAL-PROOF-ONLY-NO-APK-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/stage3-rehearsal-proof.json
+            ${{ runner.temp }}/stage3-disposable.apksigner.txt
+          if-no-files-found: error
+          retention-days: 1
