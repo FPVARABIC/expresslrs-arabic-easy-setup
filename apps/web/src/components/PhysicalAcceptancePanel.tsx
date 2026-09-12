@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import {
+  createTranslator,
+  defaultLocale,
+  type Locale,
+  type MessageKey,
+} from "@elrs-easy/i18n";
+import type {
+  ControllerMessage,
+  DeviceOperation,
+  OperationReadiness,
+} from "../hardware/useDeviceController";
+
+import {
   PHYSICAL_ACCEPTANCE_STEPS,
   acceptanceEvidenceFromContext,
   capturePhysicalAcceptanceContext,
@@ -28,36 +40,42 @@ import {
   type PhysicalAcceptanceStorage,
 } from "../acceptance/physical-acceptance-storage";
 
-const STATUS_OPTIONS: readonly Readonly<{
-  value: PhysicalAcceptanceStepStatus;
-  label: string;
-}>[] = Object.freeze([
-  { value: "NOT_RUN", label: "لم يبدأ" },
-  { value: "PASS", label: "ناجح" },
-  { value: "FAIL", label: "فاشل" },
-  { value: "BLOCKED", label: "متعذر" },
-  { value: "SKIPPED", label: "متجاوز" },
+const STATUS_OPTIONS: readonly PhysicalAcceptanceStepStatus[] = Object.freeze([
+  "NOT_RUN",
+  "PASS",
+  "FAIL",
+  "BLOCKED",
+  "SKIPPED",
 ]);
 
-const PHASE_LABELS: Readonly<Record<PhysicalAcceptancePhase, string>> =
-  Object.freeze({
-    PREFLIGHT: "تهيئة منصة الاختبار",
-    IDENTITY: "التعريف والاتصال",
-    SETTINGS: "الإعدادات القابلة للعكس",
-    BINDING: "الربط اللاسلكي",
-    FIRMWARE: "Bootloader والتفليش",
-    RECOVERY: "الاستعادة",
-  });
+/**
+ * The device operations this panel reports readiness for. Each one is answered
+ * separately by the controller, so an operator can see exactly which
+ * prerequisite is missing for which operation instead of one blanket verdict.
+ */
+type ReportedOperation = Exclude<
+  DeviceOperation,
+  "connect" | "diagnostics" | "bindingPrerequisites"
+>;
 
-const RISK_LABELS = Object.freeze({
-  READ_ONLY: "قراءة فقط",
-  REVERSIBLE_WRITE: "كتابة قابلة للعكس",
-  RF: "رابط RF",
-  FIRMWARE_WRITE: "كتابة Firmware",
-  RECOVERY_DRILL: "اختبار استعادة",
-});
+const REPORTED_OPERATIONS: readonly ReportedOperation[] = Object.freeze([
+  "settingsWrite",
+  "settingsRestore",
+  "binding",
+  "firmwareWrite",
+  "recovery",
+  "rxAsTx",
+  "airport",
+]);
 
 const MAX_IMPORT_FILE_BYTES = 1_000_000;
+
+function captureLabelFor(
+  t: (key: MessageKey, parameters?: Record<string, string | number>) => string,
+) {
+  return (capturedAt: string): string =>
+    t("accp.msg.captureBlock", { at: capturedAt });
+}
 
 function systemNow(): Date {
   return new Date();
@@ -116,8 +134,10 @@ function evidenceWithCapture(
   current: string,
   capturedAt: string,
   evidence: string,
+  /** Localised "Snapshot <time>" heading for the appended block. */
+  captureLabel: (capturedAt: string) => string,
 ): string {
-  const block = `لقطة ${capturedAt}\n${evidence}`;
+  const block = `${captureLabel(capturedAt)}\n${evidence}`;
   if (current.trim().length === 0) return block;
   if (current.includes(block)) return current;
   return `${current.trim()}\n\n---\n${block}`;
@@ -133,7 +153,16 @@ function isExactCandidateSha(value: string): boolean {
 
 export interface PhysicalAcceptancePanelProps {
   readonly context: PhysicalAcceptanceContextSnapshot;
-  readonly deviceChangesEnabled?: boolean;
+  /**
+   * Live readiness, one entry per device operation. This panel never gates its
+   * own recording on it: the recorder, the import, the export and every result
+   * field stay open regardless. It is shown so the operator can see which
+   * device operation is currently blocked and by what.
+   */
+  readonly readiness?: Readonly<Record<DeviceOperation, OperationReadiness>>;
+  /** Renders a controller message in the current locale. */
+  readonly renderMessage?: (value: ControllerMessage) => string;
+  readonly locale?: Locale;
   readonly storage?: PhysicalAcceptanceStorage | null;
   readonly now?: () => Date;
   readonly initialCandidateSha?: string;
@@ -141,11 +170,15 @@ export interface PhysicalAcceptancePanelProps {
 
 export function PhysicalAcceptancePanel({
   context,
-  deviceChangesEnabled = false,
+  readiness,
+  renderMessage,
+  locale = defaultLocale,
   storage = browserPhysicalAcceptanceStorage(),
   now = systemNow,
   initialCandidateSha = detectedCandidateSha(),
 }: PhysicalAcceptancePanelProps) {
+  const t = createTranslator(locale);
+  const captureLabel = captureLabelFor(t);
   const runtime = useMemo(
     () => browserRuntime(initialCandidateSha),
     [initialCandidateSha],
@@ -169,8 +202,8 @@ export function PhysicalAcceptancePanel({
   );
   const [message, setMessage] = useState(
     initialState.rejectedPersistedSession
-      ? "بدأ سجل جديد لأن Candidate SHA المحفوظ لا يطابق SHA هذه النسخة."
-      : "سجل محلي جاهز. كل خطوة متاحة من البداية ولا توجد تبعية إجبارية بين الخطوات.",
+      ? t("accp.msg.freshRecord")
+      : t("accp.msg.ready"),
   );
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const groups = useMemo(() => groupedSteps(), []);
@@ -195,9 +228,7 @@ export function PhysicalAcceptancePanel({
     setSession((current) =>
       capturePhysicalAcceptanceContext(current, context, now),
     );
-    setMessage(
-      "تم التقاط الحالة الحالية من التطبيق دون حفظ كلمات مرور أو SSID أو Binding phrase.",
-    );
+    setMessage(t("accp.msg.contextCaptured"));
   }
 
   function updateStep(
@@ -217,54 +248,52 @@ export function PhysicalAcceptancePanel({
         current.evidence,
         context.capturedAt,
         suggestion.evidence,
+        captureLabel,
       ),
       ...(suggestion.status === null ? {} : { status: suggestion.status }),
     });
     setMessage(
       suggestion.status === null
-        ? `تم التقاط الدليل لـ${step.title}. النتيجة تحتاج مشاهدة المشغل.`
-        : `تم التقاط دليل قابل للتحقق واقتراح ${suggestion.status} لـ${step.title}.`,
+        ? t("accp.msg.evidenceCaptured", { step: t(step.titleKey) })
+        : t("accp.msg.evidenceCapturedWithSuggestion", {
+            step: t(step.titleKey),
+            status: suggestion.status,
+          }),
     );
   }
 
   function createNewSession(): void {
     clearPhysicalAcceptanceSession(storage);
     setSession(createPhysicalAcceptanceSession({ runtime, now }));
-    setMessage(
-      "تم إنشاء جلسة قبول جديدة. الجلسة السابقة لم تعد في التخزين المحلي.",
-    );
+    setMessage(t("accp.msg.newSession"));
   }
 
   function exportJson(): void {
-    if (!candidateBound) {
-      setMessage(
-        "لا يمكن التصدير: هذه النسخة غير مرتبطة بـCandidate SHA صالح.",
-      );
-      return;
-    }
     const stem = physicalAcceptanceFileStem(session);
     downloadTextFile(
       serializePhysicalAcceptanceJson(session),
       `${stem}.json`,
       "application/json",
     );
-    setMessage("تم إنشاء ملف JSON منقح من الحقول الحساسة.");
+    setMessage(
+      candidateBound
+        ? t("accp.msg.jsonExported")
+        : `${t("accp.msg.jsonExported")} ${t("accp.msg.unboundExport")}`,
+    );
   }
 
   function exportMarkdown(): void {
-    if (!candidateBound) {
-      setMessage(
-        "لا يمكن التصدير: هذه النسخة غير مرتبطة بـCandidate SHA صالح.",
-      );
-      return;
-    }
     const stem = physicalAcceptanceFileStem(session);
     downloadTextFile(
-      serializePhysicalAcceptanceMarkdown(session),
+      serializePhysicalAcceptanceMarkdown(session, t),
       `${stem}.md`,
       "text/markdown",
     );
-    setMessage("تم إنشاء تقرير Markdown قابل للمراجعة والإرفاق بالـPR.");
+    setMessage(
+      candidateBound
+        ? t("accp.msg.markdownExported")
+        : `${t("accp.msg.markdownExported")} ${t("accp.msg.unboundExport")}`,
+    );
   }
 
   async function importJson(
@@ -274,28 +303,26 @@ export function PhysicalAcceptancePanel({
     event.currentTarget.value = "";
     if (file === undefined) return;
     if (file.size < 1 || file.size > MAX_IMPORT_FILE_BYTES) {
-      setMessage("ملف الاستيراد فارغ أو أكبر من 1 MiB.");
+      setMessage(t("accp.msg.importTooLarge"));
       return;
     }
     try {
       const parsed = parsePhysicalAcceptanceJson(await file.text());
       if (parsed === null) {
-        setMessage("ملف النتائج غير صالح أو لا يطابق مخطط القبول الفيزيائي.");
+        setMessage(t("accp.msg.importInvalid"));
         return;
       }
       if (
         !isExactCandidateSha(runtime.candidateSha) ||
         parsed.candidateSha !== runtime.candidateSha
       ) {
-        setMessage(
-          "رُفض الاستيراد لأن Candidate SHA في الملف لا يطابق SHA هذه النسخة.",
-        );
+        setMessage(t("accp.msg.importShaMismatch"));
         return;
       }
       setSession(parsed);
-      setMessage("تم استيراد الجلسة والتحقق من بنيتها وحدودها.");
+      setMessage(t("accp.msg.imported"));
     } catch {
-      setMessage("تعذر قراءة ملف النتائج.");
+      setMessage(t("accp.msg.importUnreadable"));
     }
   }
 
@@ -308,25 +335,59 @@ export function PhysicalAcceptancePanel({
         <div>
           <span>5</span>
           <div>
-            <h2 id="acceptance-heading">القبول الفيزيائي وتسجيل النتائج</h2>
-            <p>
-              جميع الاختبارات متاحة مباشرة. الترتيب أدناه موصى به وليس قفلًا
-              برمجيًا.
-            </p>
+            <h2 id="acceptance-heading">{t("accp.heading")}</h2>
+            <p>{t("accp.subheading")}</p>
           </div>
         </div>
-        <span className="acceptance-progress" aria-label="نسبة اكتمال السجل">
+        <span
+          className="acceptance-progress"
+          aria-label={t("accp.progressLabel")}
+        >
           {summary.completionPercent}%
         </span>
       </div>
 
-      <p
-        className={`${deviceChangesEnabled ? "success-note" : "danger-note"} acceptance-unlocked-note`}
+      <section
+        className="acceptance-readiness"
+        aria-label={t("accp.readinessHeading")}
       >
-        {deviceChangesEnabled
-          ? "أداة التسجيل غير مقفلة، كما أن نسخة القبول المراجعة فعّلت عمليات تغيير الجهاز مع بقاء بوابات Target وRecovery والطاقة والهوائي إلزامية."
-          : "أداة التسجيل وكل حقول النتائج متاحة، لكن تغيير الإعدادات والربط والتفليش والاستعادة مقفلة في هذه النسخة. لا تسجل نجاحًا ماديًا قبل تشغيل نسخة قبول مخصصة ومراجعة."}
-      </p>
+        <h3>{t("accp.readinessHeading")}</h3>
+        {readiness === undefined ? (
+          <p className="parity-note">{t("accp.readinessUnknown")}</p>
+        ) : (
+          <ul>
+            {REPORTED_OPERATIONS.map((operation) => {
+              const state = readiness[operation];
+              return (
+                <li
+                  key={operation}
+                  data-operation={operation}
+                  data-ready={state.ready ? "yes" : "no"}
+                  className={state.ready ? "success-note" : "parity-note"}
+                >
+                  <strong>{t(`accp.op.${operation}`)}</strong>{" "}
+                  {state.ready ? (
+                    <span>{t("accp.readinessReady")}</span>
+                  ) : (
+                    <span>
+                      {t("accp.readinessBlocked")}{" "}
+                      {state.missing
+                        .map((reason) =>
+                          renderMessage === undefined
+                            ? t(reason.key, reason.params)
+                            : renderMessage(reason),
+                        )
+                        .join(" ")}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="parity-note">{t("accp.recordingAlwaysOpen")}</p>
+        <p className="danger-note">{t("accp.noPhysicalPassFromSoftware")}</p>
+      </section>
 
       <div className="acceptance-toolbar">
         <button
@@ -334,30 +395,24 @@ export function PhysicalAcceptancePanel({
           className="primary-button"
           onClick={captureCurrentContext}
         >
-          التقاط الحالة الحالية
+          {t("accp.captureContext")}
+        </button>
+        <button type="button" className="secondary-button" onClick={exportJson}>
+          {t("accp.exportJson")}
         </button>
         <button
           type="button"
           className="secondary-button"
-          disabled={!candidateBound}
-          onClick={exportJson}
-        >
-          تصدير JSON
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={!candidateBound}
           onClick={exportMarkdown}
         >
-          تصدير تقرير Markdown
+          {t("accp.exportMarkdown")}
         </button>
         <button
           type="button"
           className="secondary-button"
           onClick={() => importInputRef.current?.click()}
         >
-          استيراد جلسة
+          {t("accp.importSession")}
         </button>
         <input
           ref={importInputRef}
@@ -371,7 +426,7 @@ export function PhysicalAcceptancePanel({
           className="secondary-button"
           onClick={createNewSession}
         >
-          جلسة جديدة
+          {t("accp.newSession")}
         </button>
       </div>
 
@@ -381,30 +436,30 @@ export function PhysicalAcceptancePanel({
 
       <dl className="acceptance-summary">
         <div>
-          <dt>الجلسة</dt>
+          <dt>{t("accp.session")}</dt>
           <dd>{session.sessionId}</dd>
         </div>
         <div>
-          <dt>ناجح</dt>
+          <dt>{t("accp.passed")}</dt>
           <dd>{summary.passed}</dd>
         </div>
         <div>
-          <dt>فاشل</dt>
+          <dt>{t("accp.failed")}</dt>
           <dd>{summary.failed}</dd>
         </div>
         <div>
-          <dt>متعذر</dt>
+          <dt>{t("accp.blocked")}</dt>
           <dd>{summary.blocked}</dd>
         </div>
         <div>
-          <dt>لم يبدأ</dt>
+          <dt>{t("accp.notRun")}</dt>
           <dd>{summary.notRun}</dd>
         </div>
       </dl>
 
       <div className="acceptance-metadata-grid">
         <label>
-          <span>اسم المشغل المختصر</span>
+          <span>{t("accp.operatorAlias")}</span>
           <input
             type="text"
             value={session.operatorAlias}
@@ -415,37 +470,40 @@ export function PhysicalAcceptancePanel({
           />
         </label>
         <label>
-          <span>اسم منصة الاختبار</span>
+          <span>{t("accp.benchLabel")}</span>
           <input
             type="text"
             value={session.benchLabel}
             maxLength={160}
-            placeholder="مثال: TX-1 / RX-1"
+            placeholder={t("accp.benchPlaceholder")}
             onChange={(event) =>
               updateMetadata({ benchLabel: event.currentTarget.value })
             }
           />
         </label>
-        <label>
+        <div className="acceptance-candidate-sha">
+          {/*
+            The candidate SHA is the build's own identity, read from the
+            bundle. It is shown rather than offered as a field, because an
+            editable one would only invite an operator to type a provenance
+            the report cannot support.
+          */}
           <span>Candidate SHA</span>
-          <input
-            type="text"
-            value={session.candidateSha}
-            maxLength={80}
-            dir="ltr"
-            placeholder="Commit SHA للنسخة المختبرة"
-            readOnly
-          />
-        </label>
+          <output dir="ltr">
+            {session.candidateSha === ""
+              ? t("accp.candidateShaUnknown")
+              : session.candidateSha}
+          </output>
+        </div>
       </div>
 
       <label className="acceptance-overall-notes">
-        <span>ملاحظات عامة</span>
+        <span>{t("accp.overallNotes")}</span>
         <textarea
           value={session.overallNotes}
           maxLength={8_000}
           rows={3}
-          placeholder="لا تكتب UID أو SSID أو كلمة مرور أو Binding phrase."
+          placeholder={t("accp.notesPlaceholder")}
           onChange={(event) =>
             updateMetadata({ overallNotes: event.currentTarget.value })
           }
@@ -454,7 +512,7 @@ export function PhysicalAcceptancePanel({
 
       {session.lastContext === null ? null : (
         <details className="acceptance-context">
-          <summary>آخر لقطة حالة محفوظة</summary>
+          <summary>{t("accp.lastSnapshot")}</summary>
           <pre>{acceptanceEvidenceFromContext(session.lastContext)}</pre>
         </details>
       )}
@@ -463,8 +521,8 @@ export function PhysicalAcceptancePanel({
         {groups.map((group) => (
           <section key={group.phase} className="acceptance-phase">
             <div className="acceptance-phase-heading">
-              <h3>{PHASE_LABELS[group.phase]}</h3>
-              <span>{group.steps.length} اختبارات</span>
+              <h3>{t(`accp.phase.${group.phase}`)}</h3>
+              <span>{t("accp.stepsCount", { count: group.steps.length })}</span>
             </div>
             <div className="acceptance-steps">
               {group.steps.map((step) => {
@@ -475,32 +533,34 @@ export function PhysicalAcceptancePanel({
                       <div>
                         <span className="acceptance-order">{step.order}</span>
                         <div>
-                          <h4>{step.title}</h4>
-                          <p>{step.instructions}</p>
+                          <h4>{t(step.titleKey)}</h4>
+                          <p>{t(step.instructionsKey)}</p>
                         </div>
                       </div>
                       <span
                         className={`acceptance-risk is-${step.risk.toLocaleLowerCase("en-US")}`}
                       >
-                        {RISK_LABELS[step.risk]}
+                        {t(`accp.risk.${step.risk}`)}
                       </span>
                     </header>
 
                     <p className="acceptance-expected">
-                      <strong>دليل القبول:</strong> {step.expectedEvidence}
+                      <strong>{t("accp.expectedEvidence")}</strong>{" "}
+                      {t(step.expectedEvidenceKey)}
                     </p>
                     {step.destructive ? (
                       <p className="danger-note acceptance-destructive">
-                        هذا الاختبار يكتب على Flash. نفذه بعد نجاح الاختبارات
-                        الأقل خطورة، وعلى جهاز احتياطي في حالة الانقطاع المتعمد.
+                        {t("accp.destructiveWarning")}
                       </p>
                     ) : null}
 
                     <div className="acceptance-step-controls">
                       <label>
-                        <span>النتيجة</span>
+                        <span>{t("accp.result")}</span>
                         <select
-                          aria-label={`نتيجة ${step.title}`}
+                          aria-label={t("accp.resultOf", {
+                            step: t(step.titleKey),
+                          })}
                           value={result.status}
                           onChange={(event) =>
                             updateStep(step, {
@@ -510,8 +570,8 @@ export function PhysicalAcceptancePanel({
                           }
                         >
                           {STATUS_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
+                            <option key={option} value={option}>
+                              {t(`acc.status.${option}`)}
                             </option>
                           ))}
                         </select>
@@ -521,14 +581,16 @@ export function PhysicalAcceptancePanel({
                         className="secondary-button"
                         onClick={() => captureStepEvidence(step)}
                       >
-                        التقاط دليل هذه الخطوة
+                        {t("accp.captureStepEvidence")}
                       </button>
                     </div>
 
                     <label className="acceptance-text-field">
-                      <span>الدليل المسجل</span>
+                      <span>{t("accp.recordedEvidence")}</span>
                       <textarea
-                        aria-label={`دليل ${step.title}`}
+                        aria-label={t("accp.evidenceOf", {
+                          step: t(step.titleKey),
+                        })}
                         value={result.evidence}
                         maxLength={8_000}
                         rows={4}
@@ -541,9 +603,11 @@ export function PhysicalAcceptancePanel({
                     </label>
 
                     <label className="acceptance-text-field">
-                      <span>ملاحظات المشغل</span>
+                      <span>{t("accp.operatorNotes")}</span>
                       <textarea
-                        aria-label={`ملاحظات ${step.title}`}
+                        aria-label={t("accp.notesOf", {
+                          step: t(step.titleKey),
+                        })}
                         value={result.notes}
                         maxLength={8_000}
                         rows={3}
@@ -554,11 +618,15 @@ export function PhysicalAcceptancePanel({
                     </label>
 
                     <footer>
-                      <span>{step.optional ? "اختياري" : "مطلوب"}</span>
+                      <span>
+                        {step.optional
+                          ? t("accp.optional")
+                          : t("accp.required")}
+                      </span>
                       <span>
                         {result.observedAt === null
-                          ? "لا توجد ملاحظة زمنية"
-                          : `آخر تحديث: ${result.observedAt}`}
+                          ? t("accp.noTimestamp")
+                          : t("accp.lastUpdated", { at: result.observedAt })}
                       </span>
                     </footer>
                   </article>

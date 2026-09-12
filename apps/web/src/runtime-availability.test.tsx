@@ -1,0 +1,1916 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { installDurableStorageStub } from "./test/durable-storage";
+import { recoveryArchiveFor } from "./test/recovery-fixtures";
+import path from "node:path";
+
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+import { createTranslator } from "@elrs-easy/i18n";
+
+import { CrsfAddress, type CrsfParameter } from "./hardware/crsf";
+import type {
+  OfficialCatalog,
+  OfficialTarget,
+  PreparedFirmwarePackage,
+} from "./hardware/parity-types";
+import type { ExpressLrsIdentity } from "./hardware/session";
+import type { HardwareSerialPort } from "./hardware/serial";
+import type {
+  HardwareDriverConnectOutcome,
+  HardwareDriverConnector,
+  HardwareSessionDriver,
+} from "./hardware/userSession";
+
+const mocks = vi.hoisted(() => ({
+  downloadPreparedBytes: vi.fn(),
+  flashEspFirmware: vi.fn(),
+  loadCatalog: vi.fn(),
+  loadCheckpoint: vi.fn(),
+  saveCheckpoint: vi.fn(),
+  clearCheckpoint: vi.fn(),
+  preparePackage: vi.fn(),
+  validateRecoveryPackage: vi.fn(),
+}));
+
+vi.mock("./hardware/esp-flasher", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./hardware/esp-flasher")>()),
+  flashEspFirmware: mocks.flashEspFirmware,
+}));
+
+vi.mock("./hardware/firmware-package", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./hardware/firmware-package")>()),
+  downloadPreparedBytes: mocks.downloadPreparedBytes,
+  prepareOfficialFirmwarePackage: mocks.preparePackage,
+}));
+
+vi.mock("./hardware/official-catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./hardware/official-catalog")>()),
+  loadOfficialExpressLrsCatalog: mocks.loadCatalog,
+}));
+
+vi.mock("./hardware/recovery-package", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./hardware/recovery-package")>()),
+  loadRecoveryCheckpoint: mocks.loadCheckpoint,
+  saveRecoveryCheckpoint: mocks.saveCheckpoint,
+  clearRecoveryCheckpoint: mocks.clearCheckpoint,
+  validateRecoveryPackage: mocks.validateRecoveryPackage,
+}));
+
+import { ProductShell } from "./components/ProductShell";
+
+/**
+ * The runtime availability matrix.
+ *
+ * A static search for `disabled={true}` proves nothing: an expression can be
+ * present, dynamic, and still evaluate false forever. So each operation here is
+ * driven through the **real production shell** — the same `ProductShell` that
+ * `main.tsx` mounts — from a state where its control is genuinely disabled, to
+ * the state where every prerequisite it names is satisfied, and the control is
+ * asserted to become enabled.
+ *
+ * Every row records what the operator sees, what the readiness inputs were,
+ * which handler and driver the enabled control reaches, how write authority is
+ * decided, what the recovery checkpoint does, how the result is verified, and
+ * what happens on failure. The rows are written to
+ * `docs/runtime-availability.json`, and `scripts/check-runtime-availability.mjs`
+ * refuses a build where any operation never became enabled.
+ */
+
+interface AvailabilityRow {
+  readonly operation: string;
+  readonly surface: "easy" | "advanced";
+  readonly transport: "browser" | "android";
+  readonly control: string;
+  readonly readinessInputs: readonly string[];
+  readonly disabledBefore: boolean;
+  readonly enabledAfter: boolean;
+  readonly handler: string;
+  readonly driver: string;
+  readonly writeAuthority: string;
+  readonly recoveryCheckpoint: string;
+  readonly verification: string;
+  readonly onFailure: string;
+}
+
+const rows: AvailabilityRow[] = [];
+
+function record(row: AvailabilityRow): void {
+  // A row is only worth recording if it actually proved the transition.
+  expect(row.disabledBefore, `${row.operation} was never disabled`).toBe(true);
+  expect(row.enabledAfter, `${row.operation} never became enabled`).toBe(true);
+  rows.push(row);
+}
+
+afterAll(() => {
+  const target = path.resolve(import.meta.dirname, "../../../docs");
+  mkdirSync(target, { recursive: true });
+  writeFileSync(
+    path.join(target, "runtime-availability.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        entryPoint: "apps/web/src/main.tsx → components/ProductShell",
+        rows: [...rows].sort((left, right) =>
+          `${left.operation}${left.surface}${left.transport}`.localeCompare(
+            `${right.operation}${right.surface}${right.transport}`,
+          ),
+        ),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+});
+
+// ---- fixtures ---------------------------------------------------------
+
+const espTransmitter: OfficialTarget = {
+  id: "vendor/tx_2400/module",
+  role: "tx",
+  vendorKey: "vendor",
+  vendorName: "Vendor",
+  radioKey: "tx_2400",
+  targetKey: "module",
+  config: {
+    productName: "Vendor TX Module",
+    platform: "esp32",
+    firmware: "VENDOR_TX",
+    luaName: "vendor.lua",
+    layoutFile: null,
+    logoFile: null,
+    uploadMethods: ["uart", "wifi", "download"],
+    minVersion: null,
+    customLayout: {},
+    overlay: null,
+    raw: {},
+  },
+};
+
+const espReceiver: OfficialTarget = {
+  id: "vendor/rx_2400/esp-receiver",
+  role: "rx",
+  vendorKey: "vendor",
+  vendorName: "Vendor",
+  radioKey: "rx_2400",
+  targetKey: "esp-receiver",
+  config: {
+    productName: "Vendor ESP RX",
+    platform: "esp32",
+    firmware: "VENDOR_ESP_RX",
+    luaName: null,
+    layoutFile: null,
+    logoFile: null,
+    uploadMethods: ["uart", "download"],
+    minVersion: null,
+    customLayout: {},
+    overlay: null,
+    raw: {},
+  },
+};
+
+/**
+ * A Target whose hardware layout the frozen pack does not carry — the shape of
+ * a device the mirror published after the pack was validated.
+ */
+const unpackedReceiver: OfficialTarget = {
+  ...espReceiver,
+  id: "vendor/rx_2400/brand-new",
+  targetKey: "brand-new",
+  config: {
+    ...espReceiver.config,
+    productName: "Vendor Brand New RX",
+    layoutFile: "Vendor Brand New RX.json",
+  },
+};
+
+const actualRecoveryPackage = await vi.importActual<
+  typeof import("./hardware/recovery-package")
+>("./hardware/recovery-package");
+
+const catalog: OfficialCatalog = {
+  source: "EXPRESSLRS_WEB_FLASHER_MIRROR",
+  loadedAt: "2026-09-09T00:00:00.000Z",
+  releases: [{ label: "4.1.0", revision: "release410", channel: "release" }],
+  targets: [espTransmitter, espReceiver, unpackedReceiver],
+};
+
+const preparedPackage: PreparedFirmwarePackage = {
+  schemaVersion: 1,
+  release: catalog.releases[0]!,
+  target: espTransmitter,
+  optionsSummary: {
+    region: "FCC",
+    domain: 0,
+    bindingConfigured: false,
+    wifiConfigured: false,
+    rxAsTxMode: "off",
+    airportEnabled: false,
+  },
+  segments: [
+    {
+      name: "firmware.bin",
+      address: 0x10000,
+      bytes: new Uint8Array([1, 2, 3]),
+      sha256: "a".repeat(64),
+    },
+  ],
+  primaryFileName: "module-4.1.0.bin",
+  primaryDownload: new Uint8Array([1, 2, 3]),
+  primaryMimeType: "application/octet-stream",
+  recoveryFileName: "module-4.1.0-recovery.zip",
+  recoveryArchive: await recoveryArchiveFor(espTransmitter),
+  createdAt: "2026-09-09T00:00:00.000Z",
+};
+
+function selection(
+  id: number,
+  name: string,
+): Extract<CrsfParameter, { readonly kind: "selection" }> {
+  return {
+    id,
+    parentId: 0,
+    type: 9,
+    hidden: false,
+    name,
+    rawValue: new Uint8Array(),
+    kind: "selection",
+    value: 1,
+    min: 0,
+    max: 2,
+    defaultValue: 0,
+    options: ["A", "B", "C"],
+    units: "",
+  };
+}
+
+function bindCommand(
+  id: number,
+): Extract<CrsfParameter, { readonly kind: "command" }> {
+  return {
+    id,
+    parentId: 0,
+    type: 13,
+    hidden: false,
+    name: "Bind",
+    rawValue: new Uint8Array(),
+    kind: "command",
+    step: 0,
+    timeoutMs: 2_000,
+    information: "",
+  };
+}
+
+/** A transmitter that answers CRSF, as the real driver would. */
+function connector(): HardwareDriverConnector {
+  const parameters: CrsfParameter[] = [
+    selection(1, "Packet Rate"),
+    bindCommand(2),
+  ];
+  const identity: ExpressLrsIdentity = {
+    validation: "CRSF_DEVICE_INFO",
+    role: "tx",
+    address: CrsfAddress.transmitter,
+    requestOrigin: CrsfAddress.usb,
+    productName: "Vendor TX Module",
+    firmwareVersion: "4.1.0",
+    serialMarker: "ELRS",
+    hardwareVersion: 1,
+    softwareVersion: 0x00040100,
+    parameterVersion: 1,
+    parameterCount: parameters.length,
+    usb: { usbVendorId: 0x303a, usbProductId: 0x1001 },
+  };
+  const port: HardwareSerialPort = {
+    open: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    ondisconnect: null,
+  };
+  const driver: HardwareSessionDriver = {
+    identity,
+    parameters,
+    port,
+    readParameter: async (parameterId) => {
+      const parameter = parameters.find((item) => item.id === parameterId);
+      if (parameter === undefined) throw new Error("missing parameter");
+      return parameter;
+    },
+    writeParameter: async (parameterId, requestedValue) => {
+      const parameter = parameters.find((item) => item.id === parameterId);
+      if (parameter === undefined || parameter.kind !== "selection") {
+        throw new Error("parameter is not writable");
+      }
+      return {
+        parameter: { ...parameter, value: requestedValue },
+        requestedValue,
+        verified: true,
+      };
+    },
+    startBinding: vi.fn().mockResolvedValue({
+      stage: "TX_BIND_COMMAND_ACKNOWLEDGED",
+      verified: true,
+      information: "Bind mode active",
+    }),
+    executeCommand: async () => ({
+      parameter: bindCommand(2),
+      finalStep: 0,
+      information: "Bind mode active",
+      acknowledged: true,
+    }),
+    verifyCurrentIdentity: vi.fn().mockResolvedValue(identity),
+    detachPortForBootloader: vi.fn().mockResolvedValue(port),
+    close: vi.fn().mockResolvedValue(true),
+  };
+  return vi.fn().mockResolvedValue({
+    status: "CONNECTED",
+    driver,
+    identity,
+    parameters,
+  } as const satisfies HardwareDriverConnectOutcome);
+}
+
+async function settle(turns = 6): Promise<void> {
+  await act(async () => {
+    for (let turn = 0; turn < turns; turn += 1) await Promise.resolve();
+  });
+}
+
+/**
+ * Waits for text that only appears once an event-loop-bound promise settles.
+ *
+ * `settle` drains microtasks, which is enough for everything else here. The
+ * durable-recovery export ends in a SHA-256 over the reopened file, and Web
+ * Crypto resolves off the event loop rather than on the microtask queue, so it
+ * needs real turns.
+ */
+async function settleUntil(pattern: RegExp, timeoutMs = 15_000): Promise<void> {
+  // Bounded by the clock, not by a turn count. The durable export now derives
+  // a key with 600,000 PBKDF2 iterations before it writes anything, which is
+  // a few hundred milliseconds of real work; a fixed number of microtask or
+  // setTimeout turns is not a budget for that, and expressing the wait in
+  // turns made this helper quietly dependent on the work factor.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // `queryAllByText`, not `queryByText`: a message shown both in the status
+    // line and as a hint beside its control is two matches, and waiting for it
+    // must not turn that into a failure.
+    if (screen.queryAllByText(pattern).length > 0) return;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+  }
+  // Asserted rather than returned, so a failure names the text that is missing.
+  expect(screen.getAllByText(pattern).length).toBeGreaterThan(0);
+}
+
+function mountAdvanced(): void {
+  render(
+    <ProductShell
+      initialLocale="en"
+      initialMode="advanced"
+      hardwareConnector={connector()}
+    />,
+  );
+}
+
+function mountEasy(): void {
+  render(
+    <ProductShell
+      initialLocale="en"
+      initialMode="easy"
+      hardwareConnector={connector()}
+    />,
+  );
+}
+
+/** The Target select, found by its own label rather than by position. */
+function targetSelect(): HTMLSelectElement {
+  const select = screen.getAllByRole("combobox").find((candidate) =>
+    // "Target" in the Advanced view, "Target for this device" in Easy Mode.
+    candidate.closest("label")?.textContent?.trimStart().startsWith("Target"),
+  );
+  if (select === undefined)
+    throw new Error("the Target select is not rendered");
+  return select as HTMLSelectElement;
+}
+
+async function loadCatalogAndChooseTarget(role: "tx" | "rx"): Promise<void> {
+  fireEvent.click(
+    screen.getByRole("button", { name: "Load the official catalog" }),
+  );
+  await settle();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: role === "tx" ? "TX transmitter" : "RX receiver",
+    }),
+  );
+  await settle(4);
+  const target = role === "tx" ? espTransmitter : espReceiver;
+  fireEvent.change(targetSelect(), { target: { value: target.id } });
+  await settle(4);
+}
+
+async function identify(): Promise<void> {
+  fireEvent.click(
+    screen.getByRole("button", { name: "Identify the device over CRSF" }),
+  );
+  await settle();
+}
+
+/** The passphrase the export path is driven with throughout this suite. */
+const RECOVERY_PASSPHRASE = "bench-recovery-passphrase";
+
+describe("runtime availability, from the production entry point", () => {
+  let durableStorage: ReturnType<typeof installDurableStorageStub>;
+
+  beforeEach(() => {
+    durableStorage = installDurableStorageStub();
+    vi.clearAllMocks();
+    mocks.loadCatalog.mockResolvedValue(catalog);
+    mocks.loadCheckpoint.mockResolvedValue(null);
+    mocks.saveCheckpoint.mockResolvedValue(undefined);
+    mocks.clearCheckpoint.mockResolvedValue(undefined);
+    // The real implementation behind a spy, rather than a stand-in answer. The
+    // durable export validates the package it just wrote and compares the
+    // result's digest to what it sealed, so a placeholder makes every export
+    // fail for a reason none of these tests are about. Individual tests still
+    // override it where the import path is what they are exercising.
+    mocks.validateRecoveryPackage.mockImplementation(
+      actualRecoveryPackage.validateRecoveryPackage,
+    );
+    mocks.preparePackage.mockResolvedValue(preparedPackage);
+    mocks.downloadPreparedBytes.mockReturnValue(undefined);
+    mocks.flashEspFirmware.mockResolvedValue({ status: "WRITE_VERIFIED" });
+  });
+
+  afterEach(() => {
+    durableStorage.restore();
+  });
+
+  it("connect: becomes available with no device present at all", async () => {
+    mountAdvanced();
+    const control = screen.getByRole("button", {
+      name: "Identify the device over CRSF",
+    });
+    // Connect is the one operation whose prerequisites are satisfied from a
+    // cold start: there is nothing to be missing yet.
+    const enabledFromCold = !control.hasAttribute("disabled");
+    expect(enabledFromCold).toBe(true);
+
+    await identify();
+    expect(await screen.findByText("Vendor TX Module")).toBeInTheDocument();
+
+    // It disables while an operation is running and after a session opens,
+    // which is the live condition it names.
+    rows.push({
+      operation: "connect",
+      surface: "advanced",
+      transport: "browser",
+      control: "Identify the device over CRSF",
+      readinessInputs: ["not busy", "previous port confirmed closed"],
+      disabledBefore: false,
+      enabledAfter: true,
+      handler: "useDeviceController.connectHardware",
+      driver: "userSession.connectHardwareDriver → navigator.serial @ 420000",
+      writeAuthority: "not required; reading identity is not a device change",
+      recoveryCheckpoint:
+        "read on mount; a pending one blocks writes, not this",
+      verification: "CRSF Device Info 0x29; role from the origin address",
+      onFailure: "named transport reason; the control returns to enabled",
+    });
+  });
+
+  it("settingsWrite: enabled only once a device, a clean port and a writable setting exist", async () => {
+    mountAdvanced();
+    const missingBefore = screen.queryByRole("button", {
+      name: "Save, with read-back",
+    });
+    // With no device there is no settings section at all, which is a stronger
+    // statement than a disabled button.
+    const disabledBefore = missingBefore === null;
+
+    await identify();
+    await screen.findByText("Vendor TX Module");
+    const control = screen.getByRole("button", {
+      name: "Save, with read-back",
+    });
+
+    record({
+      operation: "settingsWrite",
+      surface: "advanced",
+      transport: "browser",
+      control: "Save, with read-back",
+      readinessInputs: [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "a writable setting selected",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.writeSelectedSetting",
+      driver: "session.writeParameter → CRSF parameter write, then read-back",
+      writeAuthority:
+        "single-use capability for SETTINGS_WRITE, bound to session, device fingerprint and operation",
+      recoveryCheckpoint:
+        "a settings snapshot is taken before the write; Restore returns to it",
+      verification: "the parameter is read back and compared; VERIFIED or not",
+      onFailure: "the snapshot stands and Restore the snapshot stays available",
+    });
+  });
+
+  it("binding: enabled only after its own acknowledgement, and never before", async () => {
+    mountAdvanced();
+    await identify();
+    await screen.findByText("Vendor TX Module");
+
+    const control = screen.getByRole("button", {
+      name: "Run the real binding",
+    });
+    const disabledBefore = control.hasAttribute("disabled");
+
+    const acknowledgement = screen.getByRole("checkbox", {
+      name: /The other end is ready to bind/u,
+    });
+    // The acknowledgement is itself gated on the binding prerequisites, so it
+    // being enabled here is the proof that those are separately satisfied.
+    expect(acknowledgement).toBeEnabled();
+    fireEvent.click(acknowledgement);
+    await settle(2);
+
+    record({
+      operation: "binding",
+      surface: "advanced",
+      transport: "browser",
+      control: "Run the real binding",
+      readinessInputs: [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "the operator's binding acknowledgement",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.runBinding",
+      driver: "session.startBinding → CRSF command 0x32 to the Bind parameter",
+      writeAuthority: "single-use capability for BINDING",
+      recoveryCheckpoint:
+        "none taken; binding changes no stored image, so there is nothing to restore",
+      verification:
+        "TX_BIND_COMMAND_ACKNOWLEDGED from the device; a matching UID is proven by a live link, not by this write",
+      onFailure: "the acknowledgement is cleared and the reason is named",
+    });
+  });
+
+  it("bindingPrerequisites: the acknowledgement itself is gated on live conditions", async () => {
+    mountAdvanced();
+    const beforeDevice = screen.queryByRole("checkbox", {
+      name: /The other end is ready to bind/u,
+    });
+    const disabledBefore = beforeDevice === null;
+
+    await identify();
+    await screen.findByText("Vendor TX Module");
+    const control = screen.getByRole("checkbox", {
+      name: /The other end is ready to bind/u,
+    });
+
+    record({
+      operation: "bindingPrerequisites",
+      surface: "advanced",
+      transport: "browser",
+      control: "The other end is ready to bind… (checkbox)",
+      readinessInputs: [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.setBindingAcknowledged",
+      driver: "none; this is the operator's own confirmation",
+      writeAuthority:
+        "none; it exists so binding can be gated on a confirmation without being gated on itself",
+      recoveryCheckpoint: "not applicable",
+      verification: "not applicable",
+      onFailure: "not applicable",
+    });
+  });
+
+  it("settingsRestore: enabled only once there is a snapshot to restore to", async () => {
+    mountAdvanced();
+    // With no device there is no snapshot and no control to press.
+    const disabledBefore =
+      screen.queryByRole("button", { name: "Restore the snapshot" }) === null;
+
+    await identify();
+    await screen.findByText("Vendor TX Module");
+    const control = screen.getByRole("button", {
+      name: "Restore the snapshot",
+    });
+
+    record({
+      operation: "settingsRestore",
+      surface: "advanced",
+      transport: "browser",
+      control: "Restore the snapshot",
+      readinessInputs: [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "a settings snapshot — taken on connect, before anything is written",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.restoreSettingsBackup",
+      driver: "session.writeParameter, replaying the snapshot's values",
+      writeAuthority:
+        "its own single-use capability for SETTINGS_RESTORE; a capability granted for the write cannot be reused here",
+      recoveryCheckpoint:
+        "the snapshot itself is the checkpoint for settings; it is not cleared by a failed restore",
+      verification: "each replayed parameter is read back and compared",
+      onFailure: "the snapshot is kept and the restore can be retried",
+    });
+  });
+
+  it("recovery: a pending checkpoint blocks the writes and enables recovery, which is the point", async () => {
+    // The journal comes back with an interrupted write, exactly as it would
+    // after a device was unplugged mid-flash.
+    mocks.loadCheckpoint.mockResolvedValue({
+      schemaVersion: 1,
+      targetId: espTransmitter.id,
+      productName: "Vendor TX Module",
+      packageSha256: "b".repeat(64),
+      stage: "RECOVERY_REQUIRED",
+      createdAt: "2026-09-09T00:00:00.000Z",
+      updatedAt: "2026-09-09T00:01:00.000Z",
+      safeError: "The write was interrupted",
+    });
+
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+
+    const control = screen.getByLabelText(/Choose the recovery package/u);
+    // The Target is chosen and a checkpoint is pending, and it is still
+    // refused: nothing has been acknowledged yet.
+    const disabledBefore = control.hasAttribute("disabled");
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Power stays stable throughout the recovery",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "The transmitter's antenna is fitted throughout the recovery",
+      }),
+    );
+    // Typed against the Target key, which is what the controller compares. A
+    // checkpoint names a device this session may never have identified, so the
+    // operator has to say which Target they are putting back.
+    fireEvent.change(
+      screen.getByLabelText(/Confirm the Target for recovery/u),
+      { target: { value: espTransmitter.targetKey } },
+    );
+    await settle(6);
+
+    record({
+      operation: "recovery",
+      surface: "advanced",
+      transport: "browser",
+      control: "Choose the recovery package (file input)",
+      readinessInputs: [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "a pending checkpoint or a downloaded recovery archive",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the Target typed back, because a checkpoint names a device this session may not have identified",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.recoverFromFile",
+      driver:
+        "validateRecoveryPackage, then the same flashing driver the original write used",
+      writeAuthority: "its own single-use capability for RECOVERY",
+      recoveryCheckpoint:
+        "the checkpoint is what makes this available, and it is cleared only once the device is verified back",
+      verification:
+        "the restored image is read back and the device must reconnect as the identity the checkpoint recorded",
+      onFailure:
+        "the checkpoint stands so recovery can be retried; it is never cleared by a failed attempt",
+    });
+
+    // And the writes it blocks are genuinely blocked, by this condition, and
+    // the operator is told which condition it is.
+    expect(
+      screen.getAllByText(/Finish or clear that recovery first/u).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("firmwareWrite: every prerequisite is required, and satisfying them all enables it", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    // The name appears twice once a Target is matched — in the identity panel
+    // and in the Target match — so this asks for all of them.
+    expect(
+      (await screen.findAllByText("Vendor TX Module")).length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+
+    const build = screen.getByRole("button", {
+      name: "Build the official firmware",
+    });
+    expect(build).toBeEnabled();
+    fireEvent.click(build);
+    await settle();
+
+    const control = screen.getByRole("button", {
+      name: "Start the real flash",
+    });
+    // Package built, device live — and still refused, because the recovery
+    // archive has not been saved and nothing has been acknowledged.
+    const disabledBefore = control.hasAttribute("disabled");
+    const blockersShown = screen.getByText("Flashing is waiting on:");
+    expect(blockersShown).toBeInTheDocument();
+
+    // A copy written outside the application, reopened and hashed. A started
+    // download and a ticked box no longer satisfy this, and that is the point:
+    // neither was evidence that a file exists.
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Power stays stable throughout the flash",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "The transmitter's antenna is fitted",
+      }),
+    );
+    await settle(2);
+
+    record({
+      operation: "firmwareWrite",
+      surface: "advanced",
+      transport: "browser",
+      control: "Start the real flash",
+      readinessInputs: [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "a prepared package",
+        "the recovery archive downloaded",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the manual Target confirmation, where the Target was not auto-matched",
+        "a confirmed CRSF identity, for the UART method",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.flashPreparedFirmware",
+      driver:
+        "esp-flasher.flashEspFirmware (esptool-js) / xmodem / stm32-dfu, chosen by the Target's platform and the upload method",
+      writeAuthority: "single-use capability for FIRMWARE_WRITE, TTL 180s",
+      recoveryCheckpoint:
+        "written before the first byte; kept until the device is verified back",
+      verification:
+        "segment read-back and reconnect; success requires the expected role, so an rx-as-tx write that comes back a receiver fails",
+      onFailure:
+        "the checkpoint stands, recovery becomes available, and the state is WRITE_COMPLETED_RECONNECT_UNVERIFIED rather than SUCCESS",
+    });
+  });
+
+  it("easy mode has exactly the same phrase warning and the same generator", async () => {
+    mountEasy();
+    const card = screen
+      .getAllByRole("button", { name: "Start" })
+      .map((start) => start.closest("li"))
+      .find((node) => node?.textContent?.includes("Firmware update"));
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Start" }),
+    );
+    await settle(6);
+    fireEvent.click(screen.getByRole("button", { name: "Identify my device" }));
+    await settle(10);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Prepare the official update source",
+      }),
+    );
+    await settle(12);
+    fireEvent.change(targetSelect(), { target: { value: espTransmitter.id } });
+    await settle(4);
+    fireEvent.change(screen.getByLabelText(/Regulatory region/u), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+
+    // Recorded with no phrase at all, so the comparison below is against this
+    // screen rather than against an assumption about it.
+    const prepare = screen.getByRole("button", {
+      name: "Prepare and verify the official package",
+    });
+    const enabledWithNoPhrase = !prepare.hasAttribute("disabled");
+    expect(enabledWithNoPhrase).toBe(true);
+
+    // The point of this test: Easy Mode is not a reduced version of the same
+    // screen. The warning, its explanation, the generator and the replacement
+    // confirmation are all here, and none of them withholds anything.
+    const phraseField = screen.getByLabelText(
+      /Binding phrase/u,
+    ) as HTMLInputElement;
+    fireEvent.change(phraseField, { target: { value: "password" } });
+    await settle(2);
+    expect(screen.getAllByText(/easy to guess/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/unsalted MD5/u).length).toBeGreaterThan(0);
+    expect(document.querySelector(".bind-phrase-weak")).not.toBeNull();
+    expect(document.querySelector(".bind-phrase-weak.easy-error")).toBeNull();
+    expect(phraseField.value).toBe("password");
+    expect(phraseField).toBeEnabled();
+
+    // Preparing a package is exactly as available with the weak phrase typed
+    // as it was with no phrase at all.
+    expect(!prepare.hasAttribute("disabled")).toBe(enabledWithNoPhrase);
+
+    // The generator asks before replacing what the operator typed, here too.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    expect(phraseField.value).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Keep what I typed" }));
+    await settle(2);
+    expect(phraseField.value).toBe("password");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    fireEvent.click(screen.getByRole("button", { name: "Replace it" }));
+    await settle(2);
+    expect(phraseField.value).not.toBe("password");
+    expect(phraseField.type).toBe("text");
+    expect(screen.queryByText(/easy to guess/u)).toBeNull();
+    expect(
+      screen.getAllByText(/Flash the transmitter and the receiver with this/u)
+        .length,
+    ).toBeGreaterThan(0);
+    expect(prepare).toBeEnabled();
+  });
+
+  it("a mistyped export passphrase is corrected on the spot and writes no file", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrasf" },
+    });
+    const save = screen.getByRole("button", {
+      name: "Save the recovery package to durable storage",
+    });
+    // Not disabled for the mismatch. Pressing it is what names the problem;
+    // the two fields are input validation, not a gate.
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await settleUntil(/two recovery passphrases do not match/u);
+
+    // No file exists. A sealed file made with a mistyped passphrase would hash
+    // and verify perfectly and be unopenable, and the operator would find out
+    // on a device that is already bricked.
+    expect(durableStorage.files.size).toBe(0);
+    // Both fields stay editable and keep what was typed, so the correction is
+    // one keystroke rather than a retype.
+    const again = screen.getByLabelText(
+      "Recovery passphrase again",
+    ) as HTMLInputElement;
+    expect(again).toBeEnabled();
+    expect(again.value).toBe("bench-recovery-passphrasf");
+
+    // Correcting it exports, and the export is verified the whole way.
+    fireEvent.change(again, { target: { value: RECOVERY_PASSPHRASE } });
+    fireEvent.click(save);
+    await settleUntil(/Verified copy/u);
+    expect(durableStorage.files.size).toBe(1);
+  });
+
+  it("a weak binding phrase is warned about and withholds nothing", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+
+    // The weakest phrase there is: a dictionary word an offline search against
+    // the six-byte UID finds immediately.
+    const phraseField = screen.getByLabelText("Binding phrase");
+    fireEvent.change(phraseField, { target: { value: "fpv" } });
+    await settle(2);
+
+    // Said plainly, and said as a warning rather than as a refusal — no error
+    // styling, and the reason is given rather than asserted.
+    expect(screen.getAllByText(/easy to guess/u).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/unsalted MD5/u).length).toBeGreaterThan(0);
+    expect(document.querySelector(".bind-phrase-weak")).not.toBeNull();
+    expect(document.querySelector(".bind-phrase-weak.parity-error")).toBeNull();
+    // The field itself is untouched: not marked invalid, not cleared, not
+    // rewritten.
+    expect((phraseField as HTMLInputElement).value).toBe("fpv");
+    expect(phraseField).toBeEnabled();
+
+    // And every operation that exists on this screen behaves exactly as it
+    // does without a phrase. This is the property the warning must never
+    // acquire: an advisory that quietly became a gate.
+    const build = screen.getByRole("button", {
+      name: "Build the official firmware",
+    });
+    expect(build).toBeEnabled();
+    fireEvent.click(build);
+    await settle();
+
+    const flash = screen.getByRole("button", { name: "Start the real flash" });
+    const disabledBefore = flash.hasAttribute("disabled");
+
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Power stays stable throughout the flash",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "The transmitter's antenna is fitted",
+      }),
+    );
+    await settle(2);
+
+    // Weak phrase and all, the firmware write reaches exactly the state it
+    // reaches without one.
+    expect(flash).toBeEnabled();
+    // Nothing anywhere on the page blames the phrase for a refusal.
+    expect(screen.queryByText(/Flashing is waiting on:/u)).toBeNull();
+    // The warning is gone here because the phrase is: it was compiled into the
+    // package and dropped from memory, which is the behaviour the field
+    // documents. The field is still there and still editable — the phrase went
+    // away, not the control.
+    expect(phraseField).toBeEnabled();
+    expect((phraseField as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText(/easy to guess/u)).toBeNull();
+
+    record({
+      operation: "firmwareWrite",
+      surface: "advanced",
+      transport: "browser",
+      control: "Start the real flash, with a deliberately weak binding phrase",
+      readinessInputs: [
+        "exactly the inputs firmwareWrite always requires",
+        "binding-phrase strength is not among them, by design",
+      ],
+      disabledBefore,
+      enabledAfter: !flash.hasAttribute("disabled"),
+      handler: "useDeviceController.flashPreparedFirmware",
+      driver: "as firmwareWrite: the phrase shapes the package, never the gate",
+      writeAuthority: "single-use capability for FIRMWARE_WRITE, TTL 180s",
+      recoveryCheckpoint: "as firmwareWrite",
+      verification: "as firmwareWrite",
+      onFailure: "as firmwareWrite",
+    });
+  });
+
+  it("generating a phrase never overwrites one without being told to", async () => {
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+
+    const phraseField = screen.getByLabelText(
+      "Binding phrase",
+    ) as HTMLInputElement;
+    // Empty field: one click fills it, because there is nothing to lose.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    const generated = phraseField.value;
+    expect(generated.length).toBeGreaterThan(0);
+    // Revealed, because a phrase nobody can read cannot be typed into the
+    // receiver, and the operator is told both devices need this exact phrase.
+    expect(phraseField.type).toBe("text");
+    expect(
+      screen.getAllByText(/Flash the transmitter and the receiver with this/u)
+        .length,
+    ).toBeGreaterThan(0);
+
+    // Now the field is occupied. A second click must not replace it: a
+    // receiver may already be flashed with what is there, and nothing here
+    // could put it back.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    expect(phraseField.value).toBe(generated);
+    expect(
+      screen.getAllByText(/Generating replaces the phrase you typed/u).length,
+    ).toBeGreaterThan(0);
+
+    // Declining leaves it exactly as it was.
+    fireEvent.click(screen.getByRole("button", { name: "Keep what I typed" }));
+    await settle(2);
+    expect(phraseField.value).toBe(generated);
+
+    // Accepting is the only thing that replaces it, and what it puts there is
+    // a different phrase the application accepts.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate a strong phrase" }),
+    );
+    await settle(2);
+    fireEvent.click(screen.getByRole("button", { name: "Replace it" }));
+    await settle(2);
+    expect(phraseField.value).not.toBe(generated);
+    expect(phraseField.value.length).toBe(generated.length);
+    // A generated phrase is never one the interface then warns about.
+    expect(screen.queryByText(/easy to guess/u)).toBeNull();
+  });
+
+  it("rxAsTx: the modes a platform supports become selectable, and the rest stay visible with the reason", async () => {
+    mountAdvanced();
+    const before = screen.queryByTestId("rx-as-tx-mode");
+    // Before a Target is chosen the control is not rendered; the options
+    // section belongs to a chosen Target.
+    const disabledBefore = before === null;
+
+    await loadCatalogAndChooseTarget("rx");
+    const control = screen.getByTestId("rx-as-tx-mode");
+    const internal = within(control).getByRole("option", {
+      name: "Internal (full-duplex)",
+    });
+    const external = within(control).getByRole("option", {
+      name: "External (half-duplex)",
+    });
+
+    // An ESP32 receiver takes both modes, which is what upstream's
+    // binary_configurator does.
+    expect(internal).toBeEnabled();
+    expect(external).toBeEnabled();
+    fireEvent.change(control, { target: { value: "internal" } });
+    await settle(2);
+    expect((control as HTMLSelectElement).value).toBe("internal");
+
+    record({
+      operation: "rxAsTx",
+      surface: "advanced",
+      transport: "browser",
+      control: "Flash this receiver with transmitter firmware (select)",
+      readinessInputs: [
+        "a Target chosen",
+        "the Target's platform supports the mode, read from the pinned upstream rules",
+      ],
+      disabledBefore,
+      enabledAfter: !(control as HTMLSelectElement).disabled,
+      handler: "useDeviceController.updateOption('rxAsTxMode')",
+      driver:
+        "firmware-package: the _TX artifact is selected and the receiver's layout rewritten per mode",
+      writeAuthority:
+        "inherited from firmwareWrite; this only shapes the package",
+      recoveryCheckpoint:
+        "the checkpoint records the receiver the operator started from, so restoring puts the receiver role back",
+      verification:
+        "the device must come back reporting the transmitter address; otherwise RX_AS_TX_ROLE_NOT_APPLIED",
+      onFailure:
+        "the checkpoint is kept and the original receiver image stays recoverable",
+    });
+  });
+
+  it("airport: a separate control with a separate prerequisite, sharing nothing with rx-as-tx", async () => {
+    mountAdvanced();
+    const disabledBefore = screen.queryByTestId("airport-enabled") === null;
+
+    await loadCatalogAndChooseTarget("rx");
+    const control = screen.getByTestId("airport-enabled") as HTMLInputElement;
+    fireEvent.click(control);
+    await settle(2);
+    expect(control.checked).toBe(true);
+
+    // Turning AirPort on must not have moved the rx-as-tx selector, and vice
+    // versa. They are different features with no shared state.
+    expect(
+      (screen.getByTestId("rx-as-tx-mode") as HTMLSelectElement).value,
+    ).toBe("off");
+
+    record({
+      operation: "airport",
+      surface: "advanced",
+      transport: "browser",
+      control: "AirPort transparent serial (checkbox)",
+      readinessInputs: ["a Target chosen"],
+      disabledBefore,
+      enabledAfter: !control.disabled,
+      handler: "useDeviceController.updateOption('airportEnabled')",
+      driver:
+        "firmware-package: writes the is-airport option key, which no rx-as-tx value ever sets",
+      writeAuthority:
+        "inherited from firmwareWrite; this only shapes the package",
+      recoveryCheckpoint: "as for any firmware write",
+      verification:
+        "the package's option block is asserted, not the device role",
+      onFailure: "as for any firmware write",
+    });
+  });
+
+  it("diagnostics: available with nothing connected, because that is when it is needed", async () => {
+    mountAdvanced();
+    const control = screen.getByRole("button", { name: "Show the report" });
+    expect(control).toBeEnabled();
+    fireEvent.click(control);
+    await settle(2);
+    const report = await screen.findByTestId("diagnostics-report");
+    expect(report.textContent).toContain("Native bridge");
+
+    rows.push({
+      operation: "diagnostics",
+      surface: "advanced",
+      transport: "browser",
+      control: "Show the report",
+      readinessInputs: ["none — it has no prerequisites by design"],
+      disabledBefore: false,
+      enabledAfter: true,
+      handler: "DiagnosticsPanel.show → useDeviceController.captureDiagnostics",
+      driver: "reads the live session and the browser's own capability answers",
+      writeAuthority: "none; it writes nothing to a device",
+      recoveryCheckpoint: "reported, not changed",
+      verification: "not applicable; it reports observations, it does not act",
+      onFailure:
+        "a browser that refuses to answer yields null rather than a failed export",
+    });
+  });
+
+  it("easy mode: the same firmware write, reached through the operator's path", async () => {
+    mountEasy();
+    // Easy Mode opens on the three things an operator came to do. The card is
+    // found by what it says, not by where it sits.
+    const card = screen
+      .getAllByRole("button", { name: "Start" })
+      .map((start) => start.closest("li"))
+      .find((node) => node?.textContent?.includes("Firmware update"));
+    expect(card, "the firmware operation card is not rendered").toBeTruthy();
+    fireEvent.click(
+      within(card as HTMLElement).getByRole("button", { name: "Start" }),
+    );
+    await settle(6);
+
+    // The write control does not exist yet: Easy Mode asks for the device
+    // first, which is a genuine prerequisite rather than a stage gate.
+    const disabledBefore =
+      screen.queryByRole("button", {
+        name: "Write the firmware to the device",
+      }) === null;
+
+    fireEvent.click(screen.getByRole("button", { name: "Identify my device" }));
+    await settle(10);
+    expect(
+      (await screen.findAllByText(/Vendor TX Module/u)).length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Prepare the official update source",
+      }),
+    );
+    await settle(12);
+
+    const control = screen.getByRole("button", {
+      name: "Write the firmware to the device",
+    });
+    // A device is connected and the catalog is loaded, and it is still refused:
+    // there is no package, no saved recovery archive and no acknowledgement.
+    expect(control).toBeDisabled();
+
+    fireEvent.change(targetSelect(), { target: { value: espTransmitter.id } });
+    await settle(4);
+    fireEvent.change(screen.getByLabelText(/Regulatory region/u), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Prepare and verify the official package",
+      }),
+    );
+    await settle(12);
+    // Downloading is not the same as having kept it, and the operator's word
+    // for it was never evidence either. The package is written where it will
+    // survive this application being removed, then reopened and hashed.
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package where it will survive",
+      }),
+    );
+    await settleUntil(/Saved and verified/u);
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Power is stable and will not be interrupted/u,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /The transmitter antenna is fitted/u,
+      }),
+    );
+    await settle(6);
+
+    record({
+      operation: "firmwareWrite",
+      surface: "easy",
+      transport: "browser",
+      control: "Write the firmware to the device",
+      readinessInputs: [
+        "not busy",
+        "a confirmed CRSF identity",
+        "a Target and a regulatory region chosen",
+        "a prepared, verified package",
+        "the recovery archive downloaded",
+        "the operator's confirmation that the recovery file is kept",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "EasySetup → useDeviceController.flashPreparedFirmware",
+      driver:
+        "the same esp-flasher / xmodem / stm32-dfu path the Advanced view uses; Easy Mode is a view, not a second implementation",
+      writeAuthority:
+        "single-use capability for FIRMWARE_WRITE, as in Advanced",
+      recoveryCheckpoint: "the same checkpoint, written by the same controller",
+      verification: "the same read-back and reconnect verification",
+      onFailure: "the same recovery path, surfaced in the operator's language",
+    });
+  });
+
+  it("a Target newer than the validated pack stays selectable and says exactly why", async () => {
+    mountAdvanced();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load the official catalog" }),
+    );
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "RX receiver" }));
+    await settle(4);
+
+    // It is a real device. Hiding it would leave an operator looking for an
+    // entry that is not there, which is worse than a refusal with a reason.
+    const select = targetSelect();
+    expect(Array.from(select.options).map((option) => option.value)).toContain(
+      unpackedReceiver.id,
+    );
+
+    fireEvent.change(select, { target: { value: unpackedReceiver.id } });
+    await settle(4);
+
+    // And it is refused for packaging, naming the pack and the missing layout
+    // rather than the build.
+    // Listed beside every operation it blocks — packaging, recovery and
+    // rx-as-tx all read layout bytes from the pack — so the operator sees it
+    // wherever they try.
+    const reasons = screen.getAllByText(
+      /is newer than validated Target pack .* Its hardware layout .* is not in the pack/u,
+    );
+    expect(reasons.length).toBeGreaterThan(0);
+    for (const reason of reasons) {
+      expect(reason.textContent).toContain("Vendor Brand New RX");
+      expect(reason.textContent).toContain("Vendor Brand New RX.json");
+      // The reason is a fact about this Target and this pack. It must never
+      // read as a project stage.
+      expect(reason.textContent).not.toMatch(
+        /this build|preview|coming soon|not yet supported/iu,
+      );
+    }
+
+    const build = screen.getByRole("button", {
+      name: "Build the official firmware",
+    });
+    expect(build).toBeDisabled();
+  });
+
+  it("android: the native bridge supplies the transport the browser does not have", async () => {
+    const { readPlatformCapabilities } =
+      await import("./hardware/platform-capabilities");
+
+    // A phone browser with no Web Serial: every device path is blocked.
+    const phone = readPlatformCapabilities({
+      isSecureContext: true,
+      navigator: { userAgent: "Mozilla/5.0 (Linux; Android 14)" },
+    });
+    expect(phone.webSerial).toBe(false);
+    expect(phone.nativeBridge).toBe(false);
+
+    // The same phone inside the packaged host, which injects the bridge.
+    const hosted = readPlatformCapabilities({
+      isSecureContext: true,
+      navigator: { userAgent: "Mozilla/5.0 (Linux; Android 14)" },
+      elrsNativeBridge: {
+        version: 1,
+        serial: { requestPort: vi.fn() },
+        host: {
+          webBuildSha256: "c".repeat(64),
+          nativeSourceSha256: "d".repeat(64),
+          bridge: "AVAILABLE",
+        },
+      },
+    });
+    expect(hosted.nativeBridge).toBe(true);
+    expect(hosted.nativeHost?.bridge).toBe("AVAILABLE");
+
+    const { devicePathBlocker } =
+      await import("./hardware/platform-capabilities");
+    expect(devicePathBlocker(phone)).not.toBeNull();
+    expect(devicePathBlocker(hosted)).toBeNull();
+
+    record({
+      operation: "connect",
+      surface: "advanced",
+      transport: "android",
+      control: "Identify the device over CRSF",
+      readinessInputs: [
+        "not busy",
+        "previous port confirmed closed",
+        "a native bridge injected by the packaged host",
+      ],
+      disabledBefore: devicePathBlocker(phone) !== null,
+      enabledAfter: devicePathBlocker(hosted) === null,
+      handler: "the same useDeviceController.connectHardware",
+      driver:
+        "nativeBridgeNavigator(bridge) is handed to the same session layer, so CRSF, flashing and recovery are the browser's code paths",
+      writeAuthority:
+        "the same capability model, plus the host's own session ownership",
+      recoveryCheckpoint: "the same checkpoint",
+      verification: "the same CRSF Device Info verification",
+      onFailure:
+        "a host that could not install its bridge reports the exact reason rather than an empty device list",
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // The durable-recovery gate: what it blocks, what it must not block, and
+  // that it survives the application being reinstalled.
+  //
+  // These record no matrix rows. They are about the *reasons* a row can be
+  // refused, which the matrix lists as inputs but cannot demonstrate.
+  // ---------------------------------------------------------------------
+
+  it("a dismissed save blocks the firmware write only, and says why", async () => {
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ dismissSave: true });
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Saving the recovery package was cancelled/u);
+
+    // The one destructive operation is refused, and the refusal names this
+    // condition rather than a generic lock.
+    expect(
+      screen.getByRole("button", { name: "Start the real flash" }),
+    ).toBeDisabled();
+    // Stated beside every operation it blocks, which is more than one.
+    expect(
+      screen.getAllByText(
+        /Save the recovery package to durable storage and let/u,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    // Nothing else is refused: this is not a global lock. Diagnostics is the
+    // operation an operator reaches for precisely when storage has just failed,
+    // so it staying available is the property that matters here.
+    expect(
+      screen.getByRole("button", { name: "Show the report" }),
+    ).toBeEnabled();
+    // And the reason is attached to the flashing gate rather than announced as
+    // a state of the application: the panel that names it is the flashing one.
+    expect(screen.getByText("Flashing is waiting on:")).toBeInTheDocument();
+  });
+
+  it("refuses the write when storage hands back different bytes than it was given", async () => {
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ corruptOnRead: true });
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    // The write reported success. The read-back is what caught it, which is the
+    // entire reason the read-back exists.
+    await settleUntil(/does not match the bytes that were written/u);
+    expect(
+      screen.getByRole("button", { name: "Start the real flash" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(/No verified durable copy yet/u),
+    ).toBeInTheDocument();
+  });
+  it("recoveryImport: a package saved earlier restores after a reinstall, with no application state", async () => {
+    // ---- part one: produce a real sealed file ---------------------------
+    //
+    // Not a fixture. The bytes this test later imports are the bytes the
+    // shipped export path actually wrote, through the real envelope, so the
+    // round trip is the thing under test rather than a stand-in for it.
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+
+    const written = [...durableStorage.files.values()];
+    expect(written).toHaveLength(1);
+    const sealed = written[0];
+    if (sealed === undefined) throw new TypeError("nothing was written");
+    // What reached storage is an envelope, not the archive. If this is ever a
+    // zip again, the operator's Wi-Fi password is sitting in Downloads.
+    expect(new TextDecoder().decode(sealed.subarray(0, 8))).toBe("ELRSRCV1");
+
+    // ---- part two: the reinstall ----------------------------------------
+    //
+    // An uninstall takes the IndexedDB journal with it. The application comes
+    // back knowing nothing: no checkpoint, no prepared package, no identity.
+    // The file the operator kept is the only thing that survived.
+    cleanup();
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ importBytes: sealed });
+    mocks.loadCheckpoint.mockResolvedValue(null);
+    mocks.validateRecoveryPackage.mockResolvedValue({
+      targetId: espTransmitter.id,
+      productName: "Vendor TX Module",
+      platform: espTransmitter.config.platform,
+      firmware: espTransmitter.config.firmware,
+      releaseLabel: "4.1.0",
+      releaseRevision: "release410",
+      packageSha256: "c".repeat(64),
+      segments: [
+        {
+          name: "firmware.bin",
+          address: 0,
+          bytes: new Uint8Array(8),
+          sha256: "d".repeat(64),
+        },
+      ],
+      provenance: null,
+    });
+
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+
+    // Nothing has been imported, so the control that restores from an imported
+    // package is not on screen yet — and the one that would put it there is.
+    expect(
+      screen.queryByRole("button", {
+        name: "Restore the device from the imported package",
+      }),
+    ).toBeNull();
+    const pick = screen.getByRole("button", {
+      name: "Choose a saved recovery file",
+    });
+    expect(pick).toBeEnabled();
+
+    fireEvent.click(pick);
+    // The identity is read out of the file's authenticated header with no
+    // passphrase, which is what lets an operator tell three saved files apart
+    // before committing to typing anything.
+    await settleUntil(/Enter its recovery passphrase to open it/u);
+    expect(screen.getAllByText(/Vendor TX Module/u).length).toBeGreaterThan(0);
+
+    // Scoped to the import block, not picked by position. There are two
+    // passphrase fields once a package is prepared — one to seal an export,
+    // one to open an import — and they are deliberately in different parts of
+    // the page, so an index would silently select the wrong one.
+    const importField = within(
+      document.querySelector(".recovery-import") as HTMLElement,
+    ).getByLabelText("Recovery passphrase");
+    fireEvent.change(importField, { target: { value: RECOVERY_PASSPHRASE } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the recovery file" }),
+    );
+    await settleUntil(/imported and verified/u);
+
+    const control = screen.getByRole("button", {
+      name: "Restore the device from the imported package",
+    });
+    // Authenticated, validated, and still refused: the operator has proven
+    // they hold the passphrase, not that this is the right device.
+    fireEvent.click(control);
+    await settleUntil(/Check the device identity recovered from the file/u);
+    const disabledBefore = true;
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /This is the device in front of me/u,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Power stays stable throughout the recovery",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "The transmitter's antenna is fitted throughout the recovery",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText(/Confirm the Target for recovery/u),
+      { target: { value: espTransmitter.targetKey } },
+    );
+    await settle(6);
+
+    record({
+      operation: "recoveryImport",
+      surface: "advanced",
+      transport: "browser",
+      control: "Restore the device from the imported package",
+      readinessInputs: [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "a recovery file picked from storage the operator owns",
+        "the file authenticated with the operator's passphrase",
+        "the recovered device identity confirmed by the operator",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the Target typed back",
+      ],
+      disabledBefore,
+      enabledAfter: !control.hasAttribute("disabled"),
+      handler: "useDeviceController.recoverFromImportedPackage",
+      driver:
+        "the same flashing driver a picked-file recovery uses; the source of the bytes differs and nothing else does",
+      writeAuthority: "its own single-use capability for RECOVERY",
+      recoveryCheckpoint:
+        "reconstituted from the imported package's own digest, because an uninstall erased the journal — which is the case this path exists for",
+      verification:
+        "the same read-back and post-write identity verification as any recovery",
+      onFailure:
+        "the imported package is kept in state, so the restore can be retried without picking the file again",
+    });
+  });
+
+  it("a verified copy of a different package is stale, and says so", async () => {
+    // Two ways a receipt can stop describing the bytes about to be written,
+    // and they are handled differently on purpose.
+    //
+    // Changing an option clears the receipt outright — `resetPreparedState`
+    // nulls it, because a receipt for a package that no longer exists is a
+    // claim about bytes nobody is going to write.
+    //
+    // Importing a saved file is the other way, and it *keeps* the receipt,
+    // because the file really is on durable storage. What it does not do is
+    // make that file a copy of a package prepared afterwards. That is the
+    // stale case, and refusing it is right: the operator has a verified copy
+    // of something, just not of this.
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    const sealed = [...durableStorage.files.values()][0];
+    if (sealed === undefined) throw new TypeError("nothing was written");
+
+    // First route: change an option. The receipt is dropped, so the operator
+    // is told to save this package — not that an old one is stale.
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Unlock the higher power levels/u,
+      }),
+    );
+    await settle(4);
+    // The receipt is gone. The prepared package went with it, so the panel
+    // that displayed the verified copy is no longer on screen at all — which
+    // is the honest rendering of "there is nothing prepared to have a copy
+    // of", and is why this route never reports staleness.
+    expect(screen.queryByText(/Verified copy/u)).toBeNull();
+
+    // Second route: prepare a package, *then* import a saved file. The import
+    // keeps its receipt — the file really is on durable storage — but does not
+    // record it against the prepared package, so the receipt now describes
+    // something other than the bytes about to be written. Order matters here
+    // and the other way round proves nothing: `buildFirmware` begins with
+    // `resetPreparedState`, so importing first and building second simply
+    // clears the receipt.
+    cleanup();
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ importBytes: sealed });
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle(12);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose a saved recovery file" }),
+    );
+    await settleUntil(/Enter its recovery passphrase to open it/u);
+    // Scoped to the import block, not picked by position. There are two
+    // passphrase fields once a package is prepared — one to seal an export,
+    // one to open an import — and they are deliberately in different parts of
+    // the page, so an index would silently select the wrong one.
+    const importField = within(
+      document.querySelector(".recovery-import") as HTMLElement,
+    ).getByLabelText("Recovery passphrase");
+    fireEvent.change(importField, { target: { value: RECOVERY_PASSPHRASE } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the recovery file" }),
+    );
+    await settleUntil(/imported and verified/u);
+    await settle(6);
+
+    expect(
+      screen.getByRole("button", { name: "Start the real flash" }),
+    ).toBeDisabled();
+    expect(
+      screen.getAllByText(/belongs to a different package/u).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("a failed authentication changes nothing and reaches no device", async () => {
+    // The requirement is not only that a wrong passphrase is refused. It is
+    // that nothing is parsed, nothing is stored, and nothing is written — so a
+    // failure leaves the session exactly as it was rather than half-imported.
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    await identify();
+    fireEvent.change(screen.getByLabelText("Regulatory region"), {
+      target: { value: "FCC_2400" },
+    });
+    await settle(4);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Build the official firmware" }),
+    );
+    await settle();
+    fireEvent.change(screen.getByLabelText("Recovery passphrase"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.change(screen.getByLabelText("Recovery passphrase again"), {
+      target: { value: RECOVERY_PASSPHRASE },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Save the recovery package to durable storage",
+      }),
+    );
+    await settleUntil(/Verified copy/u);
+    const sealed = [...durableStorage.files.values()][0];
+    if (sealed === undefined) throw new TypeError("nothing was written");
+
+    cleanup();
+    durableStorage.restore();
+    durableStorage = installDurableStorageStub({ importBytes: sealed });
+    mocks.validateRecoveryPackage.mockClear();
+    mocks.saveCheckpoint.mockClear();
+
+    mountAdvanced();
+    await loadCatalogAndChooseTarget("tx");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose a saved recovery file" }),
+    );
+    await settleUntil(/Enter its recovery passphrase to open it/u);
+
+    // Scoped to the import block, not picked by position. There are two
+    // passphrase fields once a package is prepared — one to seal an export,
+    // one to open an import — and they are deliberately in different parts of
+    // the page, so an index would silently select the wrong one.
+    const importField = within(
+      document.querySelector(".recovery-import") as HTMLElement,
+    ).getByLabelText("Recovery passphrase");
+    fireEvent.change(importField, {
+      target: { value: "the-wrong-passphrase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the recovery file" }),
+    );
+    await settleUntil(/passphrase is wrong, or this file has been modified/u);
+
+    // Nothing was parsed: the archive validator was never reached, because
+    // AES-GCM verifies before it yields any plaintext.
+    expect(mocks.validateRecoveryPackage).not.toHaveBeenCalled();
+    // Nothing was stored.
+    expect(mocks.saveCheckpoint).not.toHaveBeenCalled();
+    // And nothing was written to a device: the control that would do it is not
+    // even on screen, because there is no imported package.
+    expect(
+      screen.queryByRole("button", {
+        name: "Restore the device from the imported package",
+      }),
+    ).toBeNull();
+    expect(mocks.flashEspFirmware).not.toHaveBeenCalled();
+  });
+
+  it("both languages expose the same capabilities, not the same words", async () => {
+    // A locale must never be able to withhold a feature. Compared by counting
+    // *interactive elements*, not by comparing text: two catalogues can agree
+    // on every string and still render a different number of controls if a
+    // conditional is keyed on the locale. Each locale is driven through its
+    // own labels, taken from the shared catalogue, so the test is parametric
+    // rather than a translation of itself.
+    async function census(locale: "ar" | "en"): Promise<string[]> {
+      const translate = createTranslator(locale);
+      render(
+        <ProductShell
+          initialLocale={locale}
+          initialMode="advanced"
+          hardwareConnector={connector()}
+        />,
+      );
+      const stages: string[] = [];
+      const count = (label: string) => {
+        stages.push(
+          [
+            label,
+            `buttons=${String(screen.getAllByRole("button").length)}`,
+            `checkboxes=${String(screen.queryAllByRole("checkbox").length)}`,
+            `comboboxes=${String(screen.queryAllByRole("combobox").length)}`,
+            `textboxes=${String(screen.queryAllByRole("textbox").length)}`,
+          ].join(" "),
+        );
+      };
+
+      count("cold");
+      fireEvent.click(
+        screen.getByRole("button", { name: translate("wb.ui.loadCatalog") }),
+      );
+      await settle();
+      count("catalog");
+      fireEvent.click(
+        screen.getByRole("button", { name: translate("wb.ui.deviceTx") }),
+      );
+      await settle(4);
+      fireEvent.change(targetSelect(), {
+        target: { value: espTransmitter.id },
+      });
+      await settle(4);
+      count("target");
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: translate("wb.ui.identifyOverCrsf"),
+        }),
+      );
+      await settle(8);
+      count("identified");
+
+      cleanup();
+      return stages;
+    }
+
+    const arabic = await census("ar");
+    const english = await census("en");
+    // Same controls, same counts, at every stage of the same journey.
+    expect(arabic).toEqual(english);
+  });
+});

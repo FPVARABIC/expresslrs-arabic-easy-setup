@@ -1,4 +1,10 @@
-import type { ExpressLrsFirmwareOptions, OfficialTarget } from "./parity-types";
+import { evaluateRxAsTxSupport, RX_AS_TX_ACTIVE_MODES } from "./rx-as-tx";
+import type { RxAsTxActiveMode, RxAsTxMode } from "./rx-as-tx";
+import type {
+  ExpressLrsFirmwareOptions,
+  OfficialRelease,
+  OfficialTarget,
+} from "./parity-types";
 
 export class FirmwareOptionsError extends Error {
   public constructor(
@@ -8,6 +14,17 @@ export class FirmwareOptionsError extends Error {
     super(message);
     this.name = "FirmwareOptionsError";
   }
+}
+
+function validatedRxAsTxMode(value: unknown): RxAsTxMode {
+  if (value === undefined || value === "off") return "off";
+  if (RX_AS_TX_ACTIVE_MODES.includes(value as RxAsTxActiveMode)) {
+    return value as RxAsTxActiveMode;
+  }
+  throw new FirmwareOptionsError(
+    "rxAsTxMode",
+    `rxAsTxMode must be one of off, ${RX_AS_TX_ACTIVE_MODES.join(", ")}`,
+  );
 }
 
 function boundedInteger(
@@ -53,6 +70,8 @@ function boundedText(
 export function validateFirmwareOptions(input: {
   readonly target: OfficialTarget;
   readonly options: ExpressLrsFirmwareOptions;
+  /** Optional: lets the AirPort check reject a release that predates it. */
+  readonly release?: OfficialRelease;
 }): ExpressLrsFirmwareOptions {
   const options = input.options;
   const region = boundedText("region", options.region, 64, false);
@@ -109,14 +128,27 @@ export function validateFirmwareOptions(input: {
     receiverInvertTx: options.receiverInvertTx === true,
     lockOnFirstConnection: options.lockOnFirstConnection === true,
     r9mmMiniSbus: options.r9mmMiniSbus === true,
-    receiverAsTransmitter: options.receiverAsTransmitter === true,
+    rxAsTxMode: validatedRxAsTxMode(options.rxAsTxMode),
+    // Deliberately read from its own field. AirPort and RX-as-TX are separate
+    // upstream features; deriving one from the other is the defect this
+    // replaced.
+    airportEnabled: options.airportEnabled === true,
   });
 
-  if (validated.receiverAsTransmitter) {
-    throw new FirmwareOptionsError(
-      "receiverAsTransmitter",
-      "Receiver-as-transmitter packaging is disabled until its TX binary and hardware-layout transformations are implemented and verified",
-    );
+  if (validated.rxAsTxMode !== "off") {
+    // Whether a receiver can be flashed with transmitter firmware follows from
+    // upstream's platform gate and from whether a `_TX` artifact exists for it
+    // — never from the project's build stage.
+    const support = evaluateRxAsTxSupport({
+      target: input.target,
+      mode: validated.rxAsTxMode,
+    });
+    if (!support.supported) {
+      throw new FirmwareOptionsError(
+        "rxAsTxMode",
+        `UNSUPPORTED_BY_TARGET (${support.reason}): ${support.targetName === "" ? "no target" : support.targetName} on platform ${support.platform === "" ? "unknown" : support.platform} cannot be flashed as a transmitter in ${validated.rxAsTxMode} mode${support.availableModes.length === 0 ? "" : ` (it accepts: ${support.availableModes.join(", ")})`}`,
+      );
+    }
   }
   return validated;
 }

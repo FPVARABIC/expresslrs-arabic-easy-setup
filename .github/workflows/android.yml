@@ -1,0 +1,894 @@
+name: Android host
+
+# Builds the Android host APK, runs Gradle lint, the JVM unit tests and the
+# instrumentation suite on an emulator, and publishes the APK with a full
+# identity record.
+#
+# The Android SDK cannot be downloaded in the development sandbox this project
+# is worked on from, so this is where an APK is produced at all, and where the
+# bridge and WebView behaviour is actually executed. What it proves is bounded
+# and stated in docs/ANDROID.md: the project compiles, lint is clean, and the
+# host's rules hold against a fake USB backend. It proves nothing about USB
+# OTG, because no emulator has a USB host.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - "android/**"
+      - "apps/web/**"
+      - "packages/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Debug APK, lint and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      # The APK bundles the web application rather than fetching it, so the web
+      # build has to exist before Gradle runs. `bundleWebAssets` fails loudly
+      # rather than shipping an empty host if this step is ever skipped.
+      - name: Build the web application
+        run: pnpm build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+        with:
+          # Pinned rather than "whatever is newest": a reproducible APK cannot
+          # depend on which Gradle happened to ship the day CI ran, and AGP
+          # 8.7.3 is supported on this line.
+          gradle-version: "8.14.3"
+
+      - name: Gradle lint
+        working-directory: android
+        run: gradle --no-daemon lintDebug
+
+      - name: JVM unit tests
+        working-directory: android
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Assemble the debug APK
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+
+      # Everything an installed APK can be traced back to. Recomputed on every
+      # head, and never carried over: reusing a digest from a previous head
+      # would be a claim about bytes nobody hashed. Note that the APK digest
+      # identifies this *build*, not this commit — no debug keystore is
+      # configured, so AGP generates one per runner and two builds of the same
+      # tree are signed by different keys. The two embedded source digests are
+      # the part that is stable across builds; see docs/ANDROID.md.
+      - name: Record the APK identity
+        working-directory: android
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$apk"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+
+          identity="app-debug.apk.identity.txt"
+          {
+            echo "commit:            ${{ github.event.pull_request.head.sha || github.sha }}"
+            echo "workflow run:      ${{ github.run_id }} attempt ${{ github.run_attempt }}"
+            echo "apk filename:      app-debug.apk"
+            echo "apk bytes:         $(stat -c%s "$apk")"
+            echo "apk sha256:        $(sha256sum "$apk" | cut -d' ' -f1)"
+            echo "build tools:       $build_tools"
+            "$aapt2" dump badging "$apk" \
+              | sed -n "s/^package: name='\([^']*\)' versionCode='\([^']*\)' versionName='\([^']*\)'.*/package id:        \1\nversionCode:       \2\nversionName:       \3/p"
+            # Labelled `sdkVersion` by older build-tools and `minSdkVersion`
+            # by newer ones. Both are read, so the field is never silently
+            # absent from the identity record.
+            echo "minSdk:            $(
+              "$aapt2" dump badging "$apk" \
+                | sed -n "s/^\(min\)\?[sS]dkVersion:'\([^']*\)'.*/\2/p" \
+                | head -1
+            )"
+            "$aapt2" dump badging "$apk" \
+              | sed -n "s/^targetSdkVersion:'\([^']*\)'/targetSdk:         \1/p"
+            echo "compileSdk:        $(sed -n 's/^ *compileSdk = \([0-9]*\)/\1/p' app/build.gradle.kts)"
+            echo "signing cert sha256: $(
+              "$apksigner" verify --print-certs "$apk" 2>&1 \
+                | grep -io 'SHA-256 digest: *[0-9a-f]\{64\}' \
+                | grep -io '[0-9a-f]\{64\}' \
+                | head -1
+            )"
+            unzip -p "$apk" assets/source-identity.json
+            echo
+          } | tee "$identity"
+
+          # The two embedded digests are what make an installed APK traceable
+          # back to a tree, and `writeSourceIdentity` writes the literal
+          # "absent" rather than failing when a digest has nothing to hash. An
+          # APK published with provenance that says nothing is worse than no
+          # APK: a bench result against it could not be tied to any source.
+          for field in webBuildSha256 nativeSourceSha256; do
+            value="$(
+              unzip -p "$apk" assets/source-identity.json \
+                | sed -n "s/.*\"$field\":\"\([^\"]*\)\".*/\1/p"
+            )"
+            printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::assets/source-identity.json carries no usable" \
+                   "$field (got '$value'). This APK cannot be traced back to a" \
+                   "source tree, so it is not publishable." >&2
+              exit 1
+            }
+          done
+
+          sha256sum "$apk" > app-debug.apk.sha256
+
+      # ---- the unsigned physical-test candidate --------------------------
+      #
+      # Built here, with the permanent signing key nowhere on this runner, and
+      # signed later by a trusted workflow that never checks out this commit
+      # and never runs Gradle. Unsigned is the correct output of a build that
+      # ran pull-request code: it cannot be installed, which is the honest
+      # state of an artifact nobody has vouched for yet.
+      - name: Assemble the unsigned physical-test candidate
+        working-directory: android
+        env:
+          # Monotonic across runs of this workflow, so a later candidate can
+          # always be installed over an earlier one once both are signed.
+          ELRS_VERSION_CODE: ${{ github.run_number }}
+          ELRS_VERSION_NAME: >-
+            ${{ github.ref_type == 'tag' && github.ref_name
+              || format('0.1.0-rc.{0}', github.run_number) }}
+        run: gradle --no-daemon assemblePhysicalTest
+
+      - name: Prove the candidate carries no signature
+        id: candidate_apk
+        working-directory: android
+        run: |
+          set -euo pipefail
+          out="app/build/outputs/apk/physicalTest"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+
+          # Resolved rather than assumed. The first version of this step hard
+          # coded `app-physicalTest.apk` and died on `test -f` under `set -e`,
+          # producing no output at all — which I misread twice as proof that
+          # the APK was signed. AGP appends `-unsigned` to the file name when a
+          # build type has no signing config, so the correct name here is
+          # exactly the one that was missing.
+          apks="$(find "$out" -maxdepth 1 -name '*.apk' | sort)"
+          count="$(printf '%s\n' "$apks" | grep -c . || true)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one APK in $out, found $count." \
+                 "Contents: $(ls -1 "$out" 2>/dev/null | tr '\n' ' ' || echo '<missing>')" >&2
+            exit 1
+          fi
+          apk="$apks"
+          echo "candidate: $apk"
+
+          # The file name is the first evidence and the cheapest: AGP drops the
+          # `-unsigned` suffix only when a signing config was applied.
+          if [ "$(basename "$apk")" != "app-physicalTest-unsigned.apk" ]; then
+            echo "::error::The candidate is named $(basename "$apk"), not" \
+                 "app-physicalTest-unsigned.apk. AGP drops that suffix only when a" \
+                 "signing config was applied, which means a key reached the" \
+                 "candidate build. See docs/ANDROID_SIGNING.md." >&2
+            echo "--- the certificate that signed it ---" >&2
+            "$apksigner" verify --verbose --print-certs "$apk" >&2 || true
+            exit 1
+          fi
+
+          # And the name is not taken on trust: apksigner is the authority.
+          if "$apksigner" verify "$apk" >/dev/null 2>&1; then
+            echo "::error::The physical-test candidate carries a valid signature" \
+                 "despite its name. A signature here means a key was readable by" \
+                 "pull-request code. See docs/ANDROID_SIGNING.md." >&2
+            echo "--- the certificate that signed it ---" >&2
+            "$apksigner" verify --verbose --print-certs "$apk" >&2 || true
+            exit 1
+          fi
+          echo "The candidate is unsigned, as required."
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: Write the candidate provenance manifest
+        id: provenance
+        working-directory: android
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          ARTIFACT_NAME: elrs-android-physicaltest-unsigned-${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          apk="${{ steps.candidate_apk.outputs.path }}"
+          test -f "$apk"
+          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
+          badging="$("$aapt2" dump badging "$apk")"
+          read_badge() { printf '%s' "$badging" | sed -n "$1" | head -1; }
+
+          package_id="$(read_badge "s/^package: name='\([^']*\)'.*/\1/p")"
+          version_code="$(read_badge "s/^package:.*versionCode='\([^']*\)'.*/\1/p")"
+          version_name="$(read_badge "s/^package:.*versionName='\([^']*\)'.*/\1/p")"
+          apk_sha="$(sha256sum "$apk" | cut -d' ' -f1)"
+          identity="$(unzip -p "$apk" assets/source-identity.json)"
+          field() {
+            printf '%s' "$identity" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"
+          }
+          web_sha="$(field webBuildSha256)"
+          native_sha="$(field nativeSourceSha256)"
+
+          # The signer verifies each of these against the artifact it fetches,
+          # so a field that says nothing would let an untraceable APK through.
+          for pair in "package_id:$package_id" "version_code:$version_code" \
+                      "version_name:$version_name" "apk_sha:$apk_sha" \
+                      "web_sha:$web_sha" "native_sha:$native_sha"; do
+            [ -n "${pair#*:}" ] || {
+              echo "::error::candidate provenance field ${pair%%:*} is empty" >&2
+              exit 1
+            }
+          done
+          for value in "$apk_sha" "$web_sha" "$native_sha"; do
+            printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::expected a SHA-256, got '$value'" >&2
+              exit 1
+            }
+          done
+
+          manifest="app-physicalTest-unsigned.provenance.json"
+          cat > "$manifest" <<JSON
+          {
+            "schemaVersion": 1,
+            "channel": "physical-test-unsigned",
+            "signed": false,
+            "repository": "${{ github.repository }}",
+            "workflow": "${{ github.workflow }}",
+            "workflowRef": "${{ github.workflow_ref }}",
+            "eventName": "${{ github.event_name }}",
+            "sourceSha": "$SOURCE_SHA",
+            "runId": "${{ github.run_id }}",
+            "runNumber": "${{ github.run_number }}",
+            "runAttempt": "${{ github.run_attempt }}",
+            "artifactName": "$ARTIFACT_NAME",
+            "apkFileName": "app-physicalTest-unsigned.apk",
+            "apkByteLength": $(stat -c%s "$apk"),
+            "apkSha256": "$apk_sha",
+            "applicationId": "$package_id",
+            "versionCode": "$version_code",
+            "versionName": "$version_name",
+            "buildTools": "$build_tools",
+            "webBuildSha256": "$web_sha",
+            "nativeSourceSha256": "$native_sha"
+          }
+          JSON
+          # Fails the step if the heredoc produced anything but valid JSON.
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$manifest"
+          cat "$manifest"
+          echo "artifact-name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk-sha256=$apk_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the unsigned physical-test candidate
+        id: candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.provenance.outputs.artifact-name }}
+          path: |
+            android/app/build/outputs/apk/physicalTest/app-physicalTest-unsigned.apk
+            android/app-physicalTest-unsigned.provenance.json
+          if-no-files-found: error
+          retention-days: 30
+
+      # The artifact id is only known after the upload, and the trusted signer
+      # takes it as an input. Recorded here so a candidate can be handed to the
+      # signer without anyone reading it out of the Actions API by hand.
+      - name: Record what the signer needs
+        run: |
+          {
+            echo "### Unsigned physical-test candidate"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| source SHA | \`${{ github.event.pull_request.head.sha || github.sha }}\` |"
+            echo "| run id | \`${{ github.run_id }}\` |"
+            echo "| artifact name | \`${{ steps.provenance.outputs.artifact-name }}\` |"
+            echo "| artifact id | \`${{ steps.candidate.outputs.artifact-id }}\` |"
+            echo "| unsigned APK SHA-256 | \`${{ steps.provenance.outputs.apk-sha256 }}\` |"
+            echo
+            echo "These are the four inputs the trusted signer requires."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the debug APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # `github.sha` on a pull_request event is the ephemeral merge commit,
+          # which exists in no branch. Name the artifact after the commit that
+          # actually produced it, so an APK can be traced back to its source.
+          name: elrs-android-host-debug-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app-debug.apk.sha256
+            android/app-debug.apk.identity.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Preserve the lint and test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-reports-${{ github.run_attempt }}
+          path: |
+            android/app/build/reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  instrumentation:
+    name: Instrumentation tests on an emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      # The packaged-application suite loads the real bundled index.html, so
+      # these tests exercise the same bytes the APK ships.
+      - name: Build the web application
+        run: pnpm build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Driven with the SDK tools directly rather than through a third-party
+      # action. This repository pins every action it uses to a full SHA, and an
+      # unverified pin on the step that runs the security tests would be the
+      # wrong place to make an exception.
+      - name: Create the emulator
+        run: |
+          set -euo pipefail
+          # API 34 with Google APIs: the bridge needs a WebView that supports
+          # WebMessageListener and document-start scripts, and the AOSP images
+          # below API 30 ship one that does not.
+          image="system-images;android-34;google_apis;x86_64"
+
+          # `avdmanager` honours XDG_CONFIG_HOME and writes to
+          # `$HOME/.config/.android/avd`; the `emulator` binary does not, and
+          # looks in `$HOME/.android/avd`. On this runner they disagreed, so a
+          # successfully created AVD was invisible to the emulator, which
+          # exited with "Unknown AVD name [ci]". `ANDROID_AVD_HOME` is first in
+          # the emulator's search order and is honoured by both.
+          #
+          # Set here and exported through GITHUB_ENV rather than in a job-level
+          # `env:` block: that block cannot expand `$HOME`, and it cannot use
+          # the `runner` context either — no runner is assigned when it is
+          # evaluated, so referring to `runner.temp` there fails the whole
+          # workflow's validation and no job runs at all.
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          mkdir -p "$ANDROID_AVD_HOME"
+          # A bounded feed rather than `yes`: `yes` is killed by SIGPIPE as soon
+          # as sdkmanager stops reading, and `pipefail` turns that into a failed
+          # step. setup-android has already accepted the licences, so this only
+          # covers the case where it has not.
+          printf 'y\n%.0s' $(seq 50) | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "$image" "platform-tools" "emulator" > /dev/null
+          # `--device` is a convenience; a runner whose SDK does not know the
+          # profile still gets a working AVD from the image alone.
+          printf 'no\n' | avdmanager create avd --force --name ci \
+            --package "$image" --device "pixel_6" \
+            || printf 'no\n' | avdmanager create avd --force --name ci --package "$image"
+          # The check that would have caught the directory mismatch here
+          # rather than five minutes later: ask the *emulator* what it can see,
+          # not just avdmanager what it wrote.
+          avdmanager list avd
+          echo "emulator sees:"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx ci
+
+      - name: Boot the emulator
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/emulator/emulator" -avd ci \
+            -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            -accel on -camera-back none -camera-front none > emulator.log 2>&1 &
+          emulator_pid=$!
+
+          # One loop that watches both the boot property and whether the
+          # emulator is still alive. Waiting on adb alone spent the full
+          # timeout on a process that had already exited, and reported nothing
+          # but exit 124 — the emulator's own error was in a log nobody read.
+          booted=0
+          for _ in $(seq 1 150); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo "::error::the emulator exited before it finished booting"
+              cat emulator.log
+              exit 1
+            fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              booted=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$booted" != "1" ]; then
+            echo "::error::the emulator did not report sys.boot_completed within 750s"
+            cat emulator.log
+            exit 1
+          fi
+
+          # Cosmetic, and not worth failing the run over on an image that
+          # refuses one of them.
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+          adb shell input keyevent 82 || true
+          adb devices
+
+      # The persistence stages are excluded here on purpose: they are two
+      # halves of one proof that spans two separately installed APKs, so
+      # running either alone would fail and prove nothing. The
+      # `update-persistence` job below drives them one at a time.
+      - name: Run the instrumentation suite
+        working-directory: android
+        run: |
+          gradle --no-daemon connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.notAnnotation=com.fpvarabic.elrs.bridge.PersistenceStage
+
+      # Bounded: with no device attached, `adb logcat -d` waits rather than
+      # failing, which held a whole job open for an hour.
+      - name: Capture the device log
+        if: always()
+        run: timeout 120 adb logcat -d > android-logcat.txt || true
+
+      # The WebCrypto measurement is a number, not a pass/fail, so it has to
+      # leave the runner or it is not evidence. The test prints one line of
+      # JSON; this lifts it into the run summary where a reader can find it
+      # without downloading an artifact.
+      - name: Report the measured WebCrypto timings
+        if: always()
+        run: |
+          set -euo pipefail
+          measurement=""
+          for source in android-logcat.txt \
+            $(find android/app/build/outputs/androidTest-results -type f 2>/dev/null); do
+            [ -f "$source" ] || continue
+            line="$(grep -o 'ELRS_WEBCRYPTO_MEASUREMENT {.*}' "$source" | head -n 1 || true)"
+            if [ -n "$line" ]; then
+              measurement="${line#ELRS_WEBCRYPTO_MEASUREMENT }"
+              break
+            fi
+          done
+          {
+            echo "### WebCrypto inside the packaged WebView"
+            echo
+            if [ -z "$measurement" ]; then
+              echo "No measurement was recorded."
+            else
+              echo '```json'
+              echo "$measurement"
+              echo '```'
+              echo
+              echo "Measured on this emulator image and this WebView build."
+              echo "It is not a figure for any particular phone: a low-end"
+              echo "device will be slower and a recent one faster, and neither"
+              echo "has been measured."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          # Also in the job log, so the value is readable from the API without
+          # opening the summary page or unpacking an artifact.
+          if [ -z "$measurement" ]; then
+            echo "::warning::the WebCrypto measurement did not reach any log the runner kept"
+          fi
+
+      - name: Preserve the instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-instrumentation-reports-${{ github.run_attempt }}
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            android-logcat.txt
+            emulator.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  update-persistence:
+    name: An update keeps the tester's data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    # Proves the property the `physical-test` channel exists for: that a tester
+    # partway through the physical rows can install the next candidate without
+    # losing their acceptance record, their language, or a recovery checkpoint
+    # from an interrupted write.
+    #
+    # It signs with a keystore generated **in this job**, not with the protected
+    # one. That is deliberate on two counts: the property under test is "the
+    # same key across two builds", which any stable key demonstrates; and this
+    # job runs on pull requests, where a release signing key must never be
+    # readable. The release-candidate workflow exercises the identical Gradle
+    # path with the real key.
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      # The packaged-application suite loads the real bundled index.html, so
+      # these tests exercise the same bytes the APK ships.
+      - name: Build the web application
+        run: pnpm build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
+        with:
+          gradle-version: "8.14.3"
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Driven with the SDK tools directly rather than through a third-party
+      # action. This repository pins every action it uses to a full SHA, and an
+      # unverified pin on the step that runs the security tests would be the
+      # wrong place to make an exception.
+      - name: Create the emulator
+        run: |
+          set -euo pipefail
+          # API 34 with Google APIs: the bridge needs a WebView that supports
+          # WebMessageListener and document-start scripts, and the AOSP images
+          # below API 30 ship one that does not.
+          image="system-images;android-34;google_apis;x86_64"
+
+          # `avdmanager` honours XDG_CONFIG_HOME and writes to
+          # `$HOME/.config/.android/avd`; the `emulator` binary does not, and
+          # looks in `$HOME/.android/avd`. On this runner they disagreed, so a
+          # successfully created AVD was invisible to the emulator, which
+          # exited with "Unknown AVD name [ci]". `ANDROID_AVD_HOME` is first in
+          # the emulator's search order and is honoured by both.
+          #
+          # Set here and exported through GITHUB_ENV rather than in a job-level
+          # `env:` block: that block cannot expand `$HOME`, and it cannot use
+          # the `runner` context either — no runner is assigned when it is
+          # evaluated, so referring to `runner.temp` there fails the whole
+          # workflow's validation and no job runs at all.
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          mkdir -p "$ANDROID_AVD_HOME"
+          # A bounded feed rather than `yes`: `yes` is killed by SIGPIPE as soon
+          # as sdkmanager stops reading, and `pipefail` turns that into a failed
+          # step. setup-android has already accepted the licences, so this only
+          # covers the case where it has not.
+          printf 'y\n%.0s' $(seq 50) | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "$image" "platform-tools" "emulator" > /dev/null
+          # `--device` is a convenience; a runner whose SDK does not know the
+          # profile still gets a working AVD from the image alone.
+          printf 'no\n' | avdmanager create avd --force --name ci \
+            --package "$image" --device "pixel_6" \
+            || printf 'no\n' | avdmanager create avd --force --name ci --package "$image"
+          # The check that would have caught the directory mismatch here
+          # rather than five minutes later: ask the *emulator* what it can see,
+          # not just avdmanager what it wrote.
+          avdmanager list avd
+          echo "emulator sees:"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -qx ci
+
+      - name: Boot the emulator
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/emulator/emulator" -avd ci \
+            -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            -accel on -camera-back none -camera-front none > emulator.log 2>&1 &
+          emulator_pid=$!
+
+          # One loop that watches both the boot property and whether the
+          # emulator is still alive. Waiting on adb alone spent the full
+          # timeout on a process that had already exited, and reported nothing
+          # but exit 124 — the emulator's own error was in a log nobody read.
+          booted=0
+          for _ in $(seq 1 150); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo "::error::the emulator exited before it finished booting"
+              cat emulator.log
+              exit 1
+            fi
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              booted=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$booted" != "1" ]; then
+            echo "::error::the emulator did not report sys.boot_completed within 750s"
+            cat emulator.log
+            exit 1
+          fi
+
+          # Cosmetic, and not worth failing the run over on an image that
+          # refuses one of them.
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+          adb shell input keyevent 82 || true
+          adb devices
+
+      # The persistence stages are excluded here on purpose: they are two
+      # halves of one proof that spans two separately installed APKs, so
+      # running either alone would fail and prove nothing. The
+      # `update-persistence` job below drives them one at a time.
+
+      - name: Generate two throwaway signing identities
+        id: keys
+        run: |
+          set -euo pipefail
+          # Stable for the life of this job, and never leaving it. K1 stands in
+          # for the physical-test key; K2 is a different key, which is the whole
+          # point of the last stage.
+          for name in k1 k2; do
+            keytool -genkeypair -noprompt \
+              -alias "elrs-$name" -keyalg RSA -keysize 2048 -validity 3 \
+              -keystore "$RUNNER_TEMP/$name.jks" -storetype PKCS12 \
+              -storepass "persistence-$name" -keypass "persistence-$name" \
+              -dname "CN=persistence-$name, O=ci, C=SA"
+          done
+          k1_cert="$(
+            keytool -list -v -keystore "$RUNNER_TEMP/k1.jks" -alias elrs-k1 \
+              -storepass persistence-k1 \
+              | sed -n 's/.*SHA256: *//p' | tr -d ':' | tr 'A-F' 'a-f' | head -1
+          )"
+          k2_cert="$(
+            keytool -list -v -keystore "$RUNNER_TEMP/k2.jks" -alias elrs-k2 \
+              -storepass persistence-k2 \
+              | sed -n 's/.*SHA256: *//p' | tr -d ':' | tr 'A-F' 'a-f' | head -1
+          )"
+          test -n "$k1_cert" && test -n "$k2_cert"
+          test "$k1_cert" != "$k2_cert"
+          echo "k1=$k1_cert" >> "$GITHUB_OUTPUT"
+          echo "k2=$k2_cert" >> "$GITHUB_OUTPUT"
+          echo "candidate A and B certificate: $k1_cert" >> "$GITHUB_STEP_SUMMARY"
+          echo "wrong-key certificate:         $k2_cert" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build candidate A, candidate B, and a wrong-key APK
+        working-directory: android
+        env:
+          ELRS_TEST_BUILD_TYPE: physicalTest
+        run: |
+          set -euo pipefail
+          out="app/build/outputs/apk/physicalTest"
+          build() {
+            local keystore="$1" pass="$2" alias="$3" code="$4" name="$5" dest="$6"
+            ELRS_TEST_KEYSTORE_PATH="$RUNNER_TEMP/$keystore" \
+            ELRS_TEST_KEYSTORE_PASSWORD="$pass" \
+            ELRS_TEST_KEY_ALIAS="$alias" \
+            ELRS_TEST_KEY_PASSWORD="$pass" \
+            ELRS_VERSION_CODE="$code" \
+            ELRS_VERSION_NAME="$name" \
+              gradle --no-daemon assemblePhysicalTest assemblePhysicalTestAndroidTest
+            cp "$out/app-physicalTest.apk" "$RUNNER_TEMP/$dest.apk"
+            # The test APK is rebuilt with each app APK because it must carry the
+            # same signature to instrument it.
+            cp app/build/outputs/apk/androidTest/physicalTest/app-physicalTest-androidTest.apk \
+              "$RUNNER_TEMP/$dest-test.apk"
+          }
+          build k1.jks persistence-k1 elrs-k1 1001 "persistence-a" candidate-a
+          build k1.jks persistence-k1 elrs-k1 1002 "persistence-b" candidate-b
+          build k2.jks persistence-k2 elrs-k2 1003 "persistence-wrong-key" wrong-key
+
+          # The version codes are asserted after installation instead, from
+          # `dumpsys`, which is what actually decides whether the update took.
+          ls -l "$RUNNER_TEMP"/candidate-*.apk "$RUNNER_TEMP"/wrong-key.apk
+
+      - name: Install candidate A and seed the tester's state
+        id: seed
+        run: |
+          set -euo pipefail
+          adb install -r "$RUNNER_TEMP/candidate-a.apk"
+          adb install -r "$RUNNER_TEMP/candidate-a-test.apk"
+          # One method at a time: these two stages span two installations, so
+          # the runner selects them by name rather than running a suite.
+          adb shell am instrument -w -r \
+            -e class 'com.fpvarabic.elrs.bridge.UpdatePersistenceInstrumentedTest#seed' \
+            com.fpvarabic.elrs.bridge.test/androidx.test.runner.AndroidJUnitRunner \
+            | tee "$RUNNER_TEMP/seed.txt"
+          grep -q 'OK (1 test)' "$RUNNER_TEMP/seed.txt"
+
+      - name: Install candidate B over the top and prove nothing was lost
+        id: update
+        run: |
+          set -euo pipefail
+          # The update itself. `-r` keeps the data; it only works because both
+          # candidates carry the same signature.
+          adb install -r "$RUNNER_TEMP/candidate-b.apk"
+          adb install -r "$RUNNER_TEMP/candidate-b-test.apk"
+          installed="$(adb shell dumpsys package com.fpvarabic.elrs.bridge \
+            | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -1)"
+          echo "installed versionCode after the update: $installed"
+          [ "$installed" = "1002" ] || {
+            echo "::error::the update did not take: versionCode is $installed, expected 1002"
+            exit 1
+          }
+          adb shell am instrument -w -r \
+            -e class 'com.fpvarabic.elrs.bridge.UpdatePersistenceInstrumentedTest#verifySurvived' \
+            com.fpvarabic.elrs.bridge.test/androidx.test.runner.AndroidJUnitRunner \
+            | tee "$RUNNER_TEMP/verify.txt"
+          grep -q 'OK (1 test)' "$RUNNER_TEMP/verify.txt"
+
+      - name: Prove a wrong-key APK is refused, and refused harmlessly
+        id: wrongkey
+        run: |
+          set -euo pipefail
+          # Expected to fail. `adb install` exits non-zero, so the failure is
+          # captured rather than allowed to fail the step.
+          set +e
+          output="$(adb install -r "$RUNNER_TEMP/wrong-key.apk" 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::an APK signed by a different key was accepted as an update." \
+                 "Android's protection against a third party replacing this application" \
+                 "is not in force."
+            exit 1
+          fi
+          echo "$output" | grep -qi 'INSTALL_FAILED_UPDATE_INCOMPATIBLE\|signatures do not match\|INCONSISTENT_CERTIFICATES' || {
+            echo "::error::the install failed for the wrong reason: $output"
+            exit 1
+          }
+
+          # And the refusal must be inert. The version that was installed is
+          # still installed, and the tester's state is still there — a rejected
+          # install that had already half-replaced the data would be worse than
+          # one that succeeded.
+          installed="$(adb shell dumpsys package com.fpvarabic.elrs.bridge \
+            | sed -n 's/.*versionCode=\([0-9]*\).*/\1/p' | head -1)"
+          [ "$installed" = "1002" ] || {
+            echo "::error::the rejected install changed the installed version to $installed"
+            exit 1
+          }
+          adb shell am instrument -w -r \
+            -e class 'com.fpvarabic.elrs.bridge.UpdatePersistenceInstrumentedTest#verifySurvived' \
+            com.fpvarabic.elrs.bridge.test/androidx.test.runner.AndroidJUnitRunner \
+            | tee "$RUNNER_TEMP/verify-after-rejection.txt"
+          grep -q 'OK (1 test)' "$RUNNER_TEMP/verify-after-rejection.txt"
+
+      # Reports what each step actually did. The first version of this asserted
+      # "refused" for the wrong-key step even when that step had been skipped —
+      # a summary claiming an outcome that never happened is worse than no
+      # summary, and is the exact failure mode this project exists to avoid.
+      - name: Record what was proven
+        if: always()
+        env:
+          SEED: ${{ steps.seed.outcome }}
+          UPDATE: ${{ steps.update.outcome }}
+          WRONGKEY: ${{ steps.wrongkey.outcome }}
+        run: |
+          {
+            echo "### Update without data loss"
+            echo ""
+            echo "| Step | Outcome |"
+            echo "| --- | --- |"
+            echo "| Candidate A installed (1001), tester state seeded | ${SEED:-not reached} |"
+            echo "| Candidate B installed over it (1002), state verified | ${UPDATE:-not reached} |"
+            echo "| Wrong-certificate APK refused, and refused harmlessly | ${WRONGKEY:-not reached} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture the device log
+        if: always()
+        run: timeout 120 adb logcat -d > android-logcat.txt || true
+
+      - name: Preserve the persistence evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-update-persistence-${{ github.run_attempt }}
+          path: |
+            android-logcat.txt
+            emulator.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Destroy the throwaway keystores
+        if: always()
+        run: |
+          for name in k1 k2; do
+            shred -u "$RUNNER_TEMP/$name.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/$name.jks"
+          done

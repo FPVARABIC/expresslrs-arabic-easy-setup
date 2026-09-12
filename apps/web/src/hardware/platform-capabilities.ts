@@ -7,6 +7,11 @@
  * object exists, which is the only thing that determines whether a port can be
  * opened.
  */
+import {
+  readNativeHostIdentity,
+  type NativeHostIdentity,
+} from "./native-bridge";
+
 export interface PlatformCapabilities {
   /** Web Serial: the CRSF path and the ESP/XMODEM flashing path. */
   readonly webSerial: boolean;
@@ -16,6 +21,11 @@ export interface PlatformCapabilities {
   readonly secureContext: boolean;
   /** A native host has injected a bridge implementing the device contract. */
   readonly nativeBridge: boolean;
+  /**
+   * What that host was built from, when it reports it. Null in a browser, and
+   * null for a host that reports nothing usable.
+   */
+  readonly nativeHost: NativeHostIdentity | null;
   /** Reported by the platform, used only to word the explanation. */
   readonly platformHint: string;
   /** Running as an installed app rather than a browser tab. */
@@ -142,6 +152,7 @@ export function readPlatformCapabilities(
     webUsb: navigatorObject?.usb !== undefined,
     secureContext: global.isSecureContext === true,
     nativeBridge: global.elrsNativeBridge !== undefined,
+    nativeHost: readNativeHostIdentity(scope),
     platformHint: typeof platform === "string" ? platform : "unknown",
     standalone,
     android:

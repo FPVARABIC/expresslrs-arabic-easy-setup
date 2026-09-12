@@ -24,15 +24,20 @@ function espImage(chipId = 0): Uint8Array {
   return bytes;
 }
 
-function esp8285Image(): Uint8Array {
-  const bytes = new Uint8Array(0x1020);
+function esp8285Image(
+  options: { readonly segmentBytes?: number } = {},
+): Uint8Array {
+  // The image end is read from the ESP header's segment table, not from the
+  // array length, so a large image means a large declared segment.
+  const segmentBytes = options.segmentBytes ?? 4;
+  const bytes = new Uint8Array(0x1010 + segmentBytes + 0xc);
   bytes[0x1000] = 0xe9;
   bytes[0x1001] = 1;
   const view = new DataView(bytes.buffer);
   view.setUint32(0x1008, 0x4020_1010, true);
-  view.setUint32(0x100c, 4, true);
+  view.setUint32(0x100c, segmentBytes, true);
   bytes.set([1, 2, 3, 4], 0x1010);
-  bytes[0x1014] = 0xef;
+  bytes[0x1010 + segmentBytes] = 0xef;
   return bytes;
 }
 
@@ -106,7 +111,7 @@ const target: OfficialTarget = {
     platform: "esp32",
     firmware: "EXAMPLE_TX_2400",
     luaName: "example.lua",
-    layoutFile: "example.json",
+    layoutFile: "BETAFPV 2400 Micro 1W.json",
     logoFile: null,
     uploadMethods: ["uart", "edgetx", "wifi", "download"],
     minVersion: "3.0.0",
@@ -152,7 +157,8 @@ const options: ExpressLrsFirmwareOptions = {
   receiverInvertTx: false,
   lockOnFirstConnection: true,
   r9mmMiniSbus: false,
-  receiverAsTransmitter: false,
+  rxAsTxMode: "off",
+  airportEnabled: false,
 };
 
 const stm32Options: ExpressLrsFirmwareOptions = {
@@ -228,25 +234,35 @@ describe("official firmware package preparation", () => {
       48 + 128 + 16 + 512,
       2_048,
     );
-    expect(configuredLayout).toEqual({
-      serial_rx: 1,
+    // The appended layout is the pack's real bytes for this Target, with the
+    // catalog overlay applied on top — not something this test invented.
+    expect(configuredLayout).toMatchObject({
+      // From the frozen pack.
+      serial_rx: 13,
+      serial_tx: 13,
+      // From the catalog entry's overlay.
       fan_en: true,
       pins: { led: 9 },
     });
     expect(prepared.primaryFileName).toBe("example-4.1.0.bin");
     expect(prepared.primaryMimeType).toBe("application/octet-stream");
     expect(prepared.primaryDownload).toEqual(application);
-    expect(fetchImplementation).toHaveBeenCalledTimes(5);
+    // Four: firmware, bootloader, partitions, boot_app0. The hardware layout
+    // is not fetched — it is frozen in the validated pack.
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(
+      (
+        fetchImplementation as unknown as { mock: { calls: unknown[][] } }
+      ).mock.calls
+        .map((call) => String(call[0]))
+        .some((url) => url.includes("/hardware/")),
+    ).toBe(false);
     expect(fetchImplementation).toHaveBeenCalledWith(
       `${assetBase}/release410/FCC/EXAMPLE_TX_2400/firmware.bin`,
       expect.objectContaining({
         credentials: "omit",
         redirect: "follow",
       }),
-    );
-    expect(fetchImplementation).toHaveBeenCalledWith(
-      `${assetBase}/hardware/TX/example.json`,
-      expect.any(Object),
     );
     expect(new Set(progressStages)).toEqual(
       new Set([
@@ -266,6 +282,210 @@ describe("official firmware package preparation", () => {
     expect(manifest.target.id).toBe(target.id);
     expect(manifest.segments).toHaveLength(4);
     expect(recovery["segments/firmware.bin"]).toEqual(application);
+  });
+
+  // `--rx-as-tx` is a ROLE CHANGE: upstream selects the transmitter build
+  // (`binary_configurator.py:239`, `file.replace('_RX','_TX')`) and rewrites the
+  // receiver's hardware layout. Patching the receiver artifact with
+  // `is-airport` is a different feature entirely, and these tests are written
+  // so that doing so cannot make them pass.
+  const rxTargetOn = (platform: string): OfficialTarget => ({
+    ...target,
+    id: "vendor/rx_2400/example-rx",
+    role: "rx",
+    radioKey: "rx_2400",
+    targetKey: "example-rx",
+    config: {
+      ...target.config,
+      productName: "Example RX",
+      platform,
+      firmware: "EXAMPLE_RX_2400",
+      layoutFile: null,
+      customLayout: { serial_rx: 3, serial_tx: 1, led: 16 },
+    },
+  });
+
+  const readOptionsBlock = (bytes: Uint8Array): Record<string, unknown> => {
+    const text = strFromU8(bytes);
+    const start = text.indexOf('{"');
+    const end = text.indexOf("}", start);
+    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  };
+
+  it("fetches the transmitter artifact, not the receiver one, under rx-as-tx", async () => {
+    const txUrl = `${assetBase}/release410/FCC/EXAMPLE_TX_2400/firmware.bin`;
+    const rxUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
+    const fetchImplementation = assetFetcher(
+      new Map([
+        [txUrl, esp8285Image()],
+        [rxUrl, esp8285Image()],
+      ]),
+    ) as unknown as typeof fetch;
+
+    await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTargetOn("esp8285"),
+      options: { ...options, rxAsTxMode: "internal" },
+      fetchImplementation,
+    });
+
+    const requested = (
+      fetchImplementation as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.map((call) => String(call[0]));
+    expect(requested).toContain(txUrl);
+    expect(requested).not.toContain(rxUrl);
+  });
+
+  it("leaves the artifact alone when rx-as-tx is off", async () => {
+    const rxUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
+    const fetchImplementation = assetFetcher(
+      new Map([[rxUrl, esp8285Image()]]),
+    ) as unknown as typeof fetch;
+
+    await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTargetOn("esp8285"),
+      options: { ...options, rxAsTxMode: "off" },
+      fetchImplementation,
+    });
+
+    const requested = (
+      fetchImplementation as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.map((call) => String(call[0]));
+    expect(requested).toContain(rxUrl);
+  });
+
+  it("never sets is-airport from rx-as-tx", async () => {
+    const fetchImplementation = assetFetcher(
+      new Map([
+        [
+          `${assetBase}/release410/FCC/EXAMPLE_TX_2400/firmware.bin`,
+          esp8285Image(),
+        ],
+      ]),
+    ) as unknown as typeof fetch;
+
+    const prepared = await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTargetOn("esp8285"),
+      options: { ...options, rxAsTxMode: "internal", airportEnabled: false },
+      fetchImplementation,
+    });
+
+    const block = readOptionsBlock(
+      prepared.segments[0]?.bytes ?? new Uint8Array(),
+    );
+    expect(block["is-airport"]).toBeUndefined();
+  });
+
+  it("sets is-airport from AirPort alone, without changing the artifact", async () => {
+    const rxUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
+    const fetchImplementation = assetFetcher(
+      new Map([[rxUrl, esp8285Image()]]),
+    ) as unknown as typeof fetch;
+
+    const prepared = await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTargetOn("esp8285"),
+      options: { ...options, rxAsTxMode: "off", airportEnabled: true },
+      fetchImplementation,
+    });
+
+    const requested = (
+      fetchImplementation as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.map((call) => String(call[0]));
+    expect(requested).toContain(rxUrl);
+    const block = readOptionsBlock(
+      prepared.segments[0]?.bytes ?? new Uint8Array(),
+    );
+    expect(block["is-airport"]).toBe(true);
+  });
+
+  it("writes the receiver's layout, mutated per mode, alongside the TX build", async () => {
+    const fetchImplementation = assetFetcher(
+      new Map([
+        [
+          `${assetBase}/release410/FCC/EXAMPLE_TX_2400/firmware.bin`,
+          esp8285Image(),
+        ],
+      ]),
+    ) as unknown as typeof fetch;
+
+    // Brace-matched so a nested object or a `uid` array cannot truncate the
+    // block being read.
+    const jsonObjectsIn = (
+      bytes: Uint8Array,
+    ): readonly Record<string, unknown>[] => {
+      const text = strFromU8(bytes);
+      const found: Record<string, unknown>[] = [];
+      for (let index = 0; index < text.length; index += 1) {
+        if (text[index] !== "{") continue;
+        let depth = 0;
+        for (let end = index; end < text.length; end += 1) {
+          if (text[end] === "{") depth += 1;
+          else if (text[end] === "}") depth -= 1;
+          if (depth !== 0) continue;
+          try {
+            found.push(
+              JSON.parse(text.slice(index, end + 1)) as Record<string, unknown>,
+            );
+          } catch {
+            /* not a complete JSON block; keep scanning */
+          }
+          index = end;
+          break;
+        }
+      }
+      return found;
+    };
+    const layoutOf = (bytes: Uint8Array): Record<string, unknown> => {
+      const layout = jsonObjectsIn(bytes).find(
+        (block) => "serial_tx" in block || "serial_rx" in block,
+      );
+      if (layout === undefined) throw new Error("no hardware layout block");
+      return layout;
+    };
+
+    const internal = await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTargetOn("esp8285"),
+      options: { ...options, rxAsTxMode: "internal" },
+      fetchImplementation,
+    });
+    const internalLayout = layoutOf(
+      internal.segments[0]?.bytes ?? new Uint8Array(),
+    );
+    expect(internalLayout["serial_rx"]).toBe(3);
+    expect(internalLayout["serial_tx"]).toBe(1);
+    expect(internalLayout["led_red"]).toBe(16);
+  });
+
+  it("keeps the original receiver artifact in the recovery archive", async () => {
+    const receiverImage = esp8285Image();
+    const fetchImplementation = assetFetcher(
+      new Map([
+        [
+          `${assetBase}/release410/FCC/EXAMPLE_TX_2400/firmware.bin`,
+          receiverImage,
+        ],
+      ]),
+    ) as unknown as typeof fetch;
+
+    const prepared = await prepareOfficialFirmwarePackage({
+      release,
+      target: rxTargetOn("esp8285"),
+      options: { ...options, rxAsTxMode: "internal" },
+      fetchImplementation,
+    });
+
+    const recovery = unzipSync(prepared.recoveryArchive);
+    const manifest = JSON.parse(
+      strFromU8(recovery["manifest.json"] ?? new Uint8Array()),
+    ) as { target: { id: string; firmware: string; role: string } };
+    // The recovery manifest must describe the RECEIVER the operator started
+    // from, so restoring puts the original role back.
+    expect(manifest.target.role).toBe("rx");
+    expect(manifest.target.firmware).toBe("EXAMPLE_RX_2400");
   });
 
   it("creates a gzip Wi-Fi image for ESP8285 without changing the serial segment bytes", async () => {
@@ -402,7 +622,6 @@ describe("official firmware package preparation", () => {
 
   it("rejects an ESP8285 image that exceeds its flash boundary after configuration", async () => {
     const firmwareUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
-    const logoUrl = `${assetBase}/release410/hardware/logo/oversized.bin`;
     const rxTarget: OfficialTarget = {
       ...target,
       id: "vendor/rx_2400/example-rx",
@@ -415,7 +634,9 @@ describe("official firmware package preparation", () => {
         platform: "esp8285",
         firmware: "EXAMPLE_RX_2400",
         layoutFile: null,
-        logoFile: "oversized.bin",
+        // A real pack logo: 16 KiB appended to an ESP8285 image that is
+        // already near its flash boundary.
+        logoFile: "axis_tft.bin",
         customLayout: {},
       },
     };
@@ -427,8 +648,11 @@ describe("official firmware package preparation", () => {
         options,
         fetchImplementation: assetFetcher(
           new Map([
-            [firmwareUrl, esp8285Image()],
-            [logoUrl, new Uint8Array(1024 * 1024)],
+            [
+              firmwareUrl, // Just under 1 MiB, so the configuration blocks and a real 16 KiB
+              // pack logo carry it over the ESP8285 flash boundary.
+              esp8285Image({ segmentBytes: 0xf_e000 }),
+            ],
           ]),
         ) as unknown as typeof fetch,
       }),
@@ -706,18 +930,12 @@ describe("official firmware package preparation", () => {
     ).rejects.toMatchObject({ code: "REGION_NOT_FOUND" });
   });
 
-  it("uses the version-specific logo with a global fallback only after a 404", async () => {
+  it("takes the logo from the frozen pack and fetches nothing for it", async () => {
     const firmwareUrl = `${assetBase}/release410/FCC/EXAMPLE_RX_2400/firmware.bin`;
-    const versionedLogoUrl = `${assetBase}/release410/hardware/logo/example-logo.bin`;
-    const globalLogoUrl = `${assetBase}/hardware/logo/example-logo.bin`;
-    const logo = new Uint8Array([0xaa, 0xbb, 0xcc]);
     const fetchImplementation = assetFetcher(
-      new Map([
-        [firmwareUrl, esp8285Image()],
-        [globalLogoUrl, logo],
-      ]),
+      new Map([[firmwareUrl, esp8285Image()]]),
     ) as unknown as typeof fetch;
-    const logoTarget: OfficialTarget = {
+    const rxTarget: OfficialTarget = {
       ...target,
       id: "vendor/rx_2400/example-rx",
       role: "rx",
@@ -729,30 +947,26 @@ describe("official firmware package preparation", () => {
         platform: "esp8285",
         firmware: "EXAMPLE_RX_2400",
         layoutFile: null,
-        logoFile: "example-logo.bin",
+        logoFile: "betafpv.bin",
         customLayout: {},
       },
     };
 
     const prepared = await prepareOfficialFirmwarePackage({
       release,
-      target: logoTarget,
+      target: rxTarget,
       options,
       fetchImplementation,
     });
 
-    expect(fetchImplementation).toHaveBeenCalledTimes(3);
-    expect(fetchImplementation).toHaveBeenNthCalledWith(
-      2,
-      versionedLogoUrl,
-      expect.any(Object),
-    );
-    expect(fetchImplementation).toHaveBeenNthCalledWith(
-      3,
-      globalLogoUrl,
-      expect.any(Object),
-    );
-    expect(prepared.segments[0]?.bytes.slice(-logo.byteLength)).toEqual(logo);
+    // Only the firmware image is fetched. The logo, like the layout, is frozen
+    // in the pack, so no hardware asset is requested on the write path at all.
+    const requested = (
+      fetchImplementation as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.map((call) => String(call[0]));
+    expect(requested).toEqual([firmwareUrl]);
+    expect(requested.some((url) => url.includes("/hardware/"))).toBe(false);
+    expect(prepared.segments.length).toBeGreaterThan(0);
   });
 
   it("rejects a firmware response whose final URL changes the trusted path", async () => {

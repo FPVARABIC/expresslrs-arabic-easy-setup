@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installDurableStorageStub } from "../test/durable-storage";
+import { recoveryArchiveFor } from "../test/recovery-fixtures";
+import type { OfficialTarget } from "../hardware/parity-types";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const firmwareMocks = vi.hoisted(() => ({
@@ -239,11 +242,23 @@ const easyPackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: new Uint8Array([4, 5, 6]),
+  recoveryArchive: await recoveryArchiveFor(
+    (easyCatalog as unknown as { targets: OfficialTarget[] }).targets[0]!,
+  ),
   createdAt: "2026-09-04T00:00:00.000Z",
 };
 
 describe("public product shell", () => {
+  let durableStorage: ReturnType<typeof installDurableStorageStub>;
+
+  beforeEach(() => {
+    durableStorage = installDurableStorageStub();
+  });
+
+  afterEach(() => {
+    durableStorage.restore();
+  });
+
   it("opens in Arabic Easy Mode, not the technical workbench", () => {
     render(<ProductShell />);
 
@@ -521,12 +536,20 @@ describe("public product shell", () => {
     // has been confirmed.
     expect(write).toBeDisabled();
 
+    // The write is gated on a copy that was written outside the app, reopened
+    // and hashed. A started download and a ticked box are no longer accepted.
+    // The passphrase is collected on this screen, so it is supplied the way
+    // an operator supplies it. The button is never disabled for want of it.
+    fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("أعد كتابة عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     await user.click(
-      screen.getByRole("button", { name: "نزّل حزمة الاستعادة" }),
+      screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان يبقى" }),
     );
-    await user.click(
-      screen.getByRole("checkbox", { name: /حفظ حزمة الاستعادة/u }),
-    );
+    await screen.findByText(/محفوظة ومتحقَّق منها/u);
     await user.click(screen.getByRole("checkbox", { name: /الطاقة ثابتة/u }));
     await user.click(screen.getByRole("checkbox", { name: /هوائي جهاز/u }));
 
@@ -667,12 +690,20 @@ describe("public product shell", () => {
     await user.click(
       screen.getByRole("button", { name: "جهّز الحزمة الرسمية وتحقق منها" }),
     );
+    // The write is gated on a copy that was written outside the app, reopened
+    // and hashed. A started download and a ticked box are no longer accepted.
+    // The passphrase is collected on this screen, so it is supplied the way
+    // an operator supplies it. The button is never disabled for want of it.
+    fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("أعد كتابة عبارة مرور الاستعادة"), {
+      target: { value: "bench-recovery-passphrase" },
+    });
     await user.click(
-      screen.getByRole("button", { name: "نزّل حزمة الاستعادة" }),
+      screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان يبقى" }),
     );
-    await user.click(
-      screen.getByRole("checkbox", { name: /حفظ حزمة الاستعادة/u }),
-    );
+    await screen.findByText(/محفوظة ومتحقَّق منها/u);
     await user.click(screen.getByRole("checkbox", { name: /الطاقة ثابتة/u }));
     await user.click(screen.getByRole("checkbox", { name: /هوائي جهاز/u }));
     await user.click(

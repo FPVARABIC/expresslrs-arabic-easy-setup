@@ -1,0 +1,300 @@
+{
+  "schemaVersion": 1,
+  "entryPoint": "apps/web/src/main.tsx → components/ProductShell",
+  "rows": [
+    {
+      "operation": "airport",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "AirPort transparent serial (checkbox)",
+      "readinessInputs": [
+        "a Target chosen"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.updateOption('airportEnabled')",
+      "driver": "firmware-package: writes the is-airport option key, which no rx-as-tx value ever sets",
+      "writeAuthority": "inherited from firmwareWrite; this only shapes the package",
+      "recoveryCheckpoint": "as for any firmware write",
+      "verification": "the package's option block is asserted, not the device role",
+      "onFailure": "as for any firmware write"
+    },
+    {
+      "operation": "binding",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Run the real binding",
+      "readinessInputs": [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "the operator's binding acknowledgement"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.runBinding",
+      "driver": "session.startBinding → CRSF command 0x32 to the Bind parameter",
+      "writeAuthority": "single-use capability for BINDING",
+      "recoveryCheckpoint": "none taken; binding changes no stored image, so there is nothing to restore",
+      "verification": "TX_BIND_COMMAND_ACKNOWLEDGED from the device; a matching UID is proven by a live link, not by this write",
+      "onFailure": "the acknowledgement is cleared and the reason is named"
+    },
+    {
+      "operation": "bindingPrerequisites",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "The other end is ready to bind… (checkbox)",
+      "readinessInputs": [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.setBindingAcknowledged",
+      "driver": "none; this is the operator's own confirmation",
+      "writeAuthority": "none; it exists so binding can be gated on a confirmation without being gated on itself",
+      "recoveryCheckpoint": "not applicable",
+      "verification": "not applicable",
+      "onFailure": "not applicable"
+    },
+    {
+      "operation": "connect",
+      "surface": "advanced",
+      "transport": "android",
+      "control": "Identify the device over CRSF",
+      "readinessInputs": [
+        "not busy",
+        "previous port confirmed closed",
+        "a native bridge injected by the packaged host"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "the same useDeviceController.connectHardware",
+      "driver": "nativeBridgeNavigator(bridge) is handed to the same session layer, so CRSF, flashing and recovery are the browser's code paths",
+      "writeAuthority": "the same capability model, plus the host's own session ownership",
+      "recoveryCheckpoint": "the same checkpoint",
+      "verification": "the same CRSF Device Info verification",
+      "onFailure": "a host that could not install its bridge reports the exact reason rather than an empty device list"
+    },
+    {
+      "operation": "connect",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Identify the device over CRSF",
+      "readinessInputs": [
+        "not busy",
+        "previous port confirmed closed"
+      ],
+      "disabledBefore": false,
+      "enabledAfter": true,
+      "handler": "useDeviceController.connectHardware",
+      "driver": "userSession.connectHardwareDriver → navigator.serial @ 420000",
+      "writeAuthority": "not required; reading identity is not a device change",
+      "recoveryCheckpoint": "read on mount; a pending one blocks writes, not this",
+      "verification": "CRSF Device Info 0x29; role from the origin address",
+      "onFailure": "named transport reason; the control returns to enabled"
+    },
+    {
+      "operation": "diagnostics",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Show the report",
+      "readinessInputs": [
+        "none — it has no prerequisites by design"
+      ],
+      "disabledBefore": false,
+      "enabledAfter": true,
+      "handler": "DiagnosticsPanel.show → useDeviceController.captureDiagnostics",
+      "driver": "reads the live session and the browser's own capability answers",
+      "writeAuthority": "none; it writes nothing to a device",
+      "recoveryCheckpoint": "reported, not changed",
+      "verification": "not applicable; it reports observations, it does not act",
+      "onFailure": "a browser that refuses to answer yields null rather than a failed export"
+    },
+    {
+      "operation": "firmwareWrite",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Start the real flash",
+      "readinessInputs": [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "a prepared package",
+        "the recovery archive downloaded",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the manual Target confirmation, where the Target was not auto-matched",
+        "a confirmed CRSF identity, for the UART method"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.flashPreparedFirmware",
+      "driver": "esp-flasher.flashEspFirmware (esptool-js) / xmodem / stm32-dfu, chosen by the Target's platform and the upload method",
+      "writeAuthority": "single-use capability for FIRMWARE_WRITE, TTL 180s",
+      "recoveryCheckpoint": "written before the first byte; kept until the device is verified back",
+      "verification": "segment read-back and reconnect; success requires the expected role, so an rx-as-tx write that comes back a receiver fails",
+      "onFailure": "the checkpoint stands, recovery becomes available, and the state is WRITE_COMPLETED_RECONNECT_UNVERIFIED rather than SUCCESS"
+    },
+    {
+      "operation": "firmwareWrite",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Start the real flash, with a deliberately weak binding phrase",
+      "readinessInputs": [
+        "exactly the inputs firmwareWrite always requires",
+        "binding-phrase strength is not among them, by design"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.flashPreparedFirmware",
+      "driver": "as firmwareWrite: the phrase shapes the package, never the gate",
+      "writeAuthority": "single-use capability for FIRMWARE_WRITE, TTL 180s",
+      "recoveryCheckpoint": "as firmwareWrite",
+      "verification": "as firmwareWrite",
+      "onFailure": "as firmwareWrite"
+    },
+    {
+      "operation": "firmwareWrite",
+      "surface": "easy",
+      "transport": "browser",
+      "control": "Write the firmware to the device",
+      "readinessInputs": [
+        "not busy",
+        "a confirmed CRSF identity",
+        "a Target and a regulatory region chosen",
+        "a prepared, verified package",
+        "the recovery archive downloaded",
+        "the operator's confirmation that the recovery file is kept",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "EasySetup → useDeviceController.flashPreparedFirmware",
+      "driver": "the same esp-flasher / xmodem / stm32-dfu path the Advanced view uses; Easy Mode is a view, not a second implementation",
+      "writeAuthority": "single-use capability for FIRMWARE_WRITE, as in Advanced",
+      "recoveryCheckpoint": "the same checkpoint, written by the same controller",
+      "verification": "the same read-back and reconnect verification",
+      "onFailure": "the same recovery path, surfaced in the operator's language"
+    },
+    {
+      "operation": "recovery",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Choose the recovery package (file input)",
+      "readinessInputs": [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "a pending checkpoint or a downloaded recovery archive",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the Target typed back, because a checkpoint names a device this session may not have identified"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.recoverFromFile",
+      "driver": "validateRecoveryPackage, then the same flashing driver the original write used",
+      "writeAuthority": "its own single-use capability for RECOVERY",
+      "recoveryCheckpoint": "the checkpoint is what makes this available, and it is cleared only once the device is verified back",
+      "verification": "the restored image is read back and the device must reconnect as the identity the checkpoint recorded",
+      "onFailure": "the checkpoint stands so recovery can be retried; it is never cleared by a failed attempt"
+    },
+    {
+      "operation": "recoveryImport",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Restore the device from the imported package",
+      "readinessInputs": [
+        "not busy",
+        "a Target chosen",
+        "previous port confirmed closed",
+        "a recovery file picked from storage the operator owns",
+        "the file authenticated with the operator's passphrase",
+        "the recovered device identity confirmed by the operator",
+        "the power acknowledgement",
+        "the antenna acknowledgement (transmitters)",
+        "the Target typed back"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.recoverFromImportedPackage",
+      "driver": "the same flashing driver a picked-file recovery uses; the source of the bytes differs and nothing else does",
+      "writeAuthority": "its own single-use capability for RECOVERY",
+      "recoveryCheckpoint": "reconstituted from the imported package's own digest, because an uninstall erased the journal — which is the case this path exists for",
+      "verification": "the same read-back and post-write identity verification as any recovery",
+      "onFailure": "the imported package is kept in state, so the restore can be retried without picking the file again"
+    },
+    {
+      "operation": "rxAsTx",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Flash this receiver with transmitter firmware (select)",
+      "readinessInputs": [
+        "a Target chosen",
+        "the Target's platform supports the mode, read from the pinned upstream rules"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.updateOption('rxAsTxMode')",
+      "driver": "firmware-package: the _TX artifact is selected and the receiver's layout rewritten per mode",
+      "writeAuthority": "inherited from firmwareWrite; this only shapes the package",
+      "recoveryCheckpoint": "the checkpoint records the receiver the operator started from, so restoring puts the receiver role back",
+      "verification": "the device must come back reporting the transmitter address; otherwise RX_AS_TX_ROLE_NOT_APPLIED",
+      "onFailure": "the checkpoint is kept and the original receiver image stays recoverable"
+    },
+    {
+      "operation": "settingsRestore",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Restore the snapshot",
+      "readinessInputs": [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "a settings snapshot — taken on connect, before anything is written"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.restoreSettingsBackup",
+      "driver": "session.writeParameter, replaying the snapshot's values",
+      "writeAuthority": "its own single-use capability for SETTINGS_RESTORE; a capability granted for the write cannot be reused here",
+      "recoveryCheckpoint": "the snapshot itself is the checkpoint for settings; it is not cleared by a failed restore",
+      "verification": "each replayed parameter is read back and compared",
+      "onFailure": "the snapshot is kept and the restore can be retried"
+    },
+    {
+      "operation": "settingsWrite",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Save, with read-back",
+      "readinessInputs": [
+        "not busy",
+        "confirmed CRSF identity",
+        "previous port confirmed closed",
+        "recovery journal read",
+        "no pending checkpoint",
+        "a writable setting selected"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.writeSelectedSetting",
+      "driver": "session.writeParameter → CRSF parameter write, then read-back",
+      "writeAuthority": "single-use capability for SETTINGS_WRITE, bound to session, device fingerprint and operation",
+      "recoveryCheckpoint": "a settings snapshot is taken before the write; Restore returns to it",
+      "verification": "the parameter is read back and compared; VERIFIED or not",
+      "onFailure": "the snapshot stands and Restore the snapshot stays available"
+    }
+  ]
+}

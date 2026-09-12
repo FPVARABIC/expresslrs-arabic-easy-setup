@@ -6,7 +6,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { installDurableStorageStub } from "../test/durable-storage";
+import { recoveryArchiveFor } from "../test/recovery-fixtures";
 
 import { CrsfAddress, type CrsfParameter } from "../hardware/crsf";
 import type {
@@ -120,6 +123,33 @@ const catalog: OfficialCatalog = {
   ],
 };
 
+/**
+ * An ESP32 receiver, which upstream *does* build transmitter firmware for. The
+ * catalog's other receiver is STM32, which is legitimately refused, so a
+ * positive rx-as-tx path needs this one.
+ */
+const espReceiver = {
+  id: "vendor/rx_2400/esp-receiver",
+  role: "rx" as const,
+  vendorKey: "vendor",
+  vendorName: "Vendor",
+  radioKey: "rx_2400",
+  targetKey: "esp-receiver",
+  config: {
+    productName: "Vendor ESP RX",
+    platform: "esp32",
+    firmware: "VENDOR_ESP_RX",
+    luaName: null,
+    layoutFile: null,
+    logoFile: null,
+    uploadMethods: ["uart", "betaflight", "download"] as const,
+    minVersion: null,
+    customLayout: {},
+    overlay: null,
+    raw: {},
+  },
+};
+
 const transportCatalog: OfficialCatalog = {
   ...catalog,
   targets: [
@@ -139,8 +169,17 @@ const transportCatalog: OfficialCatalog = {
       },
     },
     catalog.targets[1]!,
+    espReceiver,
   ],
 };
+
+const actualRecoveryPackage = await vi.importActual<
+  typeof import("../hardware/recovery-package")
+>("../hardware/recovery-package");
+
+const realRecoveryArchive = await recoveryArchiveFor(
+  transportCatalog.targets[0]!,
+);
 
 const preparedPackage: PreparedFirmwarePackage = {
   schemaVersion: 1,
@@ -151,6 +190,8 @@ const preparedPackage: PreparedFirmwarePackage = {
     domain: 0,
     bindingConfigured: false,
     wifiConfigured: false,
+    rxAsTxMode: "off" as const,
+    airportEnabled: false,
   },
   segments: [
     {
@@ -164,7 +205,7 @@ const preparedPackage: PreparedFirmwarePackage = {
   primaryDownload: new Uint8Array([1, 2, 3]),
   primaryMimeType: "application/octet-stream",
   recoveryFileName: "module-4.1.0-recovery.zip",
-  recoveryArchive: new Uint8Array([4, 5, 6]),
+  recoveryArchive: realRecoveryArchive,
   createdAt: "2026-09-04T00:00:00.000Z",
 };
 
@@ -235,6 +276,8 @@ function deferred<T>(): Readonly<{
 function connectedHardware(
   input: {
     readonly productName?: string;
+    /** The role the emulated device reports, from its CRSF origin address. */
+    readonly role?: "tx" | "rx";
     readonly verifiedProductName?: string;
     readonly reportedParameterCount?: number;
     readonly closeResult?: boolean;
@@ -263,10 +306,12 @@ function connectedHardware(
   if (input.includeBootloaderCommand === true) {
     parameters.push(command(4, "Serial Update"));
   }
+  const deviceRole = input.role ?? "tx";
   const identity: ExpressLrsIdentity = {
     validation: "CRSF_DEVICE_INFO",
-    role: "tx",
-    address: CrsfAddress.transmitter,
+    role: deviceRole,
+    address:
+      deviceRole === "tx" ? CrsfAddress.transmitter : CrsfAddress.receiver,
     requestOrigin: CrsfAddress.usb,
     productName: input.productName ?? "Bench TX 2.4GHz",
     firmwareVersion: "4.1.0",
@@ -360,16 +405,49 @@ function connectedHardware(
   };
 }
 
-function acknowledgeSavedRecoveryPackage(): void {
+/**
+ * Satisfies the recovery prerequisite the way the product now requires: by
+ * actually writing the package to durable storage and letting it be reopened
+ * and hashed. Ticking a box no longer does it, because a tick was never
+ * evidence that a file exists.
+ */
+async function saveRecoveryPackageDurably(): Promise<void> {
+  // The passphrase is a real prerequisite and it is collected on this screen,
+  // so the test supplies it the way an operator does. The export button is
+  // never disabled for want of it; pressing it empty names the reason.
+  fireEvent.change(screen.getByLabelText("عبارة مرور الاستعادة"), {
+    target: { value: "bench-recovery-passphrase" },
+  });
+  // Typed twice, because a passphrase that only exists in one field is one
+  // typo away from a file nobody can open.
+  fireEvent.change(screen.getByLabelText("أعد كتابة عبارة مرور الاستعادة"), {
+    target: { value: "bench-recovery-passphrase" },
+  });
   fireEvent.click(
-    screen.getByRole("checkbox", {
-      name: /أؤكد أن ملف حزمة الاستعادة حُفظ/u,
-    }),
+    screen.getByRole("button", { name: "احفظ حزمة الاستعادة في مكان دائم" }),
   );
+  // The export is a chain of real promises: picker, write, reopen, SHA-256.
+  // Two things make the usual `findByText` unusable here. Some of these tests
+  // run on fake timers, where the DOM-polling helpers never settle at all; and
+  // Web Crypto resolves off the event loop rather than on the microtask queue,
+  // so draining microtasks is not enough either. Both are driven explicitly.
+  await act(async () => {
+    for (let turn = 0; turn < 60; turn += 1) {
+      if (screen.queryByText(/النسخة المتحقَّقة/u) !== null) return;
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1);
+      else await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  });
+  // Asserted rather than awaited, so a failed export names itself here instead
+  // of surfacing as a timeout in whatever step comes next.
+  expect(screen.getByText(/النسخة المتحقَّقة/u)).toBeInTheDocument();
 }
 
 describe("rebuilt ExpressLRS hardware journey", () => {
+  let durableStorage: ReturnType<typeof installDurableStorageStub>;
+
   beforeEach(() => {
+    durableStorage = installDurableStorageStub();
     mocks.downloadPreparedBytes.mockReset();
     mocks.flashEspFirmware.mockReset().mockResolvedValue({
       chipName: "ESP32",
@@ -387,9 +465,19 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       close: vi.fn().mockResolvedValue(undefined),
       ondisconnect: null,
     });
+    // The real implementation, wrapped in a spy rather than replaced by one.
+    // Two paths reach it now and they want opposite things: the import tests
+    // feed deliberate rubbish and are meant to stop here, while the durable
+    // export validates the package it just wrote and has to get a real answer.
+    // A blanket rejection would make the export fail for a reason that has
+    // nothing to do with what those tests are checking.
     mocks.validateRecoveryPackage
       .mockReset()
-      .mockRejectedValue(new Error("stop after confirmation gate"));
+      .mockImplementation(actualRecoveryPackage.validateRecoveryPackage);
+  });
+
+  afterEach(() => {
+    durableStorage.restore();
   });
 
   it("starts with real operations locked and no mock-success surface", () => {
@@ -831,7 +919,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       fireEvent.click(
         screen.getByRole("button", { name: "تنزيل حزمة الاستعادة" }),
       );
-      acknowledgeSavedRecoveryPackage();
+      await saveRecoveryPackageDurably();
       fireEvent.click(
         screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
       );
@@ -1004,7 +1092,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     expect(
       screen.getByText(/التطبيق لا يستطيع إثبات حفظها/u),
     ).toBeInTheDocument();
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1081,7 +1169,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1129,7 +1217,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1193,7 +1281,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       await user.click(
         await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
       );
-      acknowledgeSavedRecoveryPackage();
+      await saveRecoveryPackageDurably();
       await user.click(
         screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
       );
@@ -1254,7 +1342,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.type(screen.getByLabelText(/تأكيد Target/u), "module");
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
@@ -1331,7 +1419,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
@@ -1418,7 +1506,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       await user.click(
         await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
       );
-      acknowledgeSavedRecoveryPackage();
+      await saveRecoveryPackageDurably();
       await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
       await user.click(
         screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
@@ -1473,7 +1561,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.selectOptions(screen.getByLabelText("طريقة التحديث"), "edgetx");
     await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
     await user.click(
@@ -1663,6 +1751,95 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     expect(mocks.clearCheckpoint).not.toHaveBeenCalled();
   });
 
+  it("refuses to call an rx-as-tx flash a success when the device comes back a receiver", async () => {
+    // The whole point of rx-as-tx is a role change. A completed write, a clean
+    // reboot and a healthy reconnect prove none of it: if the device still
+    // answers from the receiver address, the conversion did not happen.
+    const user = userEvent.setup();
+    const hardware = connectedHardware({
+      productName: "Vendor ESP RX",
+      // Answers from 0xEC, and keeps answering from 0xEC after the write.
+      role: "rx",
+    });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.preparePackage.mockReset().mockResolvedValue({
+      ...preparedPackage,
+      target: espReceiver,
+      // The archive has to describe the Target it was prepared for: the
+      // durable export validates what it wrote against the selected Target,
+      // and a package naming a different one is exactly what that refuses.
+      recoveryArchive: await recoveryArchiveFor(espReceiver),
+      optionsSummary: {
+        ...preparedPackage.optionsSummary,
+        rxAsTxMode: "internal" as const,
+      },
+    });
+
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp-receiver",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+
+    // The receiver-as-transmitter selector is a real control for this Target.
+    const mode = screen.getByTestId("rx-as-tx-mode");
+    expect(mode).toBeEnabled();
+    await user.selectOptions(mode, "internal");
+
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    // The live CRSF identity already pins this Target exactly, so no manual
+    // confirmation is asked for — and none is typed here.
+    expect(screen.queryByLabelText(/^تأكيد Target/u)).toBeNull();
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    // The real driver was reached — this is not a UI-only assertion.
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+
+    // The reconnected device reports the receiver role it always had, so the
+    // write is recorded as unproven and the checkpoint survives.
+    await waitFor(() =>
+      expect(mocks.saveCheckpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stage: "WRITE_COMPLETED_RECONNECT_UNVERIFIED",
+        }),
+      ),
+    );
+    expect(mocks.clearCheckpoint).not.toHaveBeenCalled();
+  });
+
   it("keeps destructive flashing locked until the recovery journal finishes loading", async () => {
     const checkpointLoad = deferred<RecoveryCheckpoint | null>();
     mocks.loadCheckpoint.mockReturnValueOnce(checkpointLoad.promise);
@@ -1699,7 +1876,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );
@@ -1753,7 +1930,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     await user.click(
       await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
     );
-    acknowledgeSavedRecoveryPackage();
+    await saveRecoveryPackageDurably();
     await user.click(
       screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
     );

@@ -15,6 +15,7 @@
     "dist",
     "coverage",
     ".research-worktrees",
-    "artifacts"
+    "artifacts",
+    "apps/web/src/runtime-availability.test.tsx"
   ]
 }

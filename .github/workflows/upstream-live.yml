@@ -1,0 +1,72 @@
+name: Upstream live catalog
+
+# The five live-mirror suites talk to the official ExpressLRS Web Flasher
+# mirror. They are opt-in behind EXPRESSLRS_LIVE_CATALOG=1 so that a third
+# party's availability never decides whether a code change is correct — but
+# opting out permanently would mean the application's only real contact with
+# upstream is never exercised at all.
+#
+# So they run here, in their own job: on every pull request, on main, and daily.
+# A failure is attributable to this job rather than blamed on the change under
+# review, and the manifest artifact records exactly what upstream served, so
+# drift is visible rather than silent.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    name: Live official catalog and artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 11.19.0
+          run_install: false
+
+      - name: Set up Node.js with pnpm cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Record what the official mirror is serving
+        run: node scripts/capture-upstream-manifest.mjs
+
+      - name: Run the live upstream suites
+        env:
+          EXPRESSLRS_LIVE_CATALOG: "1"
+        run: pnpm vitest run --project web-hardware --reporter=verbose
+
+      - name: Preserve the upstream manifest
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: upstream-catalog-manifest-${{ github.run_attempt }}
+          path: artifacts/upstream-catalog-manifest.json
+          if-no-files-found: warn
+          retention-days: 30

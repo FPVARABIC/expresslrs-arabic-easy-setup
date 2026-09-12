@@ -1,4 +1,9 @@
+import { acceptanceEn } from "./acceptance-en";
+import { workbenchEn } from "./workbench-en";
+
 export const en = {
+  ...workbenchEn,
+  ...acceptanceEn,
   "app.name": "ExpressLRS Easy Setup",
   "app.independent":
     "Compatible with ExpressLRS — independent community project, not affiliated with or endorsed by ExpressLRS LLC",
@@ -73,6 +78,11 @@ export const en = {
     "Copy failed. The full commit is in the code element's title.",
   "build.unpinned":
     "This build carries no commit identity, so a result recorded from it cannot be tied to one tree.",
+  "build.host": "Installed host",
+  "build.hostWeb": "web build",
+  "build.hostNative": "host sources",
+  "build.hostBridgeUnavailable":
+    "This host could not install its USB bridge ({reason}), so no device can be opened from inside the app.",
   "diagnostics.heading": "Diagnostics",
   "diagnostics.intro":
     "A report of what this session actually observed: the browser's capabilities, what the device reported, the package that was prepared, and the recovery state.",
@@ -202,6 +212,23 @@ export const en = {
     "The phrase is only spaces. Leave it empty to set none, or type a phrase you can retype exactly on the other side.",
   "easy.fw.bindPhrase.CONTROL_CHARACTER":
     "The phrase contains an invisible control character. Retype it as plain text.",
+  "easy.fw.bindPhraseWeak":
+    "This phrase is easy to guess. It still works, and nothing here is withheld because of it.",
+  "easy.fw.bindPhraseWeakWhy":
+    "The UID is the first six bytes of an unsalted MD5 of a fixed, public string around your phrase. Anyone who sees the UID on the air can try candidate phrases offline as fast as their computer runs MD5, and a word, a name, a date or a short number falls at once. Recovering the phrase means being able to bind to your link.",
+  "easy.fw.bindPhraseGenerate": "Generate a strong phrase",
+  "easy.fw.bindPhraseGenerateHint":
+    "Draws {bits} bits from the browser's cryptographic random source, in characters that survive being read aloud.",
+  "easy.fw.bindPhraseReplaceHeading":
+    "Generating replaces the phrase you typed.",
+  "easy.fw.bindPhraseReplaceBody":
+    "A phrase is already in the field. Generating replaces it, and the old one is not kept anywhere — if a receiver is already flashed with it, write it down first.",
+  "easy.fw.bindPhraseReplaceConfirm": "Replace it",
+  "easy.fw.bindPhraseReplaceCancel": "Keep what I typed",
+  "easy.fw.bindPhraseGenerated":
+    "A new phrase is in the field. Flash the transmitter and the receiver with this exact phrase — a generated phrase on one side only means they will not link.",
+  "easy.fw.bindPhraseReveal": "Show the phrase",
+  "easy.fw.bindPhraseHide": "Hide the phrase",
   "easy.fw.loadCatalog": "Prepare the official update source",
   "easy.fw.catalogReady":
     "Loaded {releases} buildable versions and {targets} official Targets.",
@@ -217,6 +244,23 @@ export const en = {
   "easy.fw.prepared":
     "Prepared {segments} segments with a SHA-256 for each. Download the recovery package before any write.",
   "easy.fw.downloadRecovery": "Download the recovery package",
+  "easy.fw.exportDurableRecovery":
+    "Save the recovery package where it will survive",
+  "easy.fw.importDurableRecovery": "I already have a saved recovery package",
+  "easy.fw.durableRecoveryVerified": "Saved and verified: {location}",
+  "easy.fw.recoveryPassphrase": "Recovery passphrase",
+  "easy.fw.recoveryPassphraseConfirm": "Recovery passphrase again",
+  "easy.fw.recoveryPassphraseHint":
+    "Write this down. The saved file is encrypted with it, it is never stored, and without it the file cannot be opened again.",
+  "easy.fw.recoveryPassphraseWhy":
+    "The saved package contains your firmware image, and that image carries your Wi-Fi name and password and the binding UID from your binding phrase.",
+  "easy.fw.pickRecoveryFile": "Choose a saved recovery file",
+  "easy.fw.unlockRecoveryFile": "Open the recovery file",
+  "easy.fw.pickedRecovery": "Saved from {product} on {created}",
+  "easy.fw.importedIdentityHeading": "Recovered from the file",
+  "easy.fw.restoreFromImported": "Restore the device from this package",
+  "easy.fw.importedIdentityConfirm":
+    "This is the device in front of me, and I want it restored to this image",
   "easy.fw.recoverySaved":
     "I checked the recovery package is saved on my computer",
   "easy.fw.power":

@@ -46,7 +46,8 @@ const validOptions = {
   receiverInvertTx: false,
   lockOnFirstConnection: true,
   r9mmMiniSbus: false,
-  receiverAsTransmitter: false,
+  rxAsTxMode: "off",
+  airportEnabled: false,
 } as const;
 
 function stm32Target(raw: Readonly<Record<string, unknown>>): OfficialTarget {
@@ -84,7 +85,8 @@ describe("firmware package option gate", () => {
           receiverInvertTx: false,
           lockOnFirstConnection: true,
           r9mmMiniSbus: false,
-          receiverAsTransmitter: false,
+          rxAsTxMode: "off",
+          airportEnabled: false,
         },
         fetchImplementation: fetchImplementation as unknown as typeof fetch,
       }),
@@ -92,13 +94,18 @@ describe("firmware package option gate", () => {
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
-  it("fails before acquisition for unverified receiver-as-transmitter packaging", async () => {
+  it("refuses rx-as-tx before acquisition when the Target cannot carry it", async () => {
     const fetchImplementation = vi.fn();
 
     await expect(
       prepareOfficialFirmwarePackage({
         release,
-        target: { ...target, role: "rx" },
+        // ExpressLRS builds no transmitter firmware for STM32 receivers.
+        target: {
+          ...target,
+          role: "rx",
+          config: { ...target.config, platform: "stm32" },
+        },
         options: {
           region: "FCC",
           domain: 0,
@@ -114,11 +121,12 @@ describe("firmware package option gate", () => {
           receiverInvertTx: false,
           lockOnFirstConnection: true,
           r9mmMiniSbus: false,
-          receiverAsTransmitter: true,
+          rxAsTxMode: "internal",
+          airportEnabled: false,
         },
         fetchImplementation: fetchImplementation as unknown as typeof fetch,
       }),
-    ).rejects.toMatchObject({ field: "receiverAsTransmitter" });
+    ).rejects.toMatchObject({ field: "rxAsTxMode" });
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 

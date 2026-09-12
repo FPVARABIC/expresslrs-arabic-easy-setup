@@ -1,15 +1,24 @@
+import { useState } from "react";
+
+import { createTranslator, getDirection, type Locale } from "@elrs-easy/i18n";
+
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
+import type { RxAsTxMode } from "../hardware/rx-as-tx";
+import type { DeviceOperation } from "../hardware/useDeviceController";
 import {
+  GENERATED_BIND_PHRASE_BITS,
   MAX_BIND_PHRASE_LENGTH,
   bindPhraseIssue,
+  bindPhraseStrength,
+  generateBindPhrase,
 } from "../hardware/bind-phrase";
 import { regulatoryRegionByKey } from "../hardware/regulatory-domain";
 import type { HardwareDriverConnector } from "../hardware/userSession";
 import {
-  METHOD_LABELS,
+  METHOD_LABEL_KEYS,
   currentSettingValue,
   formatBytes,
   isStableRelease,
@@ -20,6 +29,7 @@ import {
 
 export interface ExpressLrsParityWorkbenchProps {
   readonly hardwareConnector?: HardwareDriverConnector;
+  readonly locale?: Locale;
 }
 
 /**
@@ -28,15 +38,25 @@ export interface ExpressLrsParityWorkbenchProps {
  */
 export function ExpressLrsParityWorkbench({
   hardwareConnector,
+  locale = "ar",
 }: ExpressLrsParityWorkbenchProps = {}) {
-  const controller = useDeviceController(
-    hardwareConnector === undefined ? {} : { hardwareConnector },
+  const controller = useDeviceController({
+    ...(hardwareConnector === undefined ? {} : { hardwareConnector }),
+    locale,
+  });
+  return (
+    <ExpressLrsParityWorkbenchView controller={controller} locale={locale} />
   );
-  return <ExpressLrsParityWorkbenchView controller={controller} />;
 }
 
 export interface ExpressLrsParityWorkbenchViewProps {
   readonly controller: DeviceController;
+  /**
+   * Chosen by the operator in the shell. The workbench used to hardcode Arabic
+   * and `dir="rtl"`, so choosing English left the technical view unreadable in
+   * the wrong direction.
+   */
+  readonly locale: Locale;
 }
 
 /**
@@ -46,7 +66,21 @@ export interface ExpressLrsParityWorkbenchViewProps {
  */
 export function ExpressLrsParityWorkbenchView({
   controller,
+  locale,
 }: ExpressLrsParityWorkbenchViewProps) {
+  /**
+   * The recovery passphrases live here and nowhere else — component state, not
+   * controller state, so nothing that assembles a diagnostics report can reach
+   * them. They are never persisted and never sent anywhere.
+   */
+  const [phraseVisible, setPhraseVisible] = useState(false);
+  const [phraseReplacePending, setPhraseReplacePending] = useState(false);
+  const [phraseGenerated, setPhraseGenerated] = useState(false);
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] =
+    useState("");
+  const [importPassphrase, setImportPassphrase] = useState("");
+  const t = createTranslator(locale);
   const {
     antennaAcknowledged,
     availableMethods,
@@ -57,16 +91,26 @@ export function ExpressLrsParityWorkbenchView({
     cancelCurrentOperation,
     cancellable,
     captureDiagnostics,
+    rxAsTxModeSupport,
+    readiness,
     captureDiagnosticsWithGrants,
     catalog,
     catalogState,
     checkpoint,
     connectHardware,
-    deviceWritesReady,
     disconnectHardware,
     downloadFirmware,
     downloadLuaScript,
     downloadRecovery,
+    exportDurableRecoveryPackage,
+    pickRecoveryFile,
+    recoverFromImportedPackage,
+    unlockRecoveryFile,
+    confirmImportedRecoveryIdentity,
+    pickedRecovery,
+    importedIdentityConfirmed,
+    importedRecovery,
+    durableRecovery,
     exactHardwareTarget,
     flashPreparedFirmware,
     flashProgress,
@@ -87,6 +131,7 @@ export function ExpressLrsParityWorkbenchView({
     radioKey,
     radios,
     recoverFromFile,
+    renderMessage,
     recoveryDownloadStarted,
     recoveryDownloaded,
     recoveryJournalState,
@@ -117,7 +162,6 @@ export function ExpressLrsParityWorkbenchView({
     setTargetId,
     setVendorKey,
     settingDraft,
-    settingsBackup,
     startBinding,
     status,
     targetDefaults,
@@ -129,36 +173,52 @@ export function ExpressLrsParityWorkbenchView({
     vendors,
     visibleTargets,
     writableParameters,
-    writeReady,
     writeSetting,
   } = controller;
 
+  /**
+   * Renders the live reasons one operation is not ready, right beside the
+   * control it blocks. A disabled control that does not say why is a dead end
+   * for the operator; this makes every one of them explainable.
+   */
+  const blockers = (operation: DeviceOperation) =>
+    readiness[operation].ready ? null : (
+      <ul
+        className="parity-note operation-blockers"
+        data-operation={operation}
+        data-ready="no"
+      >
+        {readiness[operation].missing.map((reason) => (
+          <li key={reason.key}>{renderMessage(reason)}</li>
+        ))}
+      </ul>
+    );
+
   return (
-    <main className="parity-shell" dir="rtl">
+    <main className="parity-shell" dir={getDirection(locale)}>
       <header className="parity-header">
         <div>
-          <span className="section-kicker">ELRS السهل · Hardware Lab</span>
-          <h1>إعداد وتحديث ExpressLRS</h1>
-          <p>
-            مصدر رسمي، تعريف CRSF، إعدادات حقيقية، استعادة إلزامية، ونجاح مشروط
-            بعودة الجهاز المتوقع.
-          </p>
+          <span className="section-kicker">{t("wb.ui.kicker")}</span>
+          <h1>{t("wb.ui.title")}</h1>
+          <p>{t("wb.ui.subtitle")}</p>
         </div>
         <span
           className={
             identity === null ? "parity-state" : "parity-state is-ready"
           }
         >
-          {identity === null ? "لا توجد جلسة CRSF" : "CRSF متصل"}
+          {identity === null
+            ? t("wb.ui.noCrsfSession")
+            : t("wb.ui.crsfConnected")}
         </span>
       </header>
 
       <section className="parity-status" role="status" aria-live="polite">
-        <strong>الحالة</strong>
-        <span>{status}</span>
+        <strong>{t("wb.ui.statusLabel")}</strong>
+        <span>{renderMessage(status)}</span>
         {busy && cancellable ? (
           <button type="button" onClick={cancelCurrentOperation}>
-            إلغاء العملية
+            {t("wb.ui.cancelOperation")}
           </button>
         ) : null}
       </section>
@@ -167,11 +227,10 @@ export function ExpressLrsParityWorkbenchView({
         <section className="parity-warning" aria-labelledby="recovery-heading">
           <div>
             <strong id="recovery-heading">
-              استعادة معلّقة · {checkpoint.stage}
+              {t("wb.ui.pendingRecovery")} {checkpoint.stage}
             </strong>
             <p>
-              {checkpoint.productName} — اختر نفس Target وطريقة الاستعادة ثم
-              حزمة الاستعادة المطابقة.
+              {checkpoint.productName} — {t("wb.ui.recoveryPickSameTarget")}
             </p>
             {checkpoint.safeError === null ? null : (
               <p>{checkpoint.safeError}</p>
@@ -180,7 +239,7 @@ export function ExpressLrsParityWorkbenchView({
           {selectedTarget === null ? null : (
             <div>
               <label className="manual-confirm">
-                <span>تأكيد Target للاستعادة</span>
+                <span>{t("wb.ui.confirmTargetForRecovery")}</span>
                 <input
                   type="text"
                   value={manualTargetConfirmation}
@@ -190,7 +249,10 @@ export function ExpressLrsParityWorkbenchView({
                     setManualTargetConfirmation(event.currentTarget.value)
                   }
                 />
-                <small>اكتب حرفيًا: {selectedTarget.targetKey}</small>
+                <small>
+                  {t("wb.ui.typeExactly")}
+                  {selectedTarget.targetKey}
+                </small>
               </label>
               <div className="flash-acknowledgements">
                 <label className="check-field">
@@ -202,7 +264,7 @@ export function ExpressLrsParityWorkbenchView({
                       setPowerAcknowledged(event.currentTarget.checked)
                     }
                   />
-                  <span>ثبات الطاقة أثناء الاستعادة</span>
+                  <span>{t("wb.ui.powerStableRecovery")}</span>
                 </label>
                 {selectedTarget.role === "tx" ? (
                   <label className="check-field">
@@ -214,14 +276,14 @@ export function ExpressLrsParityWorkbenchView({
                         setAntennaAcknowledged(event.currentTarget.checked)
                       }
                     />
-                    <span>هوائي جهاز الإرسال مثبت أثناء الاستعادة</span>
+                    <span>{t("wb.ui.antennaFittedRecovery")}</span>
                   </label>
                 ) : null}
               </div>
             </div>
           )}
           <label className="file-button">
-            اختيار حزمة الاستعادة
+            {t("wb.ui.chooseRecoveryPackage")}
             <input
               type="file"
               accept=".zip,application/zip"
@@ -245,11 +307,11 @@ export function ExpressLrsParityWorkbenchView({
 
       {recoveryJournalState === "loading" ? (
         <p className="danger-note" role="status">
-          جارٍ فحص سجل الاستعادة؛ عمليات الكتابة مقفلة مؤقتًا.
+          {t("wb.ui.journalChecking")}
         </p>
       ) : recoveryJournalState === "error" ? (
         <p className="danger-note" role="alert">
-          تعذر التحقق من سجل الاستعادة؛ عمليات التفليش والاستعادة مقفلة بأمان.
+          {t("wb.ui.journalUnreadable")}
         </p>
       ) : null}
 
@@ -258,11 +320,8 @@ export function ExpressLrsParityWorkbenchView({
           <div>
             <span>1</span>
             <div>
-              <h2 id="catalog-heading">الإصدار وTarget</h2>
-              <p>
-                الإصدارات وTargets وطرق التحديث تأتي من مصادر ExpressLRS
-                الرسمية.
-              </p>
+              <h2 id="catalog-heading">{t("wb.ui.catalogHeading")}</h2>
+              <p>{t("wb.ui.catalogSubtitle")}</p>
             </div>
           </div>
           <button
@@ -272,12 +331,12 @@ export function ExpressLrsParityWorkbenchView({
             onClick={() => void loadCatalog()}
           >
             {catalogState === "loading"
-              ? "جارٍ التحميل…"
-              : "تحميل الكتالوج الرسمي"}
+              ? t("wb.ui.loading")
+              : t("wb.ui.loadCatalog")}
           </button>
         </div>
 
-        <div className="segmented" aria-label="نوع الجهاز">
+        <div className="segmented" aria-label={t("wb.ui.deviceType")}>
           {(["tx", "rx"] as const).map((item) => (
             <button
               key={item}
@@ -290,14 +349,14 @@ export function ExpressLrsParityWorkbenchView({
                 targetDefaults(item);
               }}
             >
-              {item === "tx" ? "جهاز إرسال TX" : "جهاز استقبال RX"}
+              {item === "tx" ? t("wb.ui.deviceTx") : t("wb.ui.deviceRx")}
             </button>
           ))}
         </div>
 
         <div className="form-grid">
           <label>
-            <span>الإصدار</span>
+            <span>{t("wb.ui.release")}</span>
             <select
               value={selectedReleaseKey}
               disabled={catalog === null || busy}
@@ -306,21 +365,23 @@ export function ExpressLrsParityWorkbenchView({
                 resetPreparedState();
               }}
             >
-              <option value="">اختر إصدارًا</option>
+              <option value="">{t("wb.ui.chooseRelease")}</option>
               {releases.map((release) => (
                 <option
                   key={releaseSelectionKey(release)}
                   value={releaseSelectionKey(release)}
                 >
                   {release.label}
-                  {!isStableRelease(release) ? " · تجريبي" : ""}
+                  {!isStableRelease(release)
+                    ? t("wb.ui.experimentalSuffix")
+                    : ""}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            <span>الشركة</span>
+            <span>{t("wb.ui.vendor")}</span>
             <select
               value={vendorKey}
               disabled={catalog === null || busy}
@@ -355,7 +416,7 @@ export function ExpressLrsParityWorkbenchView({
           </label>
 
           <label>
-            <span>النطاق / العائلة</span>
+            <span>{t("wb.ui.bandFamily")}</span>
             <select
               value={radioKey}
               disabled={catalog === null || busy}
@@ -413,7 +474,7 @@ export function ExpressLrsParityWorkbenchView({
           </label>
 
           <label>
-            <span>المنطقة التنظيمية</span>
+            <span>{t("wb.ui.regulatoryRegion")}</span>
             <select
               value={options.region}
               disabled={selectedTarget === null || busy}
@@ -421,7 +482,7 @@ export function ExpressLrsParityWorkbenchView({
                 updateOption("region", event.currentTarget.value)
               }
             >
-              <option value="">اختر المنطقة</option>
+              <option value="">{t("wb.ui.chooseRegion")}</option>
               {regionChoices.map((region) => (
                 <option key={region.key} value={region.key}>
                   {region.label}
@@ -431,7 +492,7 @@ export function ExpressLrsParityWorkbenchView({
           </label>
 
           <label>
-            <span>طريقة التحديث</span>
+            <span>{t("wb.ui.updateMethod")}</span>
             <select
               value={method}
               disabled={selectedTarget === null || busy}
@@ -444,7 +505,7 @@ export function ExpressLrsParityWorkbenchView({
             >
               {availableMethods.map((item) => (
                 <option key={item} value={item}>
-                  {METHOD_LABELS[item]}
+                  {t(METHOD_LABEL_KEYS[item])}
                 </option>
               ))}
             </select>
@@ -454,7 +515,7 @@ export function ExpressLrsParityWorkbenchView({
         {selectedTarget === null ? null : (
           <dl className="target-summary">
             <div>
-              <dt>المنصة</dt>
+              <dt>{t("wb.ui.platform")}</dt>
               <dd>{selectedTarget.config.platform}</dd>
             </div>
             <div>
@@ -462,10 +523,10 @@ export function ExpressLrsParityWorkbenchView({
               <dd>{selectedTarget.config.firmware}</dd>
             </div>
             <div>
-              <dt>طرق Target الرسمية</dt>
+              <dt>{t("wb.ui.officialTargetMethods")}</dt>
               <dd>
                 {selectedTarget.config.uploadMethods
-                  .map((item) => METHOD_LABELS[item])
+                  .map((item) => t(METHOD_LABEL_KEYS[item]))
                   .join(" · ")}
               </dd>
             </div>
@@ -478,11 +539,8 @@ export function ExpressLrsParityWorkbenchView({
           <div>
             <span>2</span>
             <div>
-              <h2 id="device-heading">تعريف الجهاز وإعداداته</h2>
-              <p>
-                لا تُعرض هوية قبل Device Info صحيح وCRC صالح، ولا يتطلب ذلك
-                تحميل الكتالوج.
-              </p>
+              <h2 id="device-heading">{t("wb.ui.deviceHeading")}</h2>
+              <p>{t("wb.ui.deviceSubtitle")}</p>
             </div>
           </div>
           {identity === null ? (
@@ -494,7 +552,7 @@ export function ExpressLrsParityWorkbenchView({
               }
               onClick={() => void connectHardware()}
             >
-              تعريف الجهاز عبر CRSF
+              {t("wb.ui.identifyOverCrsf")}
             </button>
           ) : (
             <button
@@ -503,21 +561,18 @@ export function ExpressLrsParityWorkbenchView({
               disabled={busy}
               onClick={() => void disconnectHardware()}
             >
-              إغلاق الجلسة
+              {t("wb.ui.closeSession")}
             </button>
           )}
         </div>
 
         {identity === null ? (
-          <p className="empty-state">
-            استخدم منفذ وحدة ELRS المباشر. منفذ Joystick أو منفذ الراديو العام
-            لا يحقق بوابة CRSF.
-          </p>
+          <p className="empty-state">{t("wb.ui.usePortNote")}</p>
         ) : (
           <>
             <dl className="target-summary">
               <div>
-                <dt>الجهاز</dt>
+                <dt>{t("wb.ui.device")}</dt>
                 <dd>{identity.productName}</dd>
               </div>
               <div>
@@ -529,40 +584,34 @@ export function ExpressLrsParityWorkbenchView({
                 <dd>{identity.parameterCount}</dd>
               </div>
               <div>
-                <dt>مطابقة Target</dt>
+                <dt>{t("wb.ui.targetMatch")}</dt>
                 <dd>
                   {targetMatch?.confidence ??
-                    (catalog === null ? "بانتظار الكتالوج" : "NOT_FOUND")}
+                    (catalog === null
+                      ? t("wb.ui.awaitingCatalog")
+                      : "NOT_FOUND")}
                 </dd>
               </div>
             </dl>
             {exactHardwareTarget ? (
-              <p className="success-note">
-                Target المختار مطابق تلقائيًا لهوية CRSF.
-              </p>
+              <p className="success-note">{t("wb.ui.targetAutoMatched")}</p>
             ) : catalog === null ? (
               <p className="empty-state">
-                هوية CRSF مثبتة. حمّل الكتالوج لاحقًا فقط لمطابقة Target وتجهيز
-                Firmware.
+                {t("wb.ui.identityPinnedLoadLater")}
               </p>
             ) : (
               <p className="danger-note">
-                CRSF مثبت، لكن Target يحتاج اختيارًا وتأكيدًا يدويًا قبل
-                التفليش. الإعدادات والربط يعتمدان على المعاملات التي أعلنها
-                الجهاز نفسه.
+                {t("wb.ui.identityPinnedNeedsManual")}
               </p>
             )}
 
             {identity === null ? (
-              <p className="danger-note">
-                وصّل الجهاز وعرّفه لقراءة إعداداته الحقيقية؛ كل كتابة تُقرأ
-                رجعيًا بعدها للتحقق من أنها ثبتت فعلًا.
-              </p>
+              <p className="danger-note">{t("wb.ui.connectToReadSettings")}</p>
             ) : null}
 
             <div className="settings-grid">
               <label>
-                <span>الإعداد</span>
+                <span>{t("wb.ui.setting")}</span>
                 <select
                   value={selectedSettingId}
                   disabled={busy || writableParameters.length === 0}
@@ -588,7 +637,7 @@ export function ExpressLrsParityWorkbenchView({
 
               {selectedSetting?.kind === "selection" ? (
                 <label>
-                  <span>القيمة</span>
+                  <span>{t("wb.ui.value")}</span>
                   <select
                     value={settingDraft}
                     disabled={busy}
@@ -605,7 +654,7 @@ export function ExpressLrsParityWorkbenchView({
                 </label>
               ) : (
                 <label>
-                  <span>القيمة</span>
+                  <span>{t("wb.ui.value")}</span>
                   <input
                     type="number"
                     value={settingDraft}
@@ -631,54 +680,50 @@ export function ExpressLrsParityWorkbenchView({
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={
-                    busy || selectedSetting === undefined || !deviceWritesReady
-                  }
+                  disabled={!readiness.settingsWrite.ready}
                   onClick={() => void writeSetting()}
                 >
-                  حفظ مع قراءة رجعية
+                  {t("wb.ui.saveWithReadBack")}
                 </button>
                 <button
                   type="button"
                   className="secondary-button"
-                  disabled={
-                    busy || settingsBackup === null || !deviceWritesReady
-                  }
+                  disabled={!readiness.settingsRestore.ready}
                   onClick={() => void restoreSettings()}
                 >
-                  استعادة اللقطة
+                  {t("wb.ui.restoreSnapshot")}
                 </button>
                 {hasBindCommand ? (
                   <button
                     type="button"
                     className="secondary-button"
-                    disabled={
-                      busy || !bindingAcknowledged || !deviceWritesReady
-                    }
+                    disabled={!readiness.binding.ready}
                     onClick={() => void startBinding()}
                   >
-                    تشغيل الربط الحقيقي
+                    {t("wb.ui.runRealBinding")}
                   </button>
                 ) : null}
               </div>
+              {blockers("settingsWrite")}
+              {blockers("settingsRestore")}
+              {hasBindCommand ? blockers("binding") : null}
               {hasBindCommand ? (
                 <label className="check-field">
                   <input
                     type="checkbox"
                     checked={bindingAcknowledged}
-                    disabled={busy || !deviceWritesReady}
+                    disabled={!readiness.bindingPrerequisites.ready}
                     onChange={(event) =>
                       setBindingAcknowledged(event.currentTarget.checked)
                     }
                   />
-                  <span>
-                    الطرف الآخر جاهز للربط، والطاقة والهوائيات في حالة آمنة
-                  </span>
+                  <span>{t("wb.ui.bindingAcknowledgement")}</span>
                 </label>
               ) : null}
               {bindEvidence === null ? null : (
                 <p className="parity-note" data-evidence={bindEvidence}>
-                  مستوى دليل الربط: {bindEvidence}
+                  {t("wb.ui.bindEvidenceLevel")}
+                  {bindEvidence}
                 </p>
               )}
             </div>
@@ -691,38 +736,115 @@ export function ExpressLrsParityWorkbenchView({
           <div>
             <span>3</span>
             <div>
-              <h2 id="options-heading">خيارات Firmware</h2>
-              <p>العبارة وكلمة Wi-Fi تبقيان في الذاكرة حتى بناء الحزمة.</p>
+              <h2 id="options-heading">{t("wb.ui.optionsHeading")}</h2>
+              <p>{t("wb.ui.optionsSubtitle")}</p>
             </div>
           </div>
         </div>
 
         <div className="form-grid">
-          <label>
-            <span>عبارة الربط</span>
-            <input
-              type="password"
-              autoComplete="off"
-              value={options.bindPhrase}
-              maxLength={MAX_BIND_PHRASE_LENGTH}
-              disabled={busy}
-              onChange={(event) =>
-                updateOption("bindPhrase", event.currentTarget.value)
-              }
-            />
+          <div className="bind-phrase-field">
+            <label>
+              <span>{t("wb.ui.bindPhrase")}</span>
+              <input
+                type={phraseVisible ? "text" : "password"}
+                autoComplete="off"
+                value={options.bindPhrase}
+                maxLength={MAX_BIND_PHRASE_LENGTH}
+                disabled={busy}
+                onChange={(event) => {
+                  updateOption("bindPhrase", event.currentTarget.value);
+                  setPhraseGenerated(false);
+                  setPhraseReplacePending(false);
+                }}
+              />
+            </label>
+            <div className="bind-phrase-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhraseVisible(!phraseVisible);
+                }}
+              >
+                {phraseVisible
+                  ? t("wb.ui.bindPhraseHide")
+                  : t("wb.ui.bindPhraseReveal")}
+              </button>
+              <button
+                type="button"
+                // Follows the field it writes into. `busy` is transient
+                // in-flight state, not a policy: an enabled button that writes
+                // into a disabled field is the inconsistency, not the
+                // disabling.
+                disabled={busy}
+                onClick={() => {
+                  // An existing phrase is never overwritten by a single click:
+                  // a receiver may already be flashed with it, and it is not
+                  // stored anywhere this could put it back from.
+                  if (options.bindPhrase !== "") {
+                    setPhraseReplacePending(true);
+                    return;
+                  }
+                  updateOption("bindPhrase", generateBindPhrase());
+                  setPhraseVisible(true);
+                  setPhraseGenerated(true);
+                }}
+              >
+                {t("wb.ui.bindPhraseGenerate")}
+              </button>
+            </div>
             <small>
-              اكتب العبارة نفسها في جهاز الإرسال وجهاز الاستقبال. أي اختلاف
-              بينهما يعني أن الرابط لن يقوم. الجهاز لا يعلن UID عبر CRSF، لذلك
-              تطابق العبارة يثبته قيام رابط حي لا هذه الكتابة.
+              {t("wb.ui.bindPhraseGenerateHint", {
+                bits: GENERATED_BIND_PHRASE_BITS,
+              })}
             </small>
+            {phraseReplacePending ? (
+              <div className="bind-phrase-replace" role="group">
+                <strong>{t("wb.ui.bindPhraseReplaceHeading")}</strong>
+                <small>{t("wb.ui.bindPhraseReplaceBody")}</small>
+                <div className="bind-phrase-actions">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      updateOption("bindPhrase", generateBindPhrase());
+                      setPhraseVisible(true);
+                      setPhraseGenerated(true);
+                      setPhraseReplacePending(false);
+                    }}
+                  >
+                    {t("wb.ui.bindPhraseReplaceConfirm")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhraseReplacePending(false);
+                    }}
+                  >
+                    {t("wb.ui.bindPhraseReplaceCancel")}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {phraseGenerated ? (
+              <small className="parity-note">
+                {t("wb.ui.bindPhraseGenerated")}
+              </small>
+            ) : null}
+            <small>{t("wb.ui.bindPhraseNote")}</small>
             {bindPhraseIssue(options.bindPhrase) === null ? null : (
               <small className="parity-error">
-                عبارة الربط غير صالحة: تجاوز الطول، أو مسافات فقط، أو محرف خفي.
+                {t("wb.ui.bindPhraseInvalid")}
               </small>
             )}
-          </label>
+            {bindPhraseStrength(options.bindPhrase) === "WEAK" ? (
+              <small className="parity-note bind-phrase-weak">
+                {t("wb.ui.bindPhraseWeak")} {t("wb.ui.bindPhraseWeakWhy")}
+              </small>
+            ) : null}
+          </div>
           <label>
-            <span>اسم شبكة Wi-Fi</span>
+            <span>{t("wb.ui.wifiSsid")}</span>
             <input
               type="text"
               autoComplete="off"
@@ -735,7 +857,7 @@ export function ExpressLrsParityWorkbenchView({
             />
           </label>
           <label>
-            <span>كلمة مرور Wi-Fi</span>
+            <span>{t("wb.ui.wifiPassword")}</span>
             <input
               type="password"
               autoComplete="new-password"
@@ -748,7 +870,7 @@ export function ExpressLrsParityWorkbenchView({
             />
           </label>
           <label>
-            <span>تشغيل Wi-Fi تلقائيًا بعد (ثانية)</span>
+            <span>{t("wb.ui.wifiAutoOn")}</span>
             <input
               type="number"
               min={0}
@@ -804,7 +926,7 @@ export function ExpressLrsParityWorkbenchView({
                     updateOption("uartInverted", event.currentTarget.checked)
                   }
                 />
-                <span>UART مقلوب</span>
+                <span>{t("wb.ui.uartInverted")}</span>
               </label>
               <label className="check-field">
                 <input
@@ -818,7 +940,7 @@ export function ExpressLrsParityWorkbenchView({
                     )
                   }
                 />
-                <span>فتح مستويات الطاقة الأعلى</span>
+                <span>{t("wb.ui.unlockHigherPower")}</span>
               </label>
             </>
           ) : (
@@ -851,7 +973,7 @@ export function ExpressLrsParityWorkbenchView({
                     )
                   }
                 />
-                <span>عكس خرج TX للمستقبل</span>
+                <span>{t("wb.ui.receiverInvertTx")}</span>
               </label>
               <label className="check-field">
                 <input
@@ -865,7 +987,7 @@ export function ExpressLrsParityWorkbenchView({
                     )
                   }
                 />
-                <span>قفل أول اتصال</span>
+                <span>{t("wb.ui.lockOnFirstConnection")}</span>
               </label>
               <label className="check-field">
                 <input
@@ -878,12 +1000,75 @@ export function ExpressLrsParityWorkbenchView({
                 />
                 <span>R9MM Mini SBUS</span>
               </label>
+              <label className="select-field">
+                <span>{t("workbench.options.rxAsTx")}</span>
+                <select
+                  value={options.rxAsTxMode}
+                  disabled={busy}
+                  data-testid="rx-as-tx-mode"
+                  onChange={(event) =>
+                    updateOption(
+                      "rxAsTxMode",
+                      event.currentTarget.value as RxAsTxMode,
+                    )
+                  }
+                >
+                  <option value="off">
+                    {t("workbench.options.rxAsTx.off")}
+                  </option>
+                  {rxAsTxModeSupport.map(({ mode, support }) => (
+                    <option
+                      key={mode}
+                      value={mode}
+                      disabled={!support.supported}
+                    >
+                      {t(`workbench.options.rxAsTx.${mode}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {/*
+                One note per distinct reason. When every mode is closed for the
+                same reason — no Target chosen yet, or an STM32 that has no
+                transmitter build at all — repeating it once per mode would say
+                the same thing twice.
+              */}
+              {[
+                ...new Map(
+                  rxAsTxModeSupport
+                    .filter(({ support }) => !support.supported)
+                    .map((entry) => [
+                      entry.support.supported ? "" : entry.support.reason,
+                      entry,
+                    ]),
+                ).values(),
+              ].map(({ mode, support }) =>
+                support.supported ? null : (
+                  <p
+                    key={support.reason}
+                    className="parity-note rx-as-tx-note"
+                    data-rx-as-tx-mode={mode}
+                    data-rx-as-tx-reason={support.reason}
+                  >
+                    {t(`workbench.rxAsTx.${support.reason}`, {
+                      target: support.targetName,
+                      platform: support.platform,
+                      modes: support.availableModes.join(", "),
+                    })}
+                  </p>
+                ),
+              )}
               <label className="check-field">
-                <input type="checkbox" checked={false} disabled readOnly />
-                <span>
-                  استخدام RX كمرسل — مقفل حتى تنفيذ تحويل ملف TX ومخطط العتاد
-                  والتحقق منهما
-                </span>
+                <input
+                  type="checkbox"
+                  checked={options.airportEnabled}
+                  disabled={busy}
+                  data-testid="airport-enabled"
+                  onChange={(event) =>
+                    updateOption("airportEnabled", event.currentTarget.checked)
+                  }
+                />
+                <span>{t("workbench.options.airport")}</span>
               </label>
             </>
           )}
@@ -895,8 +1080,8 @@ export function ExpressLrsParityWorkbenchView({
           <div>
             <span>4</span>
             <div>
-              <h2 id="package-heading">بناء الحزمة والتفليش</h2>
-              <p>كل قطاع موثق بـSHA-256 وحزمة الاستعادة إلزامية.</p>
+              <h2 id="package-heading">{t("wb.ui.packageHeading")}</h2>
+              <p>{t("wb.ui.packageSubtitle")}</p>
             </div>
           </div>
           <button
@@ -910,19 +1095,110 @@ export function ExpressLrsParityWorkbenchView({
             }
             onClick={() => void buildFirmware()}
           >
-            بناء Firmware الرسمي
+            {t("wb.ui.buildOfficialFirmware")}
           </button>
         </div>
 
-        {!deviceWritesReady ? (
-          <p className="danger-note">
-            التفليش يحتاج جهازًا معرّفًا وTarget مطابقًا وحزمة محققة وحزمة
-            استعادة جاهزة وتأكيدك؛ يشرح الشريط أعلاه أي شرط ما زال ناقصًا.
-          </p>
-        ) : null}
+        {readiness.firmwareWrite.ready ? null : (
+          <div className="danger-note" data-testid="firmware-write-blockers">
+            <strong>{t("wb.ui.flashNeeds")}</strong>
+            <ul>
+              {readiness.firmwareWrite.missing.map((reason) => (
+                <li key={reason.key}>{renderMessage(reason)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/*
+          Importing a saved recovery package is deliberately *outside* the
+          prepared-package block. It used to be inside it, which meant an
+          operator who had uninstalled and reinstalled — the exact situation
+          the durable export exists for — had to re-select a Target and build
+          a firmware package over the network before they could so much as
+          open the file they had kept. Exporting needs a prepared package
+          because there is nothing to export otherwise. Importing needs
+          nothing but the file.
+        */}
+        <div className="recovery-import">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy}
+            onClick={() => void pickRecoveryFile()}
+          >
+            {t("wb.ui.pickRecoveryFile")}
+          </button>
+          {pickedRecovery === null ? null : (
+            <>
+              <p className="hint">
+                {t("wb.durable.picked", {
+                  product: pickedRecovery.header.identity.target.productName,
+                  created: pickedRecovery.header.identity.createdAt,
+                })}
+              </p>
+              <label className="field">
+                <span>{t("wb.ui.recoveryPassphrase")}</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={importPassphrase}
+                  onChange={(event) => {
+                    setImportPassphrase(event.target.value);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => void unlockRecoveryFile(importPassphrase)}
+              >
+                {t("wb.ui.unlockRecoveryFile")}
+              </button>
+            </>
+          )}
+
+          {importedRecovery === null ? null : (
+            <>
+              <p className="hint">
+                {t("wb.ui.importedIdentityHeading")}:{" "}
+                {importedRecovery.productName} · {importedRecovery.targetId} ·{" "}
+                {importedRecovery.releaseLabel}
+              </p>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={importedIdentityConfirmed}
+                  onChange={(event) => {
+                    confirmImportedRecoveryIdentity(event.target.checked);
+                  }}
+                />
+                <span>{t("wb.ui.importedIdentityConfirm")}</span>
+              </label>
+              {/*
+                The control that actually restores from an imported package.
+                It went a whole round without existing: the handler was
+                correct and tested, and no view invoked it, so the one path
+                that recovers a device after a reinstall was unreachable.
+                Gated by the same evidence authority as every other
+                destructive operation and refused by name until the identity
+                above is confirmed — never hidden.
+              */}
+              <button
+                type="button"
+                className="danger-button"
+                disabled={busy}
+                onClick={() => void recoverFromImportedPackage()}
+              >
+                {t("wb.ui.restoreFromImported")}
+              </button>
+            </>
+          )}
+        </div>
 
         {prepared === null ? (
-          <p className="empty-state">لم تُبنَ حزمة بعد.</p>
+          <p className="empty-state">{t("wb.ui.noPackageYet")}</p>
         ) : (
           <>
             <dl className="segment-list">
@@ -947,7 +1223,7 @@ export function ExpressLrsParityWorkbenchView({
                 disabled={busy}
                 onClick={downloadFirmware}
               >
-                تنزيل Firmware / OTA
+                {t("wb.ui.downloadFirmware")}
               </button>
               <button
                 type="button"
@@ -955,7 +1231,26 @@ export function ExpressLrsParityWorkbenchView({
                 disabled={busy}
                 onClick={downloadRecovery}
               >
-                تنزيل حزمة الاستعادة
+                {t("wb.ui.downloadRecovery")}
+              </button>
+              {/*
+                Always clickable, both of them. The passphrase is a real
+                prerequisite, collected in the field beside the button, so a
+                press with nothing typed answers with the exact reason instead
+                of the control being dead.
+              */}
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() =>
+                  void exportDurableRecoveryPackage(
+                    recoveryPassphrase,
+                    recoveryPassphraseConfirm,
+                  )
+                }
+              >
+                {t("wb.ui.exportDurableRecovery")}
               </button>
               {selectedTarget?.role === "tx" ? (
                 <button
@@ -964,44 +1259,71 @@ export function ExpressLrsParityWorkbenchView({
                   disabled={busy}
                   onClick={() => void downloadLuaScript()}
                 >
-                  تنزيل ملف Lua
+                  {t("wb.ui.downloadLua")}
                 </button>
               ) : null}
             </div>
 
-            {recoveryDownloaded ? (
+            <label className="field">
+              <span>{t("wb.ui.recoveryPassphrase")}</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={recoveryPassphrase}
+                onChange={(event) => {
+                  setRecoveryPassphrase(event.target.value);
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>{t("wb.ui.recoveryPassphraseConfirm")}</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={recoveryPassphraseConfirm}
+                onChange={(event) => {
+                  setRecoveryPassphraseConfirm(event.target.value);
+                }}
+              />
+            </label>
+            <p className="hint">{t("wb.ui.recoveryPassphraseHint")}</p>
+            <p className="hint">{t("wb.ui.recoveryPassphraseWhy")}</p>
+
+            {durableRecovery !== null ? (
               <p className="success-note">
-                أكد المستخدم أن حزمة الاستعادة محفوظة خارج التطبيق.
+                {t("wb.ui.durableRecoveryLocation")}:{" "}
+                {durableRecovery.displayName} · {durableRecovery.sha256}
               </p>
+            ) : (
+              <p className="danger-note">{t("wb.ui.durableRecoveryPending")}</p>
+            )}
+
+            {recoveryDownloaded ? (
+              <p className="success-note">{t("wb.ui.recoveryKeptConfirmed")}</p>
             ) : recoveryDownloadStarted ? (
               <label className="check-field danger-note">
                 <input
                   type="checkbox"
-                  checked={false}
+                  // False in this branch by construction — the confirmed case
+                  // renders the note above instead — but bound to the state it
+                  // reflects rather than pinned to a literal.
+                  checked={recoveryDownloaded}
                   disabled={busy}
                   onChange={(event) => {
                     if (!event.currentTarget.checked) return;
                     setRecoveryDownloaded(true);
-                    setStatus(
-                      "سُجل تأكيدك اليدوي بأن حزمة الاستعادة محفوظة؛ احتفظ بها حتى اكتمال التحقق بعد الإقلاع.",
-                    );
+                    setStatus({ key: "wb.recovery.savedConfirmed" });
                   }}
                 />
-                <span>
-                  أؤكد أن ملف حزمة الاستعادة حُفظ ويمكنني الوصول إليه دون هذا
-                  التطبيق
-                </span>
+                <span>{t("wb.ui.recoveryKeptCheckbox")}</span>
               </label>
             ) : (
-              <p className="danger-note">
-                الكتابة مقفلة حتى بدء التنزيل ثم تأكيدك اليدوي أن حزمة الاستعادة
-                حُفظت.
-              </p>
+              <p className="danger-note">{t("wb.ui.recoveryFirstNote")}</p>
             )}
 
             {operationNeedsTargetConfirmation && checkpoint === null ? (
               <label className="manual-confirm">
-                <span>تأكيد Target</span>
+                <span>{t("wb.ui.confirmTarget")}</span>
                 <input
                   type="text"
                   value={manualTargetConfirmation}
@@ -1011,7 +1333,9 @@ export function ExpressLrsParityWorkbenchView({
                     setManualTargetConfirmation(event.currentTarget.value)
                   }
                 />
-                <small>اكتب حرفيًا: {selectedTarget?.targetKey}</small>
+                <small>
+                  {t("wb.ui.typeExactly")} {selectedTarget?.targetKey}
+                </small>
               </label>
             ) : null}
 
@@ -1025,7 +1349,7 @@ export function ExpressLrsParityWorkbenchView({
                     setPowerAcknowledged(event.currentTarget.checked)
                   }
                 />
-                <span>ثبات الطاقة أثناء التفليش</span>
+                <span>{t("wb.ui.powerStableFlash")}</span>
               </label>
               {selectedTarget?.role === "tx" ? (
                 <label className="check-field">
@@ -1037,7 +1361,7 @@ export function ExpressLrsParityWorkbenchView({
                       setAntennaAcknowledged(event.currentTarget.checked)
                     }
                   />
-                  <span>هوائي جهاز الإرسال مثبت</span>
+                  <span>{t("wb.ui.antennaFitted")}</span>
                 </label>
               ) : null}
             </div>
@@ -1045,16 +1369,16 @@ export function ExpressLrsParityWorkbenchView({
             <button
               type="button"
               className="danger-button"
-              disabled={busy || !writeReady}
+              disabled={!readiness.firmwareWrite.ready}
               onClick={() => void flashPreparedFirmware()}
             >
               {method === "wifi"
-                ? "تنزيل وفتح صفحة Wi-Fi"
+                ? t("wb.ui.downloadOpenWifi")
                 : method === "download"
-                  ? "تنزيل الحزمة"
+                  ? t("wb.ui.downloadPackage")
                   : method === "stlink"
-                    ? "بدء STM32 DFU"
-                    : "بدء التفليش الحقيقي"}
+                    ? t("wb.ui.startStm32Dfu")
+                    : t("wb.ui.startRealFlash")}
             </button>
           </>
         )}
@@ -1073,18 +1397,20 @@ export function ExpressLrsParityWorkbenchView({
 
       <PhysicalAcceptancePanel
         context={physicalAcceptanceContext}
-        deviceChangesEnabled={deviceWritesReady}
+        readiness={readiness}
+        renderMessage={renderMessage}
+        locale={locale}
       />
 
       <DiagnosticsPanel
-        locale="ar"
+        locale={locale}
         capture={captureDiagnostics}
         captureWithGrants={captureDiagnosticsWithGrants}
       />
 
       <footer className="parity-footer">
-        <span>المصدر: ExpressLRS الرسمي</span>
-        <span>لا يظهر HARDWARE_OBSERVED إلا بعد جلسة جهاز فعلية.</span>
+        <span>{t("wb.ui.sourceOfficial")}</span>
+        <span>{t("wb.ui.hardwareObservedNote")}</span>
       </footer>
     </main>
   );

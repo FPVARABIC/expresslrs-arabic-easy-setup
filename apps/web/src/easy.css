@@ -6,10 +6,21 @@
   color: var(--text);
 }
 
+/*
+ * Hidden by clipping rather than by a large negative inline offset. In a
+ * right-to-left document `inset-inline-start` resolves to `right`, so
+ * `-9999px` pushes the link past the scrollable edge and gives the whole page
+ * a horizontal scrollbar — which is what it did at narrow widths.
+ */
 .skip-link {
   position: absolute;
-  inset-inline-start: -9999px;
+  inset-inline-start: 0;
   top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   padding: 0.5rem 1rem;
   background: var(--surface-strong);
   color: var(--text);
@@ -17,7 +28,10 @@
 }
 
 .skip-link:focus {
-  inset-inline-start: 0;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
 }
 
 .product-header {
@@ -434,4 +448,54 @@
 .build-banner-error {
   flex: 1 1 100%;
   color: var(--danger);
+}
+
+/* Shown only inside an installed native host, which reports what it was built
+   from. A 12-character digest has no break opportunity, so it is given one
+   rather than allowed to widen the banner past the viewport. */
+.build-banner-host {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.build-banner-host code {
+  direction: ltr;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/*
+ * Easy Mode gets the same two controls beside the binding phrase as Advanced
+ * Mode. A generated phrase has to be readable, or it cannot be typed into the
+ * second device.
+ */
+.bind-phrase-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
+}
+
+.bind-phrase-actions button {
+  min-height: 40px;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--easy-line, #cbd5e1);
+  border-radius: 8px;
+  background: var(--easy-surface, #ffffff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.bind-phrase-replace {
+  margin-block-start: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--easy-line, #cbd5e1);
+  border-radius: 8px;
+}
+
+/* Advisory, not a refusal: the phrase works and nothing is withheld. */
+.bind-phrase-weak {
+  color: var(--easy-warn, #92400e);
 }

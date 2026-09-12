@@ -31,3 +31,32 @@ ExpressLRS `4.1.0` is the Stable behavior/build baseline for the first analysis.
 ## Sync record fields for future updates
 
 كل مزامنة لاحقة تسجل: inspection date، previous/new SHA، release/tag، change classes، affected patch areas، build/test results، performance re-baseline requirement، license/security changes، والقرار.
+
+## Receiver-as-transmitter (`--rx-as-tx`)
+
+Recorded here because an earlier implementation modelled this feature as
+AirPort, which is a different upstream feature entirely. The behaviour below is
+read from the pinned sources above, not inferred.
+
+`ExpressLRS/ExpressLRS` @ `73ce820ba51437f73f31686233b607c58e188e7b`:
+
+| Location | Behaviour |
+| --- | --- |
+| `src/python/binary_configurator.py:219` | `--rx-as-tx {internal,external}` — "Flash an RX module with TX firmware, either internal (full-duplex) or external (half-duplex)" |
+| `src/python/binary_configurator.py:238` | `platform.startswith('esp32') or platform.startswith('esp8285') and mode == internal`. Python binds `and` tighter than `or`, so ESP32 takes both modes, ESP8285 takes internal only, and anything else — ESP8266 and STM32 included — reaches `exit(1)`. |
+| `src/python/binary_configurator.py:239` | `file = config['firmware'].replace('_RX', '_TX')` — the transmitter artifact is selected, not the receiver one patched. |
+| `src/python/binary_configurator.py:89-94` | `is-airport` comes from `--airport-baud` alone. `--rx-as-tx` never sets it. |
+| `src/python/binary_configurator.py:263` | `DeviceType.RX if '.rx_' in args.target` — read from the dotted catalog path, so the device type stays RX and the receiver option keys still apply. |
+| `src/python/UnifiedConfiguration.py:229` | The layout directory comes from the unmutated catalog entry, which still names an `_RX` artifact, so `hardware/RX/<layout_file>` is used even while the TX build is flashed. |
+| `src/python/UnifiedConfiguration.py:59-67` | Requires `serial_rx` and `serial_tx`, else refuses. External mode folds `serial_rx` onto `serial_tx`, guarded by the truthiness of `serial_rx`. `led` is remapped to `led_red` in both modes. |
+
+`ExpressLRS/ExpressLRS-Configurator` @ `421d656f1987117e37472979444cee464e3fcdef` reaches the
+same answers independently: `src/api/src/factories/TargetUserDefinesFactory.ts:92-100`
+builds the per-platform mode lists, and
+`src/api/src/services/BinaryFlashingStrategy/index.ts:361-366` performs the same
+`_RX` → `_TX` swap.
+
+One deliberate divergence: upstream's `replace` is unconditional, so a Target
+whose artifact name contains no `_RX` silently keeps the receiver build. This
+application refuses that case as `NO_TX_ARTIFACT` rather than flash receiver
+firmware and call the device a transmitter.

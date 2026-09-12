@@ -20,6 +20,9 @@ function snapshot(
       webSerialSupported: true,
       webUsbSupported: false,
       nativeBridge: false,
+      nativeHostWebBuild: null,
+      nativeHostNativeSource: null,
+      nativeHostBridge: null,
       language: "ar",
       platform: "Linux",
       standaloneDisplay: false,
@@ -60,6 +63,9 @@ function snapshot(
       packageSegmentHashes: ["b".repeat(64)],
       bindingPhraseConfigured: true,
       recoveryPackageDownloaded: true,
+      durableRecoveryVerified: true,
+      durableRecoveryBackend: "ANDROID_SAF",
+      durableRecoverySha256: "b".repeat(64),
     },
     recovery: {
       journalState: "ready",
@@ -82,6 +88,10 @@ describe("diagnostics snapshot", () => {
     expect(parsed.firmware.bindingPhraseConfigured).toBe(true);
     // There is no field for the phrase or the derived UID at all.
     expect(json).not.toMatch(/bindPhrase|bindingPhrase"|"uid"/iu);
+    // Nor for the recovery passphrase. It is a function argument and
+    // component-local state; it never enters the controller state a snapshot
+    // is assembled from, so there is nothing here to filter.
+    expect(json).not.toMatch(/passphrase/iu);
   });
 
   it("redacts a secret an operator typed into free text", () => {

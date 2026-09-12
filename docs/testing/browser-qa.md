@@ -8,6 +8,12 @@ thing in this repository that can support a `BROWSER_VERIFIED` claim: jsdom
 does not enforce a Content-Security-Policy, does not run a service worker, and
 does not decide whether `navigator.serial` exists.
 
+The document also carries the policy in a `<meta http-equiv>` tag, so the
+Content-Security-Policy is in force here whether or not the server sets a
+header. That is deliberate: GitHub Pages sets none, and neither does the
+Android host's asset loader — which is the one context where this page can
+reach USB hardware.
+
 - Suite: [`browser-qa/shipped-application.spec.ts`](../../browser-qa/shipped-application.spec.ts)
 - Config: [`playwright.config.ts`](../../playwright.config.ts)
 - Server: [`scripts/serve-built-web.mjs`](../../scripts/serve-built-web.mjs)
@@ -17,6 +23,18 @@ does not decide whether `navigator.serial` exists.
 ```bash
 pnpm --filter @elrs-easy/web build
 pnpm qa:browser
+```
+
+`pnpm qa:browser:pinned` builds with the current commit SHA first, which is
+what CI does. Use it before pushing: a build with no commit identity leaves the
+candidate-SHA field empty, and an empty field cannot overflow a narrow layout
+the way a real 40-character hex run once did.
+
+Where a Chromium is already installed rather than downloaded by Playwright,
+point at it instead of running `playwright install`:
+
+```bash
+PLAYWRIGHT_CHROMIUM_PATH=/path/to/chromium pnpm qa:browser:pinned
 ```
 
 The server reads `apps/web/dist/_headers` and applies its `/*` block, because
@@ -69,3 +87,24 @@ context):
 
 This is desktop Linux Chromium. It says nothing about Chrome for Android; see
 [ANDROID.md](../ANDROID.md) for what is and is not known there.
+
+## Run it the way CI does
+
+`pnpm qa:browser` tests whatever is in `apps/web/dist`. In CI that is the real
+GitHub Pages artifact, built with the commit SHA embedded as the build
+identity. A local `pnpm build` leaves that identity unset, so the banner reads
+`unpinned-development-build` and the acceptance panel's candidate SHA is empty.
+
+That difference is not cosmetic. A 40-character hex run has no break
+opportunity in it, and one shipped defect — the candidate SHA setting the
+metadata grid's minimum width and pushing the whole panel past a 320px viewport
+— was invisible against an unpinned build and only appeared in CI.
+
+Before pushing, run:
+
+```sh
+pnpm qa:browser:pinned
+```
+
+which builds with the current commit SHA first, then runs the same suite. That
+is the pre-push equivalent of the CI step.

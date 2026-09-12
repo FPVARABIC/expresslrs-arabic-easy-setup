@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0e1116" />
     <meta name="referrer" content="no-referrer" />
+    <!--
+      The same policy `apps/web/public/_headers` sends, carried in the document
+      so it also applies where no host can set a header: GitHub Pages, and the
+      Android WebView, which serves these bytes from
+      https://appassets.androidplatform.net/ with no headers at all. That is the
+      one place a WebView with USB access runs this page, so the policy has to
+      travel with it. `frame-ancestors` is omitted because it is ignored in a
+      meta policy; the header still carries it, and the Android host refuses
+      subframe navigation natively. `scripts/check-security-headers.mjs` keeps
+      the two in step, and rejects `unsafe-eval` and `unsafe-inline` in either.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; base-uri 'none'; connect-src 'self' https://expresslrs.github.io http://10.0.0.1; font-src 'self'; form-action 'none'; img-src 'self' data:; manifest-src 'self'; object-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'"
+    />
     <meta
       name="description"
       content="معاينة تطويرية عربية للقراءة فقط مع ExpressLRS؛ التحقق على العتاد معلّق"

@@ -23,8 +23,11 @@ import {
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import type { CrsfParameter } from "../hardware/crsf";
 import {
+  GENERATED_BIND_PHRASE_BITS,
   MAX_BIND_PHRASE_LENGTH,
   bindPhraseIssue,
+  bindPhraseStrength,
+  generateBindPhrase,
 } from "../hardware/bind-phrase";
 import { isMachineVerifiedBinding } from "../hardware/binding-evidence";
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
@@ -89,6 +92,15 @@ export function EasySetup({
     connectHardware,
     disconnectHardware,
     downloadRecovery,
+    exportDurableRecoveryPackage,
+    pickRecoveryFile,
+    recoverFromImportedPackage,
+    unlockRecoveryFile,
+    confirmImportedRecoveryIdentity,
+    pickedRecovery,
+    importedIdentityConfirmed,
+    importedRecovery,
+    durableRecovery,
     exactHardwareTarget,
     flashPreparedFirmware,
     flashProgress,
@@ -120,6 +132,7 @@ export function EasySetup({
     setSettingDraft,
     setTargetId,
     settingDraft,
+    renderMessage,
     startBinding,
     targetId,
     updateOption,
@@ -136,6 +149,18 @@ export function EasySetup({
   );
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
   const [settingId, setSettingId] = useState("");
+  /**
+   * The recovery passphrases, held only in the field the operator typed them
+   * into. Never persisted, never put in application state that is serialised,
+   * and never included in diagnostics.
+   */
+  const [phraseVisible, setPhraseVisible] = useState(false);
+  const [phraseReplacePending, setPhraseReplacePending] = useState(false);
+  const [phraseGenerated, setPhraseGenerated] = useState(false);
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] =
+    useState("");
+  const [importPassphrase, setImportPassphrase] = useState("");
   const [bindAwaitingObservation, setBindAwaitingObservation] = useState(false);
   const [operatorBindEvidence, setOperatorBindEvidence] = useState<
     string | null
@@ -191,7 +216,7 @@ export function EasySetup({
       // The controller names the specific missing condition; Easy Mode shows
       // that, never a generic refusal.
       setFailed(true);
-      setOutcome({ kind: "failed", text: result.message });
+      setOutcome({ kind: "failed", text: renderMessage(result.message) });
       return;
     }
     if (isMachineVerifiedBinding(evidence)) {
@@ -239,7 +264,7 @@ export function EasySetup({
     setStep("verify");
     if (result.applied === null) {
       setFailed(true);
-      setOutcome({ kind: "failed", text: result.message });
+      setOutcome({ kind: "failed", text: renderMessage(result.message) });
       return;
     }
     setOutcome(
@@ -262,7 +287,7 @@ export function EasySetup({
     setOutcome(
       result.verified
         ? { kind: "verified", text: t("easy.fw.verified") }
-        : { kind: "failed", text: result.message },
+        : { kind: "failed", text: renderMessage(result.message) },
     );
   }
 
@@ -274,7 +299,7 @@ export function EasySetup({
     setOutcome(
       result.verified
         ? { kind: "verified", text: t("easy.fw.verified") }
-        : { kind: "failed", text: result.message },
+        : { kind: "failed", text: renderMessage(result.message) },
     );
   }
 
@@ -305,6 +330,7 @@ export function EasySetup({
   );
   const evidenceLevel = operatorBindEvidence ?? bindEvidence;
   const phraseIssue = bindPhraseIssue(options.bindPhrase);
+  const phraseStrength = bindPhraseStrength(options.bindPhrase);
 
   if (operation === null) {
     return (
@@ -577,25 +603,107 @@ export function EasySetup({
                       </label>
                     )}
 
-                    <label>
+                    <label className="bind-phrase-field">
                       <span>{t("easy.fw.bindPhrase")}</span>
                       <input
-                        type="password"
+                        type={phraseVisible ? "text" : "password"}
                         autoComplete="off"
                         maxLength={MAX_BIND_PHRASE_LENGTH}
                         value={options.bindPhrase}
                         disabled={busy}
-                        onChange={(event) =>
-                          updateOption("bindPhrase", event.currentTarget.value)
-                        }
+                        onChange={(event) => {
+                          updateOption("bindPhrase", event.currentTarget.value);
+                          setPhraseGenerated(false);
+                          setPhraseReplacePending(false);
+                        }}
                       />
                     </label>
+                    <div className="bind-phrase-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhraseVisible(!phraseVisible);
+                        }}
+                      >
+                        {phraseVisible
+                          ? t("easy.fw.bindPhraseHide")
+                          : t("easy.fw.bindPhraseReveal")}
+                      </button>
+                      <button
+                        type="button"
+                        // Follows the field it writes into. `busy` is
+                        // transient in-flight state, not a policy: an
+                        // enabled button that writes into a disabled field
+                        // is the inconsistency, not the disabling.
+                        disabled={busy}
+                        onClick={() => {
+                          // An existing phrase is never overwritten by a
+                          // single click: a receiver may already be flashed
+                          // with it, and nothing here can put it back.
+                          if (options.bindPhrase !== "") {
+                            setPhraseReplacePending(true);
+                            return;
+                          }
+                          updateOption("bindPhrase", generateBindPhrase());
+                          setPhraseVisible(true);
+                          setPhraseGenerated(true);
+                        }}
+                      >
+                        {t("easy.fw.bindPhraseGenerate")}
+                      </button>
+                    </div>
+                    <p className="easy-note">
+                      {t("easy.fw.bindPhraseGenerateHint", {
+                        bits: GENERATED_BIND_PHRASE_BITS,
+                      })}
+                    </p>
+                    {phraseReplacePending ? (
+                      <div className="bind-phrase-replace" role="group">
+                        <strong>{t("easy.fw.bindPhraseReplaceHeading")}</strong>
+                        <p className="easy-note">
+                          {t("easy.fw.bindPhraseReplaceBody")}
+                        </p>
+                        <div className="bind-phrase-actions">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              updateOption("bindPhrase", generateBindPhrase());
+                              setPhraseVisible(true);
+                              setPhraseGenerated(true);
+                              setPhraseReplacePending(false);
+                            }}
+                          >
+                            {t("easy.fw.bindPhraseReplaceConfirm")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPhraseReplacePending(false);
+                            }}
+                          >
+                            {t("easy.fw.bindPhraseReplaceCancel")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {phraseGenerated ? (
+                      <p className="easy-note">
+                        {t("easy.fw.bindPhraseGenerated")}
+                      </p>
+                    ) : null}
                     <p className="easy-note">{t("easy.fw.bindPhraseHint")}</p>
                     {phraseIssue === null ? null : (
                       <p className="easy-error">
                         {t(`easy.fw.bindPhrase.${phraseIssue}`)}
                       </p>
                     )}
+                    {phraseStrength === "WEAK" ? (
+                      <p className="easy-note bind-phrase-weak">
+                        {t("easy.fw.bindPhraseWeak")}{" "}
+                        {t("easy.fw.bindPhraseWeakWhy")}
+                      </p>
+                    ) : null}
                     {options.bindPhrase === "" ? null : (
                       <p className="easy-note">
                         {t("easy.fw.bindPhraseUnverifiable")}
@@ -651,6 +759,86 @@ export function EasySetup({
                       {t("easy.fw.build")}
                     </button>
 
+                    {/*
+                      Outside the prepared-package block on purpose. It was
+                      inside it, which meant the one path that recovers a
+                      device after a reinstall required first building a
+                      firmware package over the network. Exporting needs a
+                      prepared package; importing needs only the file.
+                    */}
+                    <button
+                      type="button"
+                      onClick={() => void pickRecoveryFile()}
+                      disabled={busy}
+                    >
+                      {t("easy.fw.pickRecoveryFile")}
+                    </button>
+                    {pickedRecovery === null ? null : (
+                      <>
+                        <p className="easy-note">
+                          {t("easy.fw.pickedRecovery", {
+                            product:
+                              pickedRecovery.header.identity.target.productName,
+                            created: pickedRecovery.header.identity.createdAt,
+                          })}
+                        </p>
+                        <label className="easy-field">
+                          <span>{t("easy.fw.recoveryPassphrase")}</span>
+                          <input
+                            type="password"
+                            autoComplete="current-password"
+                            value={importPassphrase}
+                            onChange={(event) => {
+                              setImportPassphrase(event.target.value);
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void unlockRecoveryFile(importPassphrase)
+                          }
+                          disabled={busy}
+                        >
+                          {t("easy.fw.unlockRecoveryFile")}
+                        </button>
+                      </>
+                    )}
+                    {importedRecovery === null ? null : (
+                      <>
+                        <p className="easy-note">
+                          {t("easy.fw.importedIdentityHeading")}:{" "}
+                          {importedRecovery.productName} ·{" "}
+                          {importedRecovery.targetId} ·{" "}
+                          {importedRecovery.releaseLabel}
+                        </p>
+                        <label className="easy-check">
+                          <input
+                            type="checkbox"
+                            checked={importedIdentityConfirmed}
+                            onChange={(event) => {
+                              confirmImportedRecoveryIdentity(
+                                event.target.checked,
+                              );
+                            }}
+                          />
+                          <span>{t("easy.fw.importedIdentityConfirm")}</span>
+                        </label>
+                        {/*
+                              The control that actually restores from an
+                              imported package — the path that works after a
+                              reinstall, when the journal is gone. Refused by
+                              name until the identity above is confirmed.
+                            */}
+                        <button
+                          type="button"
+                          onClick={() => void recoverFromImportedPackage()}
+                          disabled={busy}
+                        >
+                          {t("easy.fw.restoreFromImported")}
+                        </button>
+                      </>
+                    )}
                     {prepared === null ? null : (
                       <>
                         <p className="easy-note">
@@ -663,6 +851,60 @@ export function EasySetup({
                             {t("easy.fw.bindPhraseConfigured")}
                           </p>
                         ) : null}
+                        <label className="easy-field">
+                          <span>{t("easy.fw.recoveryPassphrase")}</span>
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={recoveryPassphrase}
+                            onChange={(event) => {
+                              setRecoveryPassphrase(event.target.value);
+                            }}
+                          />
+                        </label>
+                        <label className="easy-field">
+                          <span>{t("easy.fw.recoveryPassphraseConfirm")}</span>
+                          <input
+                            type="password"
+                            autoComplete="new-password"
+                            value={recoveryPassphraseConfirm}
+                            onChange={(event) => {
+                              setRecoveryPassphraseConfirm(event.target.value);
+                            }}
+                          />
+                        </label>
+                        <p className="easy-note">
+                          {t("easy.fw.recoveryPassphraseHint")}
+                        </p>
+                        <p className="easy-note">
+                          {t("easy.fw.recoveryPassphraseWhy")}
+                        </p>
+                        {/*
+                          Always clickable. The passphrase is a prerequisite
+                          collected right here, so pressing this with an empty
+                          field answers with the exact reason rather than
+                          presenting a dead control.
+                        */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void exportDurableRecoveryPackage(
+                              recoveryPassphrase,
+                              recoveryPassphraseConfirm,
+                            )
+                          }
+                          disabled={busy}
+                        >
+                          {t("easy.fw.exportDurableRecovery")}
+                        </button>
+                        {durableRecovery !== null ? (
+                          <p className="easy-note">
+                            {t("easy.fw.durableRecoveryVerified", {
+                              location: durableRecovery.displayName,
+                            })}
+                          </p>
+                        ) : null}
+
                         <button
                           type="button"
                           onClick={() => downloadRecovery()}

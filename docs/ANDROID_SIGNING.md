@@ -45,9 +45,39 @@ It is split into two jobs, and the split is the substance:
 
 The candidate build asserts its own output is unsigned and fails if it is not,
 because a signature there would mean a key had been readable by pull-request
-code. Gradle also refuses to run at all if any of the four secret names appears
-in its environment, which turns "we do not pass the key to Gradle" from a
-promise into a build failure.
+code. Unsigned is the correct output of a build that ran pull-request code, not
+a degraded one: an unsigned APK cannot be installed, which is the honest state
+of an artifact nobody has vouched for yet.
+
+### What the candidate build publishes
+
+Beside the APK goes a machine-readable provenance manifest — source SHA,
+workflow and run id, artifact name, APK SHA-256 and byte length, application id,
+`versionCode`, `versionName`, build tools, and both embedded source digests.
+Every field is checked non-empty and the three digests are checked to be 64 hex
+characters before it is written, because these are the signer's only inputs: a
+field that says nothing would let an untraceable APK through. The artifact id is
+only known after upload, so the run summary records it alongside the other three
+values the signer needs.
+
+### What the candidate build may sign with
+
+`android/app/build.gradle.kts` has no consumer for `ELRS_KEYSTORE_BASE64`,
+`ELRS_KEYSTORE_PASSWORD`, `ELRS_KEY_ALIAS` or `ELRS_KEY_PASSWORD` — and every
+task throws if any of them is in the environment. That turns "we do not pass the
+key to Gradle" from a promise into a build failure: a workflow edit that exposes
+them fails the build that would have read them, instead of succeeding quietly.
+The check is on every task rather than on packaging, because the leak that
+matters is any candidate code reading the environment.
+
+The only signing identity Gradle can configure is `disposableTest`, from
+`ELRS_TEST_KEYSTORE_*`. The update-persistence job generates that keystore, uses
+it, and shreds it; the property under test there is "the same key across two
+builds", which any key satisfies. It is named apart from the permanent secrets
+so the two cannot be confused or wired together by accident.
+
+All of this is enforced by `pnpm check:ci-hygiene`, and each rule was proven by
+reintroducing the defect it names and watching the check fail.
 
 ## What you need to do
 
@@ -225,7 +255,7 @@ correct outcome: the numbers are cheap and the confusion is not.
 
 ## Fully local signing fallback
 
-If you would rather not merge the signer workflow at all, the same result is
+If you would rather not use the signer workflow at all, the same result is
 reachable by hand, and the security properties are actually *better* — the key
 never leaves your machine. What you give up is the audit trail and the
 enforced verification.
@@ -314,3 +344,8 @@ install. There is no rotation that preserves installability: create a new
 keystore, commit the new fingerprint, and tell every tester to uninstall before
 installing the next candidate — which erases app storage, so they must export
 their durable recovery package first.
+
+## Status
+
+Nothing has been signed. No keystore exists, no secrets are configured, and the
+signer has never run, so `SIGNED_PHYSICAL_TEST_APK_READY` is **No**.
