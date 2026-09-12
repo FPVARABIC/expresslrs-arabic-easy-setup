@@ -16,6 +16,13 @@ import {
   UNSIGNED_MANIFEST_RELATIVE_PATH,
   verifyUnsignedCandidateLayout,
 } from "./verify-unsigned-candidate-layout.mjs";
+import {
+  STAGE2_APK_RELATIVE_PATH,
+  STAGE2_MANIFEST_RELATIVE_PATH,
+  verifyStage2ArtifactLayout,
+} from "./verify-stage2-artifact-layout.mjs";
+import { verifyStage2RehearsalSource } from "./verify-stage2-rehearsal-source.mjs";
+import { verifyDisposableRehearsalWorkflow } from "./verify-disposable-rehearsal-workflow.mjs";
 
 const allowedWorkflows = new Set([
   "ci.yml",
@@ -26,6 +33,10 @@ const allowedWorkflows = new Set([
   // cannot reach the signing key" a structural claim. See
   // docs/ANDROID_SIGNING.md.
   "android-physical-test-signer.yml",
+  // A manual, proof-only rehearsal that generates and destroys its own
+  // disposable key. It never names the permanent environment or secrets and
+  // never uploads an APK.
+  "android-physical-test-rehearsal.yml",
 ]);
 const workflowDirectory = ".github/workflows";
 const forbiddenPaths = [
@@ -288,6 +299,312 @@ if (!existsSync(signerPath)) {
       `${signerPath} picks build-tools by listing the directory; pin the version instead`,
     );
   }
+}
+
+// Stage 3 is deliberately weaker than the production signer in one direction
+// (its generated key is disposable) and stricter in another (no APK may leave
+// the runner). Keep that distinction structural rather than dependent on a
+// label in the Actions UI.
+const rehearsalPath = ".github/workflows/android-physical-test-rehearsal.yml";
+if (!existsSync(rehearsalPath)) {
+  fail(`${rehearsalPath} is missing`);
+} else {
+  const rehearsal = readFileSync(rehearsalPath, "utf8");
+  try {
+    verifyDisposableRehearsalWorkflow(rehearsal);
+  } catch (error) {
+    for (const problem of error.message.split("\n")) {
+      fail(`${rehearsalPath}: ${problem}`);
+    }
+  }
+
+  function replaceRehearsalOnce(source, before, after) {
+    if (!source.includes(before)) {
+      fail(`rehearsal mutation anchor is missing: ${JSON.stringify(before)}`);
+      return source;
+    }
+    return source.replace(before, after);
+  }
+
+  function expectRehearsalWorkflowRejection(name, mutate, expectedMessage) {
+    try {
+      verifyDisposableRehearsalWorkflow(mutate(rehearsal));
+      fail(`rehearsal-workflow boundary accepted ${name}`);
+    } catch (error) {
+      if (!expectedMessage.test(error.message)) {
+        fail(
+          `rehearsal-workflow boundary rejected ${name} for the wrong reason: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  expectRehearsalWorkflowRejection(
+    "push-trigger",
+    (source) =>
+      replaceRehearsalOnce(source, "  workflow_dispatch:\n", "  push:\n"),
+    /workflow_dispatch as its only trigger/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "permanent-environment",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "environment: physical-test-signing-rehearsal",
+        "environment: physical-test-signing",
+      ),
+    /separate protected environment|permanent signing environment/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "permanent-secret-reference",
+    (source) => source + "\n# ${{ secrets.ELRS_KEYSTORE_BASE64 }}\n",
+    /must not name or read a signing secret/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "candidate-checkout",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "ref: ${{ github.sha }}",
+        "ref: ${{ inputs.source_sha }}",
+      ),
+    /pinned to github\.sha|caller-supplied ref/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "missing-stage2-verifier",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "verify-stage2-rehearsal-source.mjs",
+        "stage2-source-not-verified.mjs",
+      ),
+    /does not verify the completed Stage 2 run/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "network-after-key-generation",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "- name: Align and sign the disposable copy",
+        "- name: Unsafe network after key\n        run: curl https://example.invalid\n\n      - name: Align and sign the disposable copy",
+      ),
+    /network access remains after the disposable key exists/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "action-while-key-exists",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "- name: Align and sign the disposable copy",
+        "- name: Unsafe action after key\n        uses: example/action@0000000000000000000000000000000000000000\n\n      - name: Align and sign the disposable copy",
+      ),
+    /third-party action runs while the disposable key exists/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "cleanup-without-shred",
+    (source) => source.replaceAll("shred -u", "rm -f"),
+    /cleanup is missing "shred -u"/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "unproven-key-destruction",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        'if (field("KEY_DESTROYED") !== "true")',
+        'if (field("KEY_DESTROYED") !== "false")',
+      ),
+    /does not refuse missing disposable-key destruction/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "published-apk",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "${{ runner.temp }}/stage3-disposable.apksigner.txt",
+        "${{ runner.temp }}/stage3-disposable.apksigner.txt\n            ${{ runner.temp }}/STAGE3-DISPOSABLE-DO-NOT-INSTALL.apk",
+      ),
+    /proof artifact path includes an APK/u,
+  );
+  expectRehearsalWorkflowRejection(
+    "production-artifact-name",
+    (source) =>
+      replaceRehearsalOnce(
+        source,
+        "REHEARSAL-PROOF-ONLY-NO-APK-${{ inputs.source_sha }}",
+        "elrs-android-physicaltest-signed-${{ inputs.source_sha }}",
+      ),
+    /not unmistakably named|production signed-artifact namespace/u,
+  );
+}
+
+// The Stage 2 run is expected to be red only because the key is absent. Prove
+// that the verifier rejects every materially different history before Stage 3
+// is allowed to manufacture even a disposable signature.
+const stage2RunId = "4001";
+const stage2ArtifactId = "5001";
+const stage2SignerSha = "a".repeat(40);
+const stage2SourceSha = "b".repeat(40);
+const stage2Fixture = {
+  run: {
+    id: Number(stage2RunId),
+    repository: { full_name: "FPVARABIC/example" },
+    path: ".github/workflows/android-physical-test-signer.yml",
+    event: "workflow_dispatch",
+    status: "completed",
+    conclusion: "failure",
+    head_branch: "main",
+    head_sha: stage2SignerSha,
+    run_attempt: 1,
+  },
+  jobs: {
+    jobs: [
+      {
+        name: "Verify the candidate, with no secrets present",
+        conclusion: "success",
+        run_id: Number(stage2RunId),
+        head_sha: stage2SignerSha,
+        steps: [
+          {
+            name: "Pass the verified candidate to the signing job",
+            conclusion: "success",
+          },
+        ],
+      },
+      {
+        name: "Sign the verified candidate",
+        conclusion: "failure",
+        run_id: Number(stage2RunId),
+        head_sha: stage2SignerSha,
+        steps: [
+          {
+            name: "Re-confirm the digest immediately before signing",
+            conclusion: "success",
+          },
+          {
+            name: "Materialise the signing keystore",
+            conclusion: "failure",
+          },
+          { name: "Align and sign", conclusion: "skipped" },
+          {
+            name: "Verify the signature and the certificate fingerprint",
+            conclusion: "skipped",
+          },
+          { name: "Write the signed provenance", conclusion: "skipped" },
+          { name: "Publish the signed candidate", conclusion: "skipped" },
+          { name: "Destroy the keystore", conclusion: "success" },
+        ],
+      },
+    ],
+  },
+  artifact: {
+    id: Number(stage2ArtifactId),
+    name: `verified-unsigned-${stage2SourceSha}`,
+    expired: false,
+    workflow_run: { id: Number(stage2RunId) },
+  },
+  oldSigner: { sha: "trusted-signer-blob" },
+  currentSigner: { sha: "trusted-signer-blob" },
+  repository: "FPVARABIC/example",
+  stage2RunId,
+  stage2ArtifactId,
+  stage2SignerSha,
+  sourceSha: stage2SourceSha,
+  defaultBranch: "main",
+};
+
+verifyStage2RehearsalSource(stage2Fixture);
+
+function expectStage2SourceRejection(name, mutate, expectedMessage) {
+  const fixture = structuredClone(stage2Fixture);
+  mutate(fixture);
+  try {
+    verifyStage2RehearsalSource(fixture);
+    fail(`Stage 2 source verifier accepted ${name}`);
+  } catch (error) {
+    if (!expectedMessage.test(error.message)) {
+      fail(
+        `Stage 2 source verifier rejected ${name} for the wrong reason: ${error.message}`,
+      );
+    }
+  }
+}
+
+expectStage2SourceRejection(
+  "a green signer run",
+  (fixture) => (fixture.run.conclusion = "success"),
+  /run conclusion/u,
+);
+expectStage2SourceRejection(
+  "another workflow",
+  (fixture) => (fixture.run.path = ".github/workflows/other.yml"),
+  /run workflow path/u,
+);
+expectStage2SourceRejection(
+  "an expired artifact",
+  (fixture) => (fixture.artifact.expired = true),
+  /artifact has expired/u,
+);
+expectStage2SourceRejection(
+  "a failed verification job",
+  (fixture) => (fixture.jobs.jobs[0].conclusion = "failure"),
+  /verify job conclusion/u,
+);
+expectStage2SourceRejection(
+  "a key that materialised",
+  (fixture) =>
+    (fixture.jobs.jobs[1].steps.find(
+      (step) => step.name === "Materialise the signing keystore",
+    ).conclusion = "success"),
+  /missing-secret stop/u,
+);
+expectStage2SourceRejection(
+  "a signed candidate",
+  (fixture) =>
+    (fixture.jobs.jobs[1].steps.find(
+      (step) => step.name === "Align and sign",
+    ).conclusion = "success"),
+  /Align and sign step/u,
+);
+expectStage2SourceRejection(
+  "failed cleanup",
+  (fixture) =>
+    (fixture.jobs.jobs[1].steps.find(
+      (step) => step.name === "Destroy the keystore",
+    ).conclusion = "failure"),
+  /keystore cleanup/u,
+);
+expectStage2SourceRejection(
+  "changed signer source",
+  (fixture) => (fixture.currentSigner.sha = "changed-signer-blob"),
+  /signer blob/u,
+);
+expectStage2SourceRejection(
+  "an extra job",
+  (fixture) => fixture.jobs.jobs.push({ name: "Unexpected" }),
+  /total Stage 2 jobs/u,
+);
+
+const stage2LayoutRoot = mkdtempSync(join(tmpdir(), "elrs-stage2-layout-"));
+function writeStage2Layout(root) {
+  writeFileSync(join(root, STAGE2_APK_RELATIVE_PATH), "verified-unsigned");
+  writeFileSync(join(root, STAGE2_MANIFEST_RELATIVE_PATH), "{}");
+}
+try {
+  writeStage2Layout(stage2LayoutRoot);
+  verifyStage2ArtifactLayout(stage2LayoutRoot);
+  writeFileSync(join(stage2LayoutRoot, "unexpected.apk"), "ambiguous");
+  try {
+    verifyStage2ArtifactLayout(stage2LayoutRoot);
+    fail("Stage 2 layout verifier accepted a second APK");
+  } catch (error) {
+    if (!/expected exactly/u.test(error.message)) {
+      fail(
+        `Stage 2 layout verifier rejected the second APK incorrectly: ${error.message}`,
+      );
+    }
+  }
+} finally {
+  rmSync(stage2LayoutRoot, { recursive: true, force: true });
 }
 
 // The first live rehearsal exposed a contract mismatch that a source-only
