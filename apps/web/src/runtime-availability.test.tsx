@@ -1169,7 +1169,10 @@ describe("runtime availability, from the production entry point", () => {
       surface: "advanced",
       transport: "browser",
       control: "AirPort transparent serial (checkbox)",
-      readinessInputs: ["a Target chosen"],
+      readinessInputs: [
+        "a Target chosen",
+        "a Target whose image the pinned official flasher encodes AirPort into (ESP); an STM32 Target closes the control with that reason written beside it",
+      ],
       disabledBefore,
       enabledAfter: !control.disabled,
       handler: "useDeviceController.updateOption('airportEnabled')",
