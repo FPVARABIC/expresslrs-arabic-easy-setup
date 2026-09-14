@@ -51,6 +51,24 @@ device; they are not dependencies.
 | `ExpressLRS/ExpressLRS-Configurator` | Cross-check of the rx-as-tx per-platform mode lists and artifact swap | `421d656f1987117e37472979444cee464e3fcdef` | `1.8.3` at the same SHA |
 | `ExpressLRS/web-flasher` | Browser flasher architecture | `4125a4e07d37ce1e872bb562ebd4286e6fd143f9` | none selected; reuse blocked pending a license answer |
 
+### Files read for the flash-path parity audit
+
+Every bootloader-entry, rate and block-size rule in `passthrough.ts`,
+`esp-flasher.ts` and `useDeviceController.ts` cites one of these, read at the
+pinned revision rather than from memory.
+
+| Repository @ revision | File | What it settles |
+| --- | --- | --- |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/espflasher.js` | Rates per path (betaflight 420000, etx 230400, passthru 230400, uart 460800 with 115200 ROM rate on ESP32), `no_reset` after passthrough, `ESP_RAM_BLOCK = 0x800`, `FLASH_WRITE_SIZE = 0x800` for etx/betaflight, the `bl` fallback for a non-ESP32 receiver on UART |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/passthrough.js` | `reset_to_bootloader()`: `07 07 12 20`, 32 × `0x55`, 200 ms, `[EC 04 32 'b' 'l' crc]`, target-line comparison, `MismatchError` |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/xmodem.js` | STM32 behind a flight controller: `CCC` detection, `hold down button` → `bbbbbb`, the `_RX_` target check |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` (4.1.0) | `src/lib/rx-crsf/RXEndpoint.cpp` | `handleRaw`: the `bl` frame is matched on `frame_size >= 4` and the first two payload bytes |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/src/rx_main.cpp` | `reset_into_bootloader()`: prints `&target_name[4]`, ESP8285 reboots into UART download mode, ESP32 enters `serialUpdate` |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/lib/SerialUpdate/devSerialUpdate.cpp` | The ESP32 `serialUpdate` state stops the radio and runs the upload stub on the serial port |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/lib/tx-crsf/TXModuleParameters.cpp` | The complete list of transmitter Lua commands: Bind, Enable WiFi, Enable Rx WiFi, Enable Backpack WiFi, Enable VRx WiFi, BLE Joystick, Send VTx — no serial-update or bootloader command exists |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/lib/rx-crsf/RXParameters.cpp` | The receiver's Lua parameters, including the `version_domain` info entry |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/lib/FHSS/FHSS.cpp` | The regulatory-domain names (`AU915 FCC915 EU868 IN866 AU433 EU433 US433 US433W ISM2G4 CE_LBT`) and `addDomainInfo()`, which appends them to the version string the device reports |
+
 ## Runtime sources — what actually reaches a device
 
 Everything is fetched from the official Web Flasher mirror:

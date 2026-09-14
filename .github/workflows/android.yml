@@ -26,6 +26,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned to the version the trusted signer (`android-physical-test-signer.yml`)
+  # uses, so a candidate's badging and signature report are produced by the
+  # same aapt2 and apksigner that later verify the signed artifact.
+  CANDIDATE_BUILD_TOOLS: "35.0.0"
+
 concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
@@ -41,6 +47,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          # The head commit itself, not the ephemeral merge commit a
+          # pull_request event checks out by default: the provenance and the
+          # artifact name below name the head SHA, so that is what is built.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -71,6 +81,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # The same build-tools the trusted signer uses, installed explicitly
+          # rather than "whatever is newest on the runner image", so badging
+          # and signature reports come from one known aapt2 and apksigner.
+          packages: build-tools;${{ env.CANDIDATE_BUILD_TOOLS }} platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
@@ -105,7 +120,9 @@ jobs:
           set -euo pipefail
           apk="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$apk"
-          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          build_tools="$CANDIDATE_BUILD_TOOLS"
+          test -x "$ANDROID_HOME/build-tools/$build_tools/aapt2" \
+            || { echo "::error::build-tools $build_tools is not installed" >&2; exit 1; }
           aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
           apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
 
@@ -184,7 +201,9 @@ jobs:
         run: |
           set -euo pipefail
           out="app/build/outputs/apk/physicalTest"
-          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          build_tools="$CANDIDATE_BUILD_TOOLS"
+          test -x "$ANDROID_HOME/build-tools/$build_tools/aapt2" \
+            || { echo "::error::build-tools $build_tools is not installed" >&2; exit 1; }
           apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
 
           # Resolved rather than assumed. The first version of this step hard
@@ -237,7 +256,9 @@ jobs:
           set -euo pipefail
           apk="${{ steps.candidate_apk.outputs.path }}"
           test -f "$apk"
-          build_tools="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          build_tools="$CANDIDATE_BUILD_TOOLS"
+          test -x "$ANDROID_HOME/build-tools/$build_tools/aapt2" \
+            || { echo "::error::build-tools $build_tools is not installed" >&2; exit 1; }
           aapt2="$ANDROID_HOME/build-tools/$build_tools/aapt2"
           badging="$("$aapt2" dump badging "$apk")"
           read_badge() { printf '%s' "$badging" | sed -n "$1" | head -1; }
@@ -366,6 +387,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          # The head commit itself, not the ephemeral merge commit a
+          # pull_request event checks out by default: the provenance and the
+          # artifact name below name the head SHA, so that is what is built.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -395,6 +420,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # The same build-tools the trusted signer uses, installed explicitly
+          # rather than "whatever is newest on the runner image", so badging
+          # and signature reports come from one known aapt2 and apksigner.
+          packages: build-tools;${{ env.CANDIDATE_BUILD_TOOLS }} platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
@@ -584,6 +614,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          # The head commit itself, not the ephemeral merge commit a
+          # pull_request event checks out by default: the provenance and the
+          # artifact name below name the head SHA, so that is what is built.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -613,6 +647,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # The same build-tools the trusted signer uses, installed explicitly
+          # rather than "whatever is newest on the runner image", so badging
+          # and signature reports come from one known aapt2 and apksigner.
+          packages: build-tools;${{ env.CANDIDATE_BUILD_TOOLS }} platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4.4.1
