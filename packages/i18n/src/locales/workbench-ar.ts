@@ -39,6 +39,8 @@ export const workbenchAr = {
   "workbench.options.rxAsTx.internal": "داخلي (Full-duplex)",
   "workbench.options.rxAsTx.external": "خارجي (Half-duplex)",
   "workbench.options.airport": "AirPort — جسر تسلسلي شفاف (لا يغيّر دور RX/TX)",
+  "workbench.airport.PLATFORM_NOT_ENCODED":
+    "AirPort متوقف للهدف {target}: أداة التفليش الرسمية المثبتة لا تكتب علم AirPort في صورة {platform}، فكان الخيار سيُبلَّغ كمطبَّق دون أن يصل إلى الجهاز. أهداف ESP تحمله.",
   "workbench.rxAsTx.NO_TARGET_SELECTED":
     "اختر Target رسميًا أولًا؛ إمكانية تشغيل Firmware المرسل تعتمد على الجهاز نفسه.",
   "workbench.rxAsTx.TARGET_IS_TRANSMITTER":
@@ -94,6 +96,8 @@ export const workbenchAr = {
   "wb.connect.prompt":
     "اختر منفذ وحدة ExpressLRS المباشر؛ جارٍ إرسال CRSF Device Ping…",
   "wb.connect.incomplete": "لم يكتمل التعرف: {detail}",
+  "wb.connect.multipleDevices":
+    "أكثر من جهاز USB تسلسلي متصل، وهذا المضيف لا يملك نافذة اختيار. وصّل الجهاز المراد برمجته وحده ثم أعد التعريف.",
   "wb.connect.exactMatch":
     "تم إثبات CRSF ومطابقة {product} بـTarget رسمي واحد.",
   "wb.connect.noCatalog":
@@ -290,6 +294,10 @@ export const workbenchAr = {
   "wb.need.antennaAcknowledgement": "أكّد تركيب هوائي المرسل قبل أن يبث.",
   "wb.need.targetConfirmation":
     "اكتب اسم Target للتأكيد، لأن هوية الجهاز لا تحدده بدقة.",
+  "wb.need.bandMatch":
+    "الجهاز المتصل يبلغ عن نطاق {device} ({evidence})، بينما Target المختار مبني لنطاق {target}. اختر Target لنطاق الجهاز نفسه؛ التأكيد المكتوب لا يتجاوز هذا الشرط.",
+  "wb.need.airportPlatform":
+    "لا يمكن كتابة AirPort للهدف {target} ({platform}): أداة التفليش الرسمية المثبتة تشفّره لأهداف ESP فقط.",
   "wb.need.recoveryPackage":
     "اختر حزمة الاستعادة المراد كتابتها، أو استأنف نقطة الاستعادة المفتوحة.",
   "wb.need.durableRecovery":

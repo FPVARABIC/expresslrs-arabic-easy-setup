@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { initializeSerialPassthrough } from "./passthrough";
+import { createLegacyBootloaderCommand } from "./crsf";
+import {
+  initializeSerialPassthrough,
+  PASSTHROUGH_FLASH_BAUD,
+  requestReceiverBootloaderThroughPassthrough,
+} from "./passthrough";
 import type {
   HardwareSerialPort,
   HardwareSerialReader,
@@ -445,5 +450,253 @@ describe("serial passthrough protocol and resource safety", () => {
       code: "STREAMS_UNAVAILABLE",
     });
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A port whose reads are delivered on demand, so a line can arrive *after* a
+ * particular write the way a receiver answers a command, and whose writes are
+ * kept as bytes rather than decoded text.
+ */
+function bootloaderPort() {
+  const rawWrites: Uint8Array[] = [];
+  const queue: Uint8Array[] = [];
+  let pending: ((result: ReadResult) => void) | null = null;
+  let cancelled = false;
+  let onWrite: ((bytes: Uint8Array) => void) | null = null;
+  const deliver = (text: string) => {
+    const value = new TextEncoder().encode(text);
+    if (pending !== null) {
+      const resolve = pending;
+      pending = null;
+      resolve({ done: false, value });
+    } else {
+      queue.push(value);
+    }
+  };
+  const reader: HardwareSerialReader = {
+    read: vi.fn((): Promise<ReadResult> => {
+      if (cancelled) return Promise.resolve({ done: true });
+      const next = queue.shift();
+      if (next !== undefined)
+        return Promise.resolve({ done: false, value: next });
+      return new Promise<ReadResult>((resolve) => {
+        pending = resolve;
+      });
+    }),
+    cancel: vi.fn(async () => {
+      cancelled = true;
+      pending?.({ done: true });
+      pending = null;
+    }),
+    releaseLock: vi.fn(),
+  };
+  const writer: HardwareSerialWriter = {
+    write: vi.fn(async (bytes: Uint8Array) => {
+      rawWrites.push(new Uint8Array(bytes));
+      onWrite?.(bytes);
+    }),
+    releaseLock: vi.fn(),
+  };
+  const port: HardwareSerialPort = {
+    readable: { getReader: () => reader },
+    writable: { getWriter: () => writer },
+    open: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    port,
+    reader,
+    writer,
+    rawWrites,
+    deliver,
+    whenWritten(handler: (bytes: Uint8Array) => void) {
+      onWrite = handler;
+    },
+  };
+}
+
+const OFFICIAL_BOOTLOADER_FRAME = createLegacyBootloaderCommand();
+
+describe("receiver bootloader entry through a flight-controller passthrough", () => {
+  it("pins the official rates per path", () => {
+    // web-flasher espflasher.js connect(): betaflight 420000, etx 230400
+    // (main firmware), passthru 230400.
+    expect(PASSTHROUGH_FLASH_BAUD).toEqual({
+      betaflight: 420_000,
+      edgetx: 230_400,
+      passthru: 230_400,
+    });
+  });
+
+  it("sends the official sync, training run, pause and key-less bl frame, then returns the Target line", async () => {
+    vi.useFakeTimers();
+    const serial = bootloaderPort();
+    serial.whenWritten((bytes) => {
+      // The receiver answers the command, not the training run.
+      if (bytes[0] === 0xec) serial.deliver("Unified_ESP8285_2400_RX\r\n");
+    });
+
+    const operation = requestReceiverBootloaderThroughPassthrough({
+      port: serial.port,
+      baudRate: 420_000,
+      family: "esp",
+    });
+    await flushUntil(() => serial.rawWrites.length === 2);
+    expect(serial.port.open).toHaveBeenCalledWith(
+      expect.objectContaining({ baudRate: 420_000, flowControl: "none" }),
+    );
+    expect([...serial.rawWrites[0]!]).toEqual([0x07, 0x07, 0x12, 0x20]);
+    expect([...serial.rawWrites[1]!]).toEqual(new Array<number>(32).fill(0x55));
+    // Nothing else goes out before the official 200 ms pause has elapsed.
+    await vi.advanceTimersByTimeAsync(199);
+    expect(serial.rawWrites).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushUntil(() => serial.rawWrites.length === 3);
+    // [0xEC, 0x04, 0x32, 'b', 'l', crc]: the frame the official flasher
+    // sends, with no key appended.
+    expect([...serial.rawWrites[2]!]).toEqual([...OFFICIAL_BOOTLOADER_FRAME]);
+    expect(OFFICIAL_BOOTLOADER_FRAME).toHaveLength(6);
+
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await operation;
+    expect(result.target).toBe("Unified_ESP8285_2400_RX");
+    expect(result.lines).toEqual(["Unified_ESP8285_2400_RX"]);
+    expect(result.bootloaderKeyed).toBe(false);
+    expect(serial.reader.cancel).toHaveBeenCalledTimes(1);
+    expect(serial.reader.releaseLock).toHaveBeenCalledTimes(1);
+    expect(serial.writer.releaseLock).toHaveBeenCalledTimes(1);
+    expect(serial.port.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not mistake CLI noise echoed before the command for a Target line", async () => {
+    vi.useFakeTimers();
+    const serial = bootloaderPort();
+    serial.deliver("# serialpassthrough 1 420000\r\n");
+    serial.whenWritten((bytes) => {
+      if (bytes[0] === 0xec) serial.deliver("VENDOR_ESP_RX\n");
+    });
+
+    const operation = requestReceiverBootloaderThroughPassthrough({
+      port: serial.port,
+      baudRate: 420_000,
+      family: "esp",
+    });
+    await vi.advanceTimersByTimeAsync(210);
+    await flushUntil(() => serial.rawWrites.length === 3);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await operation;
+    expect(result.target).toBe("VENDOR_ESP_RX");
+    expect(result.lines).toEqual(["VENDOR_ESP_RX"]);
+  });
+
+  it("answers an STM32 bootloader's hold-down prompt and keeps reading until the XMODEM request", async () => {
+    vi.useFakeTimers();
+    const serial = bootloaderPort();
+    serial.whenWritten((bytes) => {
+      if (bytes[0] === 0xec) {
+        serial.deliver("DIY_2400_RX_STM32_CCG_Nano_v0_5\n");
+        serial.deliver("BL_TYPE=UART\n=== v1.3 ===\nhold down button\n");
+      }
+      if (new TextDecoder().decode(bytes) === "bbbbbb") {
+        serial.deliver("CCC");
+      }
+    });
+
+    const operation = requestReceiverBootloaderThroughPassthrough({
+      port: serial.port,
+      baudRate: 420_000,
+      family: "stm32",
+    });
+    await vi.advanceTimersByTimeAsync(210);
+    await flushUntil(() => serial.rawWrites.length === 3);
+    // The key sequence follows the prompt after the official 100 ms.
+    await vi.advanceTimersByTimeAsync(100);
+    await flushUntil(() => serial.rawWrites.length === 4);
+    expect(new TextDecoder().decode(serial.rawWrites[3])).toBe("bbbbbb");
+    // "CCC" arrives without a newline; the 250 ms poll picks it up.
+    await vi.advanceTimersByTimeAsync(260);
+
+    const result = await operation;
+    expect(result.target).toBe("DIY_2400_RX_STM32_CCG_Nano_v0_5");
+    expect(result.bootloaderKeyed).toBe(true);
+    expect(result.lines).toEqual([
+      "DIY_2400_RX_STM32_CCG_Nano_v0_5",
+      "BL_TYPE=UART",
+      "=== v1.3 ===",
+      "hold down button",
+    ]);
+    expect(serial.port.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns no Target when the receiver stays silent, and still releases the port", async () => {
+    vi.useFakeTimers();
+    const serial = bootloaderPort();
+
+    const operation = requestReceiverBootloaderThroughPassthrough({
+      port: serial.port,
+      baudRate: 420_000,
+      family: "esp",
+    });
+    await vi.advanceTimersByTimeAsync(200 + 2_000 + 250);
+
+    const result = await operation;
+    expect(result.target).toBeNull();
+    expect(result.lines).toEqual([]);
+    expect(serial.rawWrites).toHaveLength(3);
+    expect(serial.reader.cancel).toHaveBeenCalledTimes(1);
+    expect(serial.port.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a pre-aborted request without opening the port", async () => {
+    const serial = bootloaderPort();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      requestReceiverBootloaderThroughPassthrough({
+        port: serial.port,
+        baudRate: 420_000,
+        family: "esp",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect(serial.port.open).not.toHaveBeenCalled();
+  });
+
+  it("stops during the pause when cancelled, before the bl frame goes out", async () => {
+    vi.useFakeTimers();
+    const serial = bootloaderPort();
+    const controller = new AbortController();
+
+    const operation = requestReceiverBootloaderThroughPassthrough({
+      port: serial.port,
+      baudRate: 420_000,
+      family: "esp",
+      signal: controller.signal,
+    });
+    await flushUntil(() => serial.rawWrites.length === 2);
+    controller.abort();
+
+    await expect(operation).rejects.toMatchObject({ code: "ABORTED" });
+    expect(serial.rawWrites).toHaveLength(2);
+    expect(serial.port.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a port that exposes no streams and confirms the close", async () => {
+    const port: HardwareSerialPort = {
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await expect(
+      requestReceiverBootloaderThroughPassthrough({
+        port,
+        baudRate: 420_000,
+        family: "esp",
+      }),
+    ).rejects.toMatchObject({ code: "STREAMS_UNAVAILABLE" });
+    expect(port.close).toHaveBeenCalledTimes(1);
   });
 });

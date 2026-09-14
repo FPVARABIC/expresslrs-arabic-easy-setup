@@ -58,6 +58,7 @@ const FAILURE_MESSAGE_KEYS: Readonly<Record<string, MessageKey>> =
     INVALID_PARAMETER_TABLE: "easy.fail.INVALID_PARAMETER_TABLE",
     CLEANUP_UNCONFIRMED: "easy.fail.CLEANUP_UNCONFIRMED",
     CONNECT_FAILED: "easy.fail.CONNECT_FAILED",
+    MULTIPLE_DEVICES: "easy.fail.MULTIPLE_DEVICES",
   });
 
 /**

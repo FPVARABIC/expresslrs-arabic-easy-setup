@@ -14,6 +14,12 @@ import {
   type DiagnosticsSnapshot,
 } from "../diagnostics/diagnostics";
 import { readBackMatches } from "../easy/easyOperations";
+import { evaluateAirportSupport } from "./airport-support";
+import {
+  bandFamilyForRadioKey,
+  bandKnownToMismatch,
+  deviceBandEvidence,
+} from "./band-evidence";
 
 import {
   BindingLinkObserver,
@@ -34,7 +40,7 @@ import {
 } from "./durable-recovery";
 import { readDurableDocumentStore } from "./durable-recovery-stores";
 import type { CrsfFrame, CrsfParameter } from "./crsf";
-import { flashEspFirmware } from "./esp-flasher";
+import { flashEspFirmware, type EspSerialPath } from "./esp-flasher";
 import {
   downloadPreparedBytes,
   prepareOfficialFirmwarePackage,
@@ -55,7 +61,9 @@ import {
 } from "./platform-capabilities";
 import {
   initializeSerialPassthrough,
+  PASSTHROUGH_FLASH_BAUD,
   requestHardwarePort,
+  requestReceiverBootloaderThroughPassthrough,
   type PassthroughMethod,
 } from "./passthrough";
 import type {
@@ -342,6 +350,15 @@ function platformFamily(target: OfficialTarget): "esp" | "stm32" | "other" {
   return "other";
 }
 
+/**
+ * A transmitter command that puts the module into serial update mode, when the
+ * firmware exposes one. The pinned 4.1.0 firmware exposes none —
+ * `TXModuleParameters.cpp` registers Bind, Enable WiFi, Enable Rx WiFi, Enable
+ * Backpack WiFi, Enable VRx WiFi, BLE Joystick and Send VTx — and the official
+ * flasher never asks for one: a transmitter module on its USB port is reset
+ * into the ROM bootloader by the adapter's DTR/RTS lines. So this is an extra,
+ * not a requirement.
+ */
 function commandForBootloader(
   parameters: readonly CrsfParameter[],
 ): string | null {
@@ -352,6 +369,47 @@ function commandForBootloader(
       /(serial\s*update|bootloader|update\s*mode)/iu.test(candidate.name),
   );
   return parameter?.name ?? null;
+}
+
+/**
+ * Whether the Target line a receiver printed on its way into the bootloader
+ * names the chosen Target. The firmware prints `TARGET_NAME` (for example
+ * `Unified_ESP8285_2400_RX`), which is the catalog's `firmware` field; the key
+ * and the product name are accepted too, because older builds printed those.
+ */
+function bootloaderTargetAccepted(
+  observed: string,
+  target: OfficialTarget,
+): boolean {
+  const seen = normalized(observed);
+  if (seen.length < 3) return false;
+  return [
+    target.targetKey,
+    target.config.firmware,
+    target.config.productName,
+  ].some((candidate) => {
+    const expected = normalized(candidate);
+    return (
+      expected.length >= 3 &&
+      (expected.includes(seen) || seen.includes(expected))
+    );
+  });
+}
+
+/**
+ * Which receivers must be told to enter their bootloader over CRSF before the
+ * flasher opens the port, following `web-flasher/src/js/espflasher.js`
+ * `connect()`: an STM32 has only its XMODEM bootloader; an ESP8285 has no
+ * USB-UART bridge to reset it, so the official flasher sends the `bl` command
+ * at 420000 and then connects with `no_reset`; an ESP32 receiver is reset by
+ * its adapter's DTR/RTS lines like a transmitter (`default_reset`).
+ */
+function receiverNeedsCrsfBootloaderCommand(
+  family: "esp" | "stm32",
+  platform: string,
+): boolean {
+  if (family === "stm32") return true;
+  return !platform.toLocaleLowerCase("en-US").startsWith("esp32");
 }
 
 export function currentSettingValue(
@@ -454,6 +512,17 @@ export function useDeviceController({
       ? head
       : `${head} ${renderMessage(value.detail)}`;
   };
+  /**
+   * The detail text for a failure the operator is shown and the journal keeps.
+   * A controller error carries a named message and is rendered in the
+   * operator's language; anything else contributes its technical text. Using
+   * `Error.message` alone here showed the operator the raw message *key* of
+   * every refusal raised inside a write.
+   */
+  const failureDetail = (error: unknown): string =>
+    error instanceof ControllerError
+      ? renderMessage(error.controllerMessage)
+      : safeMessage(error);
   const [catalog, setCatalog] = useState<OfficialCatalog | null>(null);
   const [catalogState, setCatalogState] = useState<
     "idle" | "loading" | "ready" | "failed"
@@ -464,7 +533,9 @@ export function useDeviceController({
   const [radioKey, setRadioKey] = useState("");
   const [targetId, setTargetId] = useState("");
   const [method, setMethod] = useState<ExpressLrsFlashMethod>("uart");
-  const [options, setOptions] =
+  // What the operator typed. `options` below is what the Target can actually
+  // carry, derived on every render rather than corrected after the fact.
+  const [storedOptions, setOptions] =
     useState<ExpressLrsFirmwareOptions>(DEFAULT_OPTIONS);
   const [status, setStatus] = useState<ControllerMessage>(() =>
     message("wb.status.idle"),
@@ -632,6 +703,17 @@ export function useDeviceController({
   const selectedTarget =
     roleTargets.find((target) => target.id === targetId) ?? null;
   const availableMethods = selectedTarget?.config.uploadMethods ?? [];
+  // Whether the chosen Target's platform can carry AirPort at all. Decided by
+  // the Target, never by the build: an STM32 Target closes the option and says
+  // why, and the flag is dropped from the effective options rather than
+  // carried into a package that would report it applied. The operator's own
+  // tick survives in `storedOptions`, so moving back to an ESP Target
+  // restores it.
+  const airportSupport = evaluateAirportSupport(selectedTarget);
+  const options: ExpressLrsFirmwareOptions =
+    storedOptions.airportEnabled && !airportSupport.supported
+      ? Object.freeze({ ...storedOptions, airportEnabled: false })
+      : storedOptions;
   const regionChoices = regulatoryRegionsForRadioKey(radioKey);
   const selectedSetting = writableParameters.find(
     (parameter) => String(parameter.id) === selectedSettingId,
@@ -658,6 +740,21 @@ export function useDeviceController({
     selectedTarget !== null &&
     targetMatch?.confidence === "EXACT" &&
     targetMatch.selected?.id === selectedTarget.id;
+  // What the device says about its own band: the regulatory domain it reports
+  // over CRSF, or failing that an exact catalog match. Compared with the band
+  // the chosen Target's radio key names, so a 900 MHz build cannot be written
+  // to a 2.4 GHz device of the same MCU on the strength of a typed
+  // confirmation. Unknown on either side is not a match; it is the absence of
+  // a contradiction, and the Target confirmation still applies.
+  const deviceBand = deviceBandEvidence({ parameters, match: targetMatch });
+  const selectedBand =
+    selectedTarget === null
+      ? null
+      : bandFamilyForRadioKey(selectedTarget.radioKey);
+  const bandKnownMismatch = bandKnownToMismatch(
+    deviceBand,
+    selectedTarget?.radioKey ?? null,
+  );
   const manualTargetConfirmed =
     selectedTarget !== null &&
     normalized(manualTargetConfirmation) ===
@@ -691,6 +788,7 @@ export function useDeviceController({
     powerAcknowledged &&
     (selectedTarget.role !== "tx" || antennaAcknowledged) &&
     (!operationNeedsTargetConfirmation || manualTargetConfirmed) &&
+    !bandKnownMismatch &&
     (!firmwareWriteMethod || method !== "uart" || identity !== null);
 
   /**
@@ -827,6 +925,14 @@ export function useDeviceController({
           message("wb.need.antennaAcknowledgement"),
         ] as const,
         [
+          !bandKnownMismatch,
+          message("wb.need.bandMatch", {
+            device: deviceBand?.band ?? "",
+            evidence: deviceBand?.detail ?? "",
+            target: selectedBand ?? "",
+          }),
+        ] as const,
+        [
           !operationNeedsTargetConfirmation || manualTargetConfirmed,
           message("wb.need.targetConfirmation"),
         ] as const,
@@ -873,7 +979,18 @@ export function useDeviceController({
               ),
         ] as const,
       ]),
-      airport: readinessFrom([targetChosen]),
+      airport: readinessFrom([
+        targetChosen,
+        [
+          airportSupport.supported,
+          airportSupport.supported
+            ? message("wb.need.target")
+            : message("wb.need.airportPlatform", {
+                target: airportSupport.targetName,
+                platform: airportSupport.platform,
+              }),
+        ] as const,
+      ]),
     });
 
   /**
@@ -1106,7 +1223,7 @@ export function useDeviceController({
       ...(operation === "FIRMWARE_WRITE"
         ? {
             targetMatchesDevice: selectedTarget !== null,
-            bandMatchesDevice: selectedTarget !== null,
+            bandMatchesDevice: selectedTarget !== null && !bandKnownMismatch,
             artifactVerified: prepared !== null,
             recoveryAvailable:
               durableRecovery !== null && durableRecoveryFor === prepared,
@@ -1323,7 +1440,9 @@ export function useDeviceController({
           return outcome;
         }
         setStatus(
-          message("wb.connect.incomplete", { detail: outcome.message }),
+          outcome.status === "MULTIPLE_DEVICES"
+            ? message("wb.connect.multipleDevices")
+            : message("wb.connect.incomplete", { detail: outcome.message }),
         );
         return outcome;
       }
@@ -2162,6 +2281,7 @@ export function useDeviceController({
     Readonly<{
       port: HardwareSerialPort;
       resetMode: "default_reset" | "no_reset";
+      path: EspSerialPath;
     }>
   > {
     if (!hardwareCleanupGateOpen()) {
@@ -2198,43 +2318,40 @@ export function useDeviceController({
           );
         }
       }
-      if (input.family === "stm32" && selectedTarget.role === "rx") {
-        const bootloader = await session.enterReceiverBootloader({
-          expectedFirmwareTarget: selectedTarget.config.firmware,
-          confirmedByUser: true,
-          signal: input.signal,
-        });
-        const observed = normalized(bootloader.target);
-        const accepted = [
-          normalized(selectedTarget.targetKey),
-          normalized(selectedTarget.config.firmware),
-          normalized(selectedTarget.config.productName),
-        ];
+      let resetMode: "default_reset" | "no_reset" = "default_reset";
+      if (selectedTarget.role === "rx") {
         if (
-          !accepted.some(
-            (candidate) =>
-              candidate.length >= 3 &&
-              (candidate.includes(observed) || observed.includes(candidate)),
+          receiverNeedsCrsfBootloaderCommand(
+            input.family,
+            selectedTarget.config.platform,
           )
         ) {
-          throw new ControllerError(
-            message("wb.transport.bootloaderTargetMismatch", {
-              target: bootloader.target,
-            }),
-          );
+          const bootloader = await session.enterReceiverBootloader({
+            expectedFirmwareTarget: selectedTarget.config.firmware,
+            confirmedByUser: true,
+            signal: input.signal,
+          });
+          if (!bootloaderTargetAccepted(bootloader.target, selectedTarget)) {
+            throw new ControllerError(
+              message("wb.transport.bootloaderTargetMismatch", {
+                target: bootloader.target,
+              }),
+            );
+          }
+          // The receiver has already rebooted into its bootloader on the
+          // strength of the command; a DTR/RTS reset now would only reboot
+          // an ESP8285 back into the application it just left.
+          resetMode = "no_reset";
         }
-      } else if (selectedTarget.role === "tx") {
+      } else {
         const command = commandForBootloader(parameters);
-        if (command === null) {
-          throw new ControllerError(
-            message("wb.transport.noBootloaderCommand"),
-          );
+        if (command !== null) {
+          await session.enterTransmitterBootloader({
+            commandName: command,
+            confirmedByUser: true,
+            signal: input.signal,
+          });
         }
-        await session.enterTransmitterBootloader({
-          commandName: command,
-          confirmedByUser: true,
-          signal: input.signal,
-        });
       }
       disconnectUnsubscribeRef.current?.();
       disconnectUnsubscribeRef.current = null;
@@ -2254,21 +2371,52 @@ export function useDeviceController({
         writeAuthorityRef.current.revokeAll();
         clearHardwarePresentation();
       }
-      return Object.freeze({ port, resetMode: "default_reset" });
+      return Object.freeze({ port, resetMode, path: "uart" as const });
     }
 
+    if (selectedTarget === null) {
+      throw new ControllerError(message("wb.flash.needPackage"));
+    }
+    const passthroughMethod = input.selectedMethod as PassthroughMethod;
     const port = await requestHardwarePort();
     if (!hardwareCleanupGateOpen() || input.signal.aborted) {
       await closePortOrLatch(port, message("wb.transport.closeAfterCancel"));
       throw new ControllerError(message("wb.transport.gateChangedDuringPort"));
     }
     await initializeSerialPassthrough({
-      method: input.selectedMethod as PassthroughMethod,
+      method: passthroughMethod,
       port,
-      flashBaud: input.family === "esp" ? 460_800 : 420_000,
+      flashBaud: PASSTHROUGH_FLASH_BAUD[passthroughMethod],
       signal: input.signal,
     });
-    return Object.freeze({ port, resetMode: "no_reset" });
+    if (passthroughMethod === "betaflight") {
+      // The flight controller's passthrough is only a wire. The receiver
+      // behind it is still running its application and has to be told, over
+      // CRSF at its own rate, to reboot into the bootloader — the official
+      // flasher's `reset_to_bootloader()` step. EdgeTX needs no command: the
+      // radio pulls the module's boot pin itself.
+      const bootloader = await requestReceiverBootloaderThroughPassthrough({
+        port,
+        baudRate: PASSTHROUGH_FLASH_BAUD.betaflight,
+        family: input.family,
+        signal: input.signal,
+      });
+      if (
+        bootloader.target !== null &&
+        !bootloaderTargetAccepted(bootloader.target, selectedTarget)
+      ) {
+        throw new ControllerError(
+          message("wb.transport.bootloaderTargetMismatch", {
+            target: bootloader.target,
+          }),
+        );
+      }
+    }
+    return Object.freeze({
+      port,
+      resetMode: "no_reset" as const,
+      path: passthroughMethod,
+    });
   }
 
   async function flashPreparedFirmware(): Promise<DeviceOperationResult> {
@@ -2371,6 +2519,7 @@ export function useDeviceController({
             port: serial.port,
             target: selectedTarget,
             segments: prepared.segments,
+            path: serial.path,
             resetMode: serial.resetMode,
             signal: controller.signal,
             onProgress: setFlashProgress,
@@ -2420,7 +2569,7 @@ export function useDeviceController({
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
         latchUnconfirmedHardwareClose(message("wb.flash.writeCloseUnproven"));
       }
-      const detailText = safeMessage(error);
+      const detailText = failureDetail(error);
       try {
         await saveCheckpoint(prepared, "RECOVERY_REQUIRED", detailText);
       } catch {
@@ -2539,20 +2688,51 @@ export function useDeviceController({
             message("wb.recovery.gateChangedDuringPort"),
           );
         }
-        if (!["uart", "passthru"].includes(method)) {
+        const recoveryPath: EspSerialPath =
+          method === "uart" ||
+          method === "betaflight" ||
+          method === "edgetx" ||
+          method === "passthru"
+            ? method
+            : "uart";
+        if (recoveryPath === "betaflight" || recoveryPath === "edgetx") {
           await initializeSerialPassthrough({
-            method: method as PassthroughMethod,
+            method: recoveryPath,
             port,
-            flashBaud: family === "esp" ? 460_800 : 420_000,
+            flashBaud: PASSTHROUGH_FLASH_BAUD[recoveryPath],
             signal: controller.signal,
           });
+        }
+        if (recoveryPath === "betaflight") {
+          // Same step as a fresh write: the receiver behind the flight
+          // controller must be told to reboot into its bootloader. A device
+          // whose application no longer runs prints nothing here; the
+          // official flasher then flashes blindly, and the operator's typed
+          // Target confirmation plus the ROM's own chip check remain.
+          const bootloader = await requestReceiverBootloaderThroughPassthrough({
+            port,
+            baudRate: PASSTHROUGH_FLASH_BAUD.betaflight,
+            family: family === "stm32" ? "stm32" : "esp",
+            signal: controller.signal,
+          });
+          if (
+            bootloader.target !== null &&
+            !bootloaderTargetAccepted(bootloader.target, selectedTarget)
+          ) {
+            throw new ControllerError(
+              message("wb.transport.bootloaderTargetMismatch", {
+                target: bootloader.target,
+              }),
+            );
+          }
         }
         if (family === "esp") {
           const flashResult = await flashEspFirmware({
             port,
             target: selectedTarget,
             segments: validated.segments,
-            resetMode: method === "uart" ? "default_reset" : "no_reset",
+            path: recoveryPath,
+            resetMode: recoveryPath === "uart" ? "default_reset" : "no_reset",
             signal: controller.signal,
             onProgress: setFlashProgress,
           });
@@ -2608,7 +2788,7 @@ export function useDeviceController({
           message("wb.recovery.writeCloseUnproven"),
         );
       }
-      const detail = safeMessage(error);
+      const detail = failureDetail(error);
       if (writeFinished) {
         // The bytes went out but the device did not come back readable. The
         // checkpoint is kept and restaged so a second attempt is still
@@ -2957,6 +3137,8 @@ export function useDeviceController({
     canObserveFrames,
     rxAsTxSupport,
     rxAsTxModeSupport,
+    airportSupport,
+    deviceBand,
     wipeSecretOptions,
     captureDiagnostics,
     captureDiagnosticsWithGrants,

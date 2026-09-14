@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   clearCheckpoint: vi.fn(),
   preparePackage: vi.fn(),
   requestHardwarePort: vi.fn(),
+  requestReceiverBootloader: vi.fn(),
   validateRecoveryPackage: vi.fn(),
 }));
 
@@ -61,6 +62,7 @@ vi.mock("../hardware/passthrough", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../hardware/passthrough")>()),
   initializeSerialPassthrough: mocks.initializeSerialPassthrough,
   requestHardwarePort: mocks.requestHardwarePort,
+  requestReceiverBootloaderThroughPassthrough: mocks.requestReceiverBootloader,
 }));
 
 vi.mock("../hardware/recovery-package", async (importOriginal) => ({
@@ -150,6 +152,59 @@ const espReceiver = {
   },
 };
 
+/**
+ * An ESP8285 receiver: the one platform the official flasher never resets
+ * through the adapter's DTR/RTS lines, because such a receiver has no USB-UART
+ * bridge of its own. It is told over CRSF to reboot into its bootloader.
+ */
+const esp8285Receiver = {
+  id: "vendor/rx_2400/esp8285-receiver",
+  role: "rx" as const,
+  vendorKey: "vendor",
+  vendorName: "Vendor",
+  radioKey: "rx_2400",
+  targetKey: "esp8285-receiver",
+  config: {
+    productName: "Vendor ESP8285 RX",
+    platform: "esp8285",
+    firmware: "Unified_ESP8285_2400_RX",
+    luaName: null,
+    layoutFile: null,
+    logoFile: null,
+    uploadMethods: ["uart", "betaflight", "download"] as const,
+    minVersion: null,
+    customLayout: {},
+    overlay: null,
+    raw: {},
+  },
+};
+
+/**
+ * A 900 MHz build for the same ESP32 receiver platform: what a cross-band
+ * flash looks like when the MCU alone cannot tell it apart.
+ */
+const esp900Receiver = {
+  id: "vendor/rx_900/esp-receiver-900",
+  role: "rx" as const,
+  vendorKey: "vendor",
+  vendorName: "Vendor",
+  radioKey: "rx_900",
+  targetKey: "esp-receiver-900",
+  config: {
+    productName: "Vendor ESP 900 RX",
+    platform: "esp32",
+    firmware: "VENDOR_ESP_900_RX",
+    luaName: null,
+    layoutFile: null,
+    logoFile: null,
+    uploadMethods: ["uart", "betaflight", "download"] as const,
+    minVersion: null,
+    customLayout: {},
+    overlay: null,
+    raw: {},
+  },
+};
+
 const transportCatalog: OfficialCatalog = {
   ...catalog,
   targets: [
@@ -170,6 +225,8 @@ const transportCatalog: OfficialCatalog = {
     },
     catalog.targets[1]!,
     espReceiver,
+    esp8285Receiver,
+    esp900Receiver,
   ],
 };
 
@@ -241,6 +298,23 @@ function selection(
   };
 }
 
+function info(
+  id: number,
+  name: string,
+  value: string,
+): Extract<CrsfParameter, { readonly kind: "info" }> {
+  return {
+    id,
+    parentId: 0,
+    type: 12,
+    hidden: false,
+    name,
+    rawValue: new Uint8Array(),
+    kind: "info",
+    value,
+  };
+}
+
 function command(
   id: number,
   name: string,
@@ -285,6 +359,16 @@ function connectedHardware(
     readonly closeImplementation?: () => Promise<boolean>;
     readonly detachFailure?: Error;
     readonly includeBootloaderCommand?: boolean;
+    /**
+     * What the receiver prints on its way into the bootloader. Present only
+     * for a driver that offers the direct CRSF bootloader transition.
+     */
+    readonly receiverBootloaderTarget?: string;
+    /**
+     * The `version_domain` string the firmware publishes as an INFO entry
+     * ("4.1.0 ISM2G4"), which carries the device's regulatory domain.
+     */
+    readonly versionInfo?: string;
     readonly startBindingImplementation?: (signal?: AbortSignal) => Promise<{
       stage: "TX_BIND_COMMAND_ACKNOWLEDGED";
       verified: true;
@@ -296,6 +380,7 @@ function connectedHardware(
   readonly startBinding: ReturnType<typeof vi.fn>;
   readonly close: ReturnType<typeof vi.fn>;
   readonly detachPortForBootloader: ReturnType<typeof vi.fn>;
+  readonly enterReceiverBootloader: ReturnType<typeof vi.fn> | null;
   readonly outcome: HardwareDriverConnectOutcome;
 } {
   const parameters: CrsfParameter[] = [
@@ -305,6 +390,10 @@ function connectedHardware(
   ];
   if (input.includeBootloaderCommand === true) {
     parameters.push(command(4, "Serial Update"));
+  }
+  if (input.versionInfo !== undefined) {
+    // Ids stay contiguous: the session refuses a parameter table with a gap.
+    parameters.push(info(parameters.length + 1, input.versionInfo, "abc1234"));
   }
   const deviceRole = input.role ?? "tx";
   const identity: ExpressLrsIdentity = {
@@ -348,7 +437,15 @@ function connectedHardware(
     input.detachFailure === undefined
       ? vi.fn().mockResolvedValue(port)
       : vi.fn().mockRejectedValue(input.detachFailure);
+  const enterReceiverBootloader =
+    input.receiverBootloaderTarget === undefined
+      ? null
+      : vi.fn().mockResolvedValue({
+          target: input.receiverBootloaderTarget,
+          responseObserved: true,
+        });
   const driver: HardwareSessionDriver = {
+    ...(enterReceiverBootloader === null ? {} : { enterReceiverBootloader }),
     identity,
     parameters,
     port,
@@ -401,6 +498,7 @@ function connectedHardware(
     startBinding,
     close,
     detachPortForBootloader,
+    enterReceiverBootloader,
     outcome,
   };
 }
@@ -455,6 +553,11 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       cleanupVerified: true,
     });
     mocks.initializeSerialPassthrough.mockReset().mockResolvedValue(undefined);
+    // A receiver that prints nothing: the official flasher then flashes on
+    // the strength of the operator's Target confirmation and the ROM's chip.
+    mocks.requestReceiverBootloader
+      .mockReset()
+      .mockResolvedValue({ target: null, lines: [], bootloaderKeyed: false });
     mocks.loadCatalog.mockReset().mockResolvedValue(catalog);
     mocks.loadCheckpoint.mockReset().mockResolvedValue(null);
     mocks.saveCheckpoint.mockReset().mockResolvedValue(undefined);
@@ -1139,6 +1242,456 @@ describe("rebuilt ExpressLRS hardware journey", () => {
         }),
       ).toBeEnabled();
     }
+  });
+
+  // --- bootloader entry per serial path, as the pinned official flasher does it
+
+  it("flashes a transmitter over direct USB without demanding a bootloader command the pinned firmware does not have", async () => {
+    const user = userEvent.setup();
+    // No "Serial Update" here: ExpressLRS 4.1.0 (TXModuleParameters.cpp)
+    // registers Bind, the WiFi commands, BLE Joystick and Send VTx, and the
+    // official flasher resets a module through its USB-UART bridge instead.
+    const hardware = connectedHardware({ productName: "Vendor TX Module" });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Vendor TX Module" });
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "هوائي جهاز الإرسال مثبت" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.flashEspFirmware).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "uart", resetMode: "default_reset" }),
+    );
+    expect(hardware.detachPortForBootloader).toHaveBeenCalledTimes(1);
+    expect(mocks.initializeSerialPassthrough).not.toHaveBeenCalled();
+    expect(mocks.requestReceiverBootloader).not.toHaveBeenCalled();
+  });
+
+  it("tells an ESP8285 receiver on a direct adapter to reboot into its bootloader and then flashes it without a reset", async () => {
+    const user = userEvent.setup();
+    const hardware = connectedHardware({
+      role: "rx",
+      productName: "Vendor ESP8285 RX",
+      receiverBootloaderTarget: "Unified_ESP8285_2400_RX",
+    });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.preparePackage.mockReset().mockResolvedValue({
+      ...preparedPackage,
+      target: esp8285Receiver,
+      recoveryArchive: await recoveryArchiveFor(esp8285Receiver),
+    });
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp8285-receiver",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    // The live CRSF identity pins this Target exactly; nothing is typed.
+    expect(screen.queryByLabelText(/^تأكيد Target/u)).toBeNull();
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    // The CRSF `bl` command went out over the identified session, the Target
+    // it printed matched, and the flasher was told the receiver is already in
+    // its bootloader: an ESP8285 has no DTR/RTS lines to reset it with.
+    expect(hardware.enterReceiverBootloader).toHaveBeenCalledTimes(1);
+    expect(mocks.flashEspFirmware).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "uart", resetMode: "no_reset" }),
+    );
+  });
+
+  it("sends the CRSF bootloader command through the flight controller at 420000 before flashing a receiver", async () => {
+    const user = userEvent.setup();
+    const hardware = connectedHardware({
+      role: "rx",
+      productName: "Vendor ESP RX",
+    });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.preparePackage.mockReset().mockResolvedValue({
+      ...preparedPackage,
+      target: espReceiver,
+      recoveryArchive: await recoveryArchiveFor(espReceiver),
+    });
+    mocks.requestReceiverBootloader.mockResolvedValueOnce({
+      target: "VENDOR_ESP_RX",
+      lines: ["VENDOR_ESP_RX"],
+      bootloaderKeyed: false,
+    });
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp-receiver",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("طريقة التحديث"),
+      "betaflight",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    await user.type(screen.getByLabelText(/^تأكيد Target/u), "esp-receiver");
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    // Passthrough at the receiver's CRSF rate, then the `bl` command at that
+    // same rate, then the ROM at that same rate with no reset and no change.
+    expect(mocks.initializeSerialPassthrough).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "betaflight", flashBaud: 420_000 }),
+    );
+    expect(mocks.requestReceiverBootloader).toHaveBeenCalledWith(
+      expect.objectContaining({ baudRate: 420_000, family: "esp" }),
+    );
+    expect(mocks.flashEspFirmware).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "betaflight", resetMode: "no_reset" }),
+    );
+  });
+
+  it("refuses to flash through the flight controller when the receiver names another Target", async () => {
+    const user = userEvent.setup();
+    const hardware = connectedHardware({
+      role: "rx",
+      productName: "Vendor ESP RX",
+    });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.preparePackage.mockReset().mockResolvedValue({
+      ...preparedPackage,
+      target: espReceiver,
+      recoveryArchive: await recoveryArchiveFor(espReceiver),
+    });
+    // The receiver behind the flight controller is not the one the package
+    // was built for. The official flasher raises MismatchError here.
+    mocks.requestReceiverBootloader.mockResolvedValueOnce({
+      target: "Unified_ESP32_900_RX",
+      lines: ["Unified_ESP32_900_RX"],
+      bootloaderKeyed: false,
+    });
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp-receiver",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("طريقة التحديث"),
+      "betaflight",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    await user.type(screen.getByLabelText(/^تأكيد Target/u), "esp-receiver");
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    // The status line and the recovery checkpoint both carry the refusal,
+    // rendered in the operator's language rather than as a message key.
+    const refusals = await screen.findAllByText(
+      /Bootloader أبلغ Target مختلفًا: Unified_ESP32_900_RX/u,
+    );
+    expect(refusals.length).toBeGreaterThan(0);
+    expect(mocks.requestReceiverBootloader).toHaveBeenCalledTimes(1);
+    expect(mocks.flashEspFirmware).not.toHaveBeenCalled();
+  });
+
+  it("drives an EdgeTX passthrough at the module-bay rate and leaves bootloader entry to the radio's boot pin", async () => {
+    const user = userEvent.setup();
+    const hardware = connectedHardware({ productName: "Vendor TX Module" });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Vendor TX Module" });
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_2400",
+    );
+    await user.selectOptions(screen.getByLabelText("طريقة التحديث"), "edgetx");
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    await user.type(screen.getByLabelText(/^تأكيد Target/u), "module");
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "هوائي جهاز الإرسال مثبت" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.flashEspFirmware).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.initializeSerialPassthrough).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "edgetx", flashBaud: 230_400 }),
+    );
+    expect(mocks.requestReceiverBootloader).not.toHaveBeenCalled();
+    expect(mocks.flashEspFirmware).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "edgetx", resetMode: "no_reset" }),
+    );
+  });
+
+  it("closes AirPort for an STM32 Target with the reason written out, and reopens it for ESP", async () => {
+    const user = userEvent.setup();
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    render(<ExpressLrsParityWorkbench />);
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "Vendor TX Module" }),
+      ).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp-receiver",
+    );
+    const airport = screen.getByTestId("airport-enabled");
+    expect(airport).toBeEnabled();
+    await user.click(airport);
+    expect(airport).toBeChecked();
+
+    // An STM32 Target: the pinned flasher writes no AirPort flag into its
+    // image, so the option is closed by that condition — and cleared, so a
+    // package cannot be built claiming it.
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_900",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_900/receiver",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("airport-enabled")).toBeDisabled(),
+    );
+    expect(screen.getByTestId("airport-enabled")).not.toBeChecked();
+    expect(screen.getByText(/AirPort متوقف للهدف Vendor RX/u)).toHaveAttribute(
+      "data-airport-reason",
+      "PLATFORM_NOT_ENCODED",
+    );
+
+    // Back on an ESP Target the control answers again.
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_2400",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_2400/esp-receiver",
+    );
+    expect(screen.getByTestId("airport-enabled")).toBeEnabled();
+    expect(screen.queryByText(/AirPort متوقف/u)).toBeNull();
+  });
+
+  it("refuses a Target from another band than the device reports, whatever the operator types", async () => {
+    const user = userEvent.setup();
+    // The receiver publishes "4.1.0 ISM2G4": a 2.4 GHz device by its own
+    // regulatory domain. The 900 MHz build below runs on the same ESP32.
+    const hardware = connectedHardware({
+      role: "rx",
+      productName: "Vendor ESP RX",
+      versionInfo: "4.1.0 ISM2G4",
+    });
+    mocks.loadCatalog.mockResolvedValueOnce(transportCatalog);
+    mocks.preparePackage.mockReset().mockResolvedValue({
+      ...preparedPackage,
+      target: esp900Receiver,
+      recoveryArchive: await recoveryArchiveFor(esp900Receiver),
+    });
+    render(
+      <ExpressLrsParityWorkbench hardwareConnector={hardware.connector} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await user.click(screen.getByRole("button", { name: "جهاز استقبال RX" }));
+    await user.click(
+      screen.getByRole("button", { name: "تعريف الجهاز عبر CRSF" }),
+    );
+    await screen.findByText("CRSF متصل");
+    // The identity pins the 2.4 GHz Target; the operator moves to the 900 MHz
+    // build of the same platform.
+    await user.selectOptions(screen.getByLabelText("الشركة"), "vendor");
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      "rx_900",
+    );
+    await user.selectOptions(
+      await screen.findByLabelText("Target"),
+      "vendor/rx_900/esp-receiver-900",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("المنطقة التنظيمية"),
+      "FCC_915",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "تنزيل حزمة الاستعادة" }),
+    );
+    await saveRecoveryPackageDurably();
+    await user.type(
+      screen.getByLabelText(/^تأكيد Target/u),
+      "esp-receiver-900",
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "ثبات الطاقة أثناء التفليش" }),
+    );
+
+    // Every other prerequisite is met; the band contradiction alone holds
+    // the write, and it says which evidence it read.
+    expect(
+      screen.getByRole("button", { name: "بدء التفليش الحقيقي" }),
+    ).toBeDisabled();
+    // Named in the write's own prerequisite list and in the readiness panel.
+    expect(
+      screen.getAllByText(/يبلغ عن نطاق 2\.4GHz \(ISM2G4\)/u).length,
+    ).toBeGreaterThan(0);
+    expect(mocks.flashEspFirmware).not.toHaveBeenCalled();
   });
 
   it("rechecks the live direct-UART identity before using the manual-confirmation waiver", async () => {

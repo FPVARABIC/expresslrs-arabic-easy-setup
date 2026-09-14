@@ -14,7 +14,8 @@ export const ar = {
   "language.switch": "تغيير اللغة",
   "mode.easy": "الوضع السهل",
   "mode.advanced": "الوضع المتقدم",
-  "mode.advancedHint": "المحاكاة وقراءة الجهاز والتفاصيل التقنية",
+  "mode.advancedHint":
+    "قراءة الجهاز وتجهيز Firmware والاستعادة والتفاصيل التقنية",
   "real.progress.heading": "مراحل القراءة",
   "real.progress.preparing": "نجهّز طلبًا للقراءة فقط",
   "real.progress.discovering": "نحاول الوصول إلى عنوان الجهاز المختار",
@@ -116,6 +117,8 @@ export const ar = {
   "easy.fail.CLEANUP_UNCONFIRMED":
     "تعذر إثبات إغلاق المنفذ السابق. أعد تحميل الصفحة قبل المحاولة مرة أخرى.",
   "easy.fail.CONNECT_FAILED": "تعذر فتح الجهاز.",
+  "easy.fail.MULTIPLE_DEVICES":
+    "أكثر من جهاز USB متصل. وصّل الجهاز الذي تريد إعداده وحده ثم أعد المحاولة.",
   "easy.fail.UNKNOWN": "تعذر التعرف على الجهاز، فلا يُدّعى عنه شيء.",
   "easy.op.binding": "ربط المرسل والمستقبل",
   "easy.op.bindingDescription":

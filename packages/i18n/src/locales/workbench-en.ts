@@ -53,6 +53,8 @@ export const workbenchEn = {
   "workbench.options.rxAsTx.external": "External (half-duplex)",
   "workbench.options.airport":
     "AirPort — transparent serial bridge (does not change the RX/TX role)",
+  "workbench.airport.PLATFORM_NOT_ENCODED":
+    "AirPort is off for {target}: the pinned official flasher writes no AirPort flag into a {platform} image, so the option would be reported as applied without reaching the device. ESP targets carry it.",
   "workbench.rxAsTx.NO_TARGET_SELECTED":
     "Choose an official Target first; whether it can run transmitter firmware depends on the device.",
   "workbench.rxAsTx.TARGET_IS_TRANSMITTER":
@@ -115,6 +117,8 @@ export const workbenchEn = {
   "wb.connect.prompt":
     "Select the direct ExpressLRS module port; sending a CRSF Device Ping…",
   "wb.connect.incomplete": "Identification did not complete: {detail}",
+  "wb.connect.multipleDevices":
+    "More than one USB serial device is attached and this host has no device chooser. Connect only the device to be programmed, then identify it again.",
   "wb.connect.exactMatch":
     "CRSF proven and {product} matched to a single official Target.",
   "wb.connect.noCatalog":
@@ -338,6 +342,10 @@ export const workbenchEn = {
     "Confirm the transmitter's antenna is fitted before it can transmit.",
   "wb.need.targetConfirmation":
     "Type the Target name to confirm it, because the device identity does not pin it exactly.",
+  "wb.need.bandMatch":
+    "The connected device reports the {device} band ({evidence}), but the chosen Target is a {target} build. Choose a Target for the device's own band; a typed confirmation cannot override this.",
+  "wb.need.airportPlatform":
+    "AirPort cannot be written for {target} ({platform}): the pinned official flasher encodes it for ESP targets only.",
   "wb.need.recoveryPackage":
     "Select the recovery package to restore, or resume the open checkpoint.",
   "wb.need.durableRecovery":

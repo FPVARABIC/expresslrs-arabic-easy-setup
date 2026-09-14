@@ -92,6 +92,7 @@ export function ExpressLrsParityWorkbenchView({
     cancellable,
     captureDiagnostics,
     rxAsTxModeSupport,
+    airportSupport,
     readiness,
     captureDiagnosticsWithGrants,
     catalog,
@@ -1062,7 +1063,11 @@ export function ExpressLrsParityWorkbenchView({
                 <input
                   type="checkbox"
                   checked={options.airportEnabled}
-                  disabled={busy}
+                  // Closed only by a real condition of the chosen Target: the
+                  // pinned flasher encodes AirPort for ESP images and not for
+                  // STM32. The reason is written out below rather than the
+                  // control being hidden.
+                  disabled={busy || !airportSupport.supported}
                   data-testid="airport-enabled"
                   onChange={(event) =>
                     updateOption("airportEnabled", event.currentTarget.checked)
@@ -1070,6 +1075,17 @@ export function ExpressLrsParityWorkbenchView({
                 />
                 <span>{t("workbench.options.airport")}</span>
               </label>
+              {airportSupport.supported ? null : (
+                <p
+                  className="parity-note airport-note"
+                  data-airport-reason={airportSupport.reason}
+                >
+                  {t(`workbench.airport.${airportSupport.reason}`, {
+                    target: airportSupport.targetName,
+                    platform: airportSupport.platform,
+                  })}
+                </p>
+              )}
             </>
           )}
         </div>

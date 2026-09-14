@@ -13,7 +13,8 @@ export const en = {
   "language.switch": "Switch language",
   "mode.easy": "Easy mode",
   "mode.advanced": "Advanced mode",
-  "mode.advancedHint": "Simulation, device reading, and technical details",
+  "mode.advancedHint":
+    "Device reading, firmware packaging, recovery, and technical details",
   "real.progress.heading": "Read progress",
   "real.progress.preparing": "Preparing a read-only request",
   "real.progress.discovering": "Trying to reach the selected device address",
@@ -124,6 +125,8 @@ export const en = {
   "easy.fail.CLEANUP_UNCONFIRMED":
     "The previous port could not be confirmed closed. Reload the page before trying again.",
   "easy.fail.CONNECT_FAILED": "The device could not be opened.",
+  "easy.fail.MULTIPLE_DEVICES":
+    "More than one USB device is attached. Connect only the device you want to set up, then try again.",
   "easy.fail.UNKNOWN":
     "The device could not be identified, so nothing is claimed about it.",
   "easy.op.binding": "Bind transmitter and receiver",

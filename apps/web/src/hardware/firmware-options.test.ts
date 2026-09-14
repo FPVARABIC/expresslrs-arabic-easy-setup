@@ -207,12 +207,45 @@ describe("firmware option validation", () => {
     ).toBe("off");
   });
 
-  it("keeps AirPort independent of rx-as-tx in both directions", () => {
-    // AirPort on an STM32 receiver is fine: it is a different feature and is
-    // not gated by the rx-as-tx platform rule.
+  it("refuses AirPort on an STM32 Target, which the pinned official flasher never encodes it for", () => {
+    const stm32Receiver: OfficialTarget = {
+      ...target,
+      id: "vendor/rx_900/stm32-receiver",
+      role: "rx",
+      radioKey: "rx_900",
+      targetKey: "stm32-receiver",
+      config: {
+        ...target.config,
+        productName: "STM32 RX",
+        platform: "stm32",
+        firmware: "DIY_900_RX_STM32",
+        uploadMethods: ["betaflight", "stlink", "download"],
+      },
+    };
+
+    expect(() =>
+      validateFirmwareOptions({
+        target: stm32Receiver,
+        options: { ...options, airportEnabled: true },
+      }),
+    ).toThrow(/UNSUPPORTED_BY_PLATFORM \(PLATFORM_NOT_ENCODED\)/u);
+    // Off is not a claim about the device, so it is still accepted.
     expect(
       validateFirmwareOptions({
-        target: rxOn("stm32"),
+        target: stm32Receiver,
+        options: { ...options, airportEnabled: false },
+      }),
+    ).toMatchObject({ airportEnabled: false });
+  });
+
+  it("keeps AirPort independent of rx-as-tx in both directions", () => {
+    // AirPort on an ESP8285 receiver — a platform whose external rx-as-tx
+    // mode is refused — is fine: it is a different feature and is not gated
+    // by the rx-as-tx platform rule. (STM32 is refused for AirPort's own
+    // reason, covered above.)
+    expect(
+      validateFirmwareOptions({
+        target: rxOn("esp8285"),
         options: { ...options, rxAsTxMode: "off", airportEnabled: true },
       }),
     ).toMatchObject({ rxAsTxMode: "off", airportEnabled: true });

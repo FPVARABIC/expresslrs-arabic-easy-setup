@@ -1,3 +1,4 @@
+import { evaluateAirportSupport } from "./airport-support";
 import { evaluateRxAsTxSupport, RX_AS_TX_ACTIVE_MODES } from "./rx-as-tx";
 import type { RxAsTxActiveMode, RxAsTxMode } from "./rx-as-tx";
 import type {
@@ -134,6 +135,20 @@ export function validateFirmwareOptions(input: {
     // replaced.
     airportEnabled: options.airportEnabled === true,
   });
+
+  if (validated.airportEnabled) {
+    // The pinned official web flasher's STM32 configuration writes no AirPort
+    // bit (`configure.js` `#configureSTM32`), and this application's STM32
+    // packaging is a port of it. Accepting the option would report AirPort as
+    // applied on a device that never received it, so it is refused by name.
+    const support = evaluateAirportSupport(input.target);
+    if (!support.supported) {
+      throw new FirmwareOptionsError(
+        "airportEnabled",
+        `UNSUPPORTED_BY_PLATFORM (${support.reason}): ${support.targetName} on platform ${support.platform} cannot carry AirPort; the pinned official flasher encodes it for ESP targets only`,
+      );
+    }
+  }
 
   if (validated.rxAsTxMode !== "off") {
     // Whether a receiver can be flashed with transmitter firmware follows from

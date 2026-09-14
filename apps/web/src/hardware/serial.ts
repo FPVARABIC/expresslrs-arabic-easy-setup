@@ -62,6 +62,11 @@ export type HardwareSerialOpenFailure =
   | "INSECURE_CONTEXT"
   | "CANCELLED"
   | "PERMISSION_DENIED"
+  /**
+   * More than one usable device is attached and the host has no chooser to
+   * offer — the Android bridge refuses rather than guess which one to program.
+   */
+  | "MULTIPLE_DEVICES"
   | "OPEN_FAILED"
   | "STREAMS_UNAVAILABLE"
   | "CLEANUP_UNCONFIRMED";
@@ -179,6 +184,9 @@ export async function requestAndOpenHardwareSerial(
     }
     if (name === "SecurityError" || name === "NotAllowedError") {
       return Object.freeze({ status: "PERMISSION_DENIED" });
+    }
+    if (name === "MULTIPLE_DEVICES") {
+      return Object.freeze({ status: "MULTIPLE_DEVICES" });
     }
     return Object.freeze({ status: "OPEN_FAILED" });
   }
