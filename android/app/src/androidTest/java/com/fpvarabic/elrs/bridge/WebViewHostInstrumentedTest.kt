@@ -759,6 +759,8 @@ class WebViewHostInstrumentedTest {
 
     private companion object {
         const val ORIGIN = MainActivity.APPLICATION_ORIGIN
+        /** A second adapter beside the fake backend's default device. */
+        const val SECOND_DEVICE = "/dev/bus/usb/001/003"
         const val AWAIT_SECONDS = 10L
 
         /**

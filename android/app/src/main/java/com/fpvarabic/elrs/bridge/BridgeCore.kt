@@ -286,10 +286,11 @@ class BridgeCore(
     }
 
     private fun requestPermission(request: BridgeRequest.Valid, call: PendingCall) {
-        val deviceId = request.deviceId ?: return finish(
-            call,
-            BridgeRequest.error(request.callId, Reason.INVALID_REQUEST, "requestPermission requires a deviceId"),
-        )
+        val deviceId = request.deviceId
+        if (deviceId == null) {
+            finish(call, BridgeRequest.error(request.callId, Reason.INVALID_REQUEST, "requestPermission requires a deviceId"))
+            return
+        }
         backend.requestPermission(deviceId) { permission ->
             finish(
                 call,
@@ -307,10 +308,11 @@ class BridgeCore(
     }
 
     private fun open(request: BridgeRequest.Valid, call: PendingCall) {
-        val deviceId = request.deviceId ?: return finish(
-            call,
-            BridgeRequest.error(request.callId, Reason.INVALID_REQUEST, "open requires a deviceId"),
-        )
+        val deviceId = request.deviceId
+        if (deviceId == null) {
+            finish(call, BridgeRequest.error(request.callId, Reason.INVALID_REQUEST, "open requires a deviceId"))
+            return
+        }
         if (session != null) {
             // Two owners of one port cannot both be right about its state.
             finish(call, BridgeRequest.error(request.callId, Reason.PORT_ALREADY_OPEN, "a port is already open; close it first"))
