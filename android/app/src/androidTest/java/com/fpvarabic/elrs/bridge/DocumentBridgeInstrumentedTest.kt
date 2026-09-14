@@ -229,6 +229,29 @@ class DocumentBridgeInstrumentedTest {
     }
 
     @Test
+    fun abandonsADocumentThePickerCreatesAfterItsCallWasAlreadyRejected() {
+        // The picker is up, so the worker is parked inside create(); then the
+        // host is stopped for real underneath it and the page is told so.
+        val gate = CountDownLatch(1)
+        documents.blockCreate = gate
+        val pending = pendingCall("documentCreate") { it.put("suggestedName", "recovery.zip") }
+        core.onHostBackgrounded()
+        assertEquals(BridgeCore.Reason.HOST_NOT_VISIBLE, pending.await().getString("reason"))
+
+        // The picker now answers a page that has already been refused.
+        gate.countDown()
+        assertTrue(core.awaitIdle(AWAIT_MILLIS))
+
+        // A document nobody can ever write to or commit must not stay open —
+        // it would refuse every later export with WRITE_ALREADY_OPEN.
+        assertFalse(documents.hasPendingWrite)
+        core.onHostForegrounded()
+        documents.blockCreate = null
+        val next = call("documentCreate") { it.put("suggestedName", "recovery.zip") }
+        assertTrue(next.toString(), next.getBoolean("ok"))
+    }
+
+    @Test
     fun letsTheHostWriteAgainAfterItComesBack() {
         core.onHostBackgrounded()
         core.onHostForegrounded()
@@ -346,14 +369,20 @@ class DocumentBridgeInstrumentedTest {
 
     private var nextCallId = 0
 
-    private fun call(operation: String, extra: (JSONObject) -> JSONObject = { it }): JSONObject {
+    private fun pendingCall(
+        operation: String,
+        extra: (JSONObject) -> JSONObject = { it },
+    ): Pending {
         val request = extra(
             JSONObject().put("callId", "c${nextCallId++}").put("operation", operation),
         )
         val pending = Pending()
         core.handle(request.toString(), ORIGIN, isMainFrame = true) { pending.accept(it) }
-        return pending.await()
+        return pending
     }
+
+    private fun call(operation: String, extra: (JSONObject) -> JSONObject = { it }): JSONObject =
+        pendingCall(operation, extra).await()
 
     private fun bytesOf(bytes: ByteArray): JSONArray {
         val array = JSONArray()

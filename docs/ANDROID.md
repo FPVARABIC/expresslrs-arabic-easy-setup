@@ -218,7 +218,9 @@ weaker one — and the page is told the exact reason, which the build banner sho
 | Chunk ordering | a single worker thread, plus an offset that must equal what the session has written |
 | Cancellation overtakes queued work | `BridgeCore.cancel` runs on the caller's thread, not the queue |
 | A thrown transfer releases the port | `BridgeCore.transfer` |
-| Backgrounding revokes write authority | `MainActivity.onPause` → `onHostBackgrounded`: the port closes and every pending promise is rejected |
+| Leaving the screen revokes write authority | `MainActivity.onStop` → `onHostBackgrounded`: the port closes and every pending promise is rejected. A pause that keeps the host visible (Android's own USB permission dialog) and a stop behind a picker this host launched do **not**: the call that opened them is still pending and the worker is parked inside it. Proven by `HostLifecycleInstrumentedTest` |
+| The screen stays on | `FLAG_KEEP_SCREEN_ON` from `MainActivity.onCreate`, so a screen timeout cannot stop the host under a half-written image |
+| Two devices attached | the shim refuses `requestPort` with `MULTIPLE_DEVICES` rather than guessing which one to program |
 | Detach releases the port | a `RECEIVER_NOT_EXPORTED` receiver for `ACTION_USB_DEVICE_DETACHED` |
 | A destroyed Activity keeps nothing open | `MainActivity.onDestroy` → `close` |
 

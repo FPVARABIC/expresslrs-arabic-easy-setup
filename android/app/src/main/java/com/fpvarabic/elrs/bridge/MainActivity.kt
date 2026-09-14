@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
+import android.view.WindowManager
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -76,6 +77,12 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // A firmware write takes minutes, and the operator's hands are on the
+        // device rather than on the phone. A screen timeout would stop this
+        // Activity, and a stopped host closes its port — under a half-written
+        // image. The screen stays on while this host is in front.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         registerDocumentLaunchers()
 
@@ -208,13 +215,33 @@ class MainActivity : AppCompatActivity() {
         bridge?.onHostForegrounded()
     }
 
-    override fun onPause() {
-        super.onPause()
-        // A backgrounded WebView keeps running. Write authority does not follow
-        // it there: whatever was open is closed and every pending call is
-        // rejected, so a resumed page must ask again.
-        bridge?.onHostBackgrounded()
+    /**
+     * Write authority ends when the host leaves the screen — `onStop`, not
+     * `onPause`.
+     *
+     * Android *pauses* this Activity for its own USB permission dialog and
+     * for the Storage Access Framework picker this host launches, and each of
+     * those is answered by a call still pending on the bridge. Ending
+     * authority in `onPause` rejected exactly those calls: the first
+     * permission request on a freshly attached device always failed, and a
+     * recovery export could never complete because the picker's own
+     * appearance abandoned it and left its document half-open.
+     *
+     * A picker this host opened is the one stop that keeps the bridge alive:
+     * the worker is parked inside that picker wait and moves no bytes until
+     * the result comes back, which it can only do to a resumed Activity.
+     * Anything else that stops the host — Home, the recents screen, another
+     * app, the screen lock — closes the port and rejects every pending call,
+     * so a resumed page must ask again.
+     */
+    override fun onStop() {
+        super.onStop()
+        if (!awaitingOwnPicker) bridge?.onHostBackgrounded()
     }
+
+    /** Whether a picker this host launched is still waiting for its result. */
+    internal val awaitingOwnPicker: Boolean
+        get() = pendingDocumentResult != null || pendingFileChooser != null
 
     override fun onDestroy() {
         bridge?.close()

@@ -235,6 +235,15 @@
       if (candidates.length === 0) {
         throw bridgeError("NO_DEVICE", "no USB serial device is attached");
       }
+      if (candidates.length > 1) {
+        /* Web Serial would show a chooser here. This host has none, and
+         * picking one silently is how firmware reaches the wrong device.
+         * The operator attaches one device at a time; the refusal says so. */
+        throw bridgeError(
+          "MULTIPLE_DEVICES",
+          "more than one USB serial device is attached; connect only the device to be programmed",
+        );
+      }
       var device = candidates[0];
       if (device.usable) return nativePort(device);
       return call({

@@ -1,5 +1,7 @@
 package com.fpvarabic.elrs.bridge
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -41,7 +43,17 @@ class FakeDocumentStore(
     /** Whether a half-written document is still sitting there. */
     val hasPendingWrite: Boolean get() = documents.values.any { it.open }
 
+    /**
+     * Held to park `create` the way a real picker parks the bridge's worker
+     * until the operator answers — which is exactly when the host can be
+     * stopped underneath it.
+     */
+    @Volatile var blockCreate: CountDownLatch? = null
+
     override fun create(suggestedName: String, mimeType: String): DocumentStore.Outcome {
+        blockCreate?.let { gate ->
+            check(gate.await(10, TimeUnit.SECONDS)) { "the create gate was never released" }
+        }
         if (dismissCreate) {
             return DocumentStore.Refused(
                 DocumentStore.Reason.PICKER_CANCELLED,

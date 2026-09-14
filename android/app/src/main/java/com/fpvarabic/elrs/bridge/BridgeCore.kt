@@ -252,7 +252,13 @@ class BridgeCore(
                 outcome.message,
             )
         }
-        finish(call, reply)
+        if (!finish(call, reply) && outcome is DocumentStore.Created) {
+            // The page was already answered — by a lifecycle rejection while
+            // the picker was up — so nothing will ever write to or commit this
+            // document. Left open, it would refuse every later export with
+            // WRITE_ALREADY_OPEN until the host was backgrounded again.
+            documents.abandon()
+        }
     }
 
     private fun describeDevices(): JSONArray {
@@ -474,9 +480,10 @@ class BridgeCore(
         runCatching { active.connection.close() }
     }
 
-    private fun finish(call: PendingCall, payload: String) {
+    /** Answers [call] if nothing else has; false when the reply had nowhere to go. */
+    private fun finish(call: PendingCall, payload: String): Boolean {
         pending.remove(call.callId, call)
-        call.answer(payload)
+        return call.answer(payload)
     }
 
     private fun rejectPending(reason: String, message: String, except: String? = null) {

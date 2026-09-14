@@ -206,6 +206,9 @@ Nothing is written. Safe on any device, including ones you care about.
 | A3 | Grant the USB permission when Android asks | A port opens and the identity is read. The dialog names the device — check it is the one you attached | It names a different device, or no port opens after granting |
 | A4 | Deny the permission on a second device | A named refusal. No port is held; the next attempt still works | It hangs, or a later attempt fails because something was left open |
 | A5 | Grant, then revoke in Android settings, then retry | The stale handle is refused rather than used | It carries on with a handle it no longer has |
+| A14 | Attach the device, open the app and press *Identify* **before** granting anything, then grant in the dialog Android shows | The **same** attempt continues to a read identity once the dialog is answered — no second press | The first attempt fails while the dialog is up ("the application left the screen" or similar) and only a second press works |
+| A15 | Attach a second USB serial adapter alongside the ELRS device and press *Identify* | A refusal saying more than one device is attached; nothing is opened | It silently picks one of them |
+| A16 | Leave the app in front past the phone's screen timeout | The screen stays on while the app is in front | The screen turns off — on a write, that would have closed the port |
 
 ### Stage 3 — durable recovery export and re-import (D1–D9)
 

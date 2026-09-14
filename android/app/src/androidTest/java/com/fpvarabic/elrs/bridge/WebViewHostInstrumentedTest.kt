@@ -138,6 +138,37 @@ class WebViewHostInstrumentedTest {
         assertEquals("no device was ever opened", 0, backend.openCount.get())
     }
 
+    @Test
+    fun refusesToChooseBetweenTwoAttachedDevices() {
+        // Web Serial shows a chooser here. This host has none, and an earlier
+        // revision of the shim silently took the first device it found —
+        // which, with two adapters attached, is how firmware reaches the
+        // wrong one.
+        backend.devices.add(FakeUsbBackend.cdcDevice(SECOND_DEVICE, productName = "ExpressLRS RX"))
+        backend.permissions[FakeUsbBackend.DEFAULT_DEVICE] = UsbDeviceGate.Permission.GRANTED
+        backend.permissions[SECOND_DEVICE] = UsbDeviceGate.Permission.GRANTED
+        attach()
+        loadOnOrigin("<html><body>ready</body></html>")
+
+        evaluate(
+            """
+            window.__result = null;
+            window.elrsNativeBridge.serial.requestPort().then(function () {
+              window.__result = JSON.stringify({ ok: true });
+            }).catch(function (error) {
+              window.__result = JSON.stringify({
+                ok: false, name: error.name, reason: error.bridgeReason,
+              });
+            });
+            """.trimIndent(),
+        )
+        val refusal = JSONObject(awaitScript("window.__result"))
+        assertFalse(refusal.toString(), refusal.getBoolean("ok"))
+        assertEquals("MULTIPLE_DEVICES", refusal.getString("name"))
+        assertEquals("MULTIPLE_DEVICES", refusal.getString("reason"))
+        assertEquals("no port may be opened on a guess", 0, backend.openCount.get())
+    }
+
     // ---- promise mapping --------------------------------------------------
 
     @Test
