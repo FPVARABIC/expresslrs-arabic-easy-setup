@@ -124,12 +124,8 @@ class HostLifecycleInstrumentedTest {
                 scenario.evaluate("window.__documentReply"),
             )
 
-            // The operator dismisses the picker.
-            InstrumentationRegistry.getInstrumentation().uiAutomation
-                .performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-            scenario.awaitUntil("the host never came back after the picker") {
-                scenario.state == Lifecycle.State.RESUMED
-            }
+            // The operator dismisses the picker, and the host comes back.
+            scenario.dismissOwnPickerAndAwaitResume()
             val reply = JSONObject(scenario.awaitValue("window.__documentReply"))
             assertFalse(reply.toString(), reply.getBoolean("ok"))
             assertEquals("PICKER_CANCELLED", reply.getString("name"))
@@ -177,6 +173,35 @@ class HostLifecycleInstrumentedTest {
             Thread.sleep(POLL_MILLIS)
         }
         throw AssertionError("the packaged application never rendered a control in ${AWAIT_SECONDS}s")
+    }
+
+    /**
+     * Dismisses the host's own Storage Access Framework picker and waits for the
+     * Activity to return to RESUMED.
+     *
+     * A single BACK is not reliable: the real DocumentsUI picker can still be
+     * loading when the event arrives and drop it, and it sometimes opens a level
+     * deep. That raced the CI emulator and failed this test intermittently on
+     * bytes that were otherwise green (run 42 red, run 43 green, identical
+     * instrumentation). So BACK is re-sent each time the host has not yet
+     * resumed. This makes only the *dismissal* robust — every assertion after it
+     * (the pending call resolves PICKER_CANCELLED, the port survived) is
+     * unchanged, so the lifecycle guarantee under test is not weakened, only the
+     * picker-load race is taken out of it. BACK is never sent once the host is
+     * back, so it cannot leak through to the application.
+     */
+    private fun ActivityScenario<MainActivity>.dismissOwnPickerAndAwaitResume() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val deadline = System.currentTimeMillis() + AWAIT_SECONDS * 1_000
+        while (System.currentTimeMillis() < deadline) {
+            if (state == Lifecycle.State.RESUMED) return
+            automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            Thread.sleep(BACK_RETRY_MILLIS)
+        }
+        throw AssertionError(
+            "the host never came back after the picker | state=$state | " +
+                "reply=${evaluate("window.__documentReply")}",
+        )
     }
 
     private fun ActivityScenario<MainActivity>.awaitUntil(failure: String, condition: () -> Boolean) {
@@ -251,5 +276,8 @@ class HostLifecycleInstrumentedTest {
     private companion object {
         const val AWAIT_SECONDS = 30L
         const val POLL_MILLIS = 100L
+        // Long enough for the DocumentsUI picker to finish loading between
+        // BACK presses, short enough to retry several times within the window.
+        const val BACK_RETRY_MILLIS = 1_000L
     }
 }
