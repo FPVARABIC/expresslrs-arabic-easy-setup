@@ -410,6 +410,42 @@ function abortAfterFirstErase(
   };
 }
 
+/**
+ * Fires the abort right after the first command packet the predicate accepts
+ * has been sent — the answer to that command, and everything after it, then
+ * runs against an aborted signal.
+ */
+function abortWhen(
+  hardware: ReturnType<typeof fakeStlink>,
+  controller: AbortController,
+  predicate: (command: Uint8Array) => boolean,
+): void {
+  const original = hardware.device.transferOut;
+  (
+    hardware.device as { transferOut: UsbStlinkDeviceLike["transferOut"] }
+  ).transferOut = async (endpoint, source) => {
+    const result = await original(endpoint, source);
+    const bytes = new Uint8Array(
+      ArrayBuffer.isView(source) ? source.buffer : source,
+      ArrayBuffer.isView(source) ? source.byteOffset : 0,
+      source.byteLength,
+    );
+    if (bytes.byteLength === 16 && predicate(bytes)) controller.abort();
+    return result;
+  };
+}
+
+const isDebugWrite = (command: Uint8Array, address: number, value: number) =>
+  command[1] === 0x35 &&
+  new DataView(command.buffer, command.byteOffset).getUint32(2, true) ===
+    address &&
+  new DataView(command.buffer, command.byteOffset).getUint32(6, true) === value;
+
+const isDebugRead = (command: Uint8Array, address: number) =>
+  command[1] === 0x36 &&
+  new DataView(command.buffer, command.byteOffset).getUint32(2, true) ===
+    address;
+
 describe("ST-Link (SWD) STM32 writer", () => {
   it("normalises catalog part numbers the way the official flasher does", () => {
     expect(normalizeExpectedCpuType("STM32F103C8T6")).toBe("STM32F103x8T6");
@@ -915,6 +951,137 @@ describe("ST-Link (SWD) STM32 writer", () => {
     expect(error.code).toBe("ABORTED");
     expect(error.cleanupVerified).toBe(false);
     expect(error.cleanupSteps).toMatchObject({ flashRelocked: "no" });
+  });
+
+  // ---- N1: the lock state is tracked by intent, not by a post-await flag ---
+
+  it("re-locks the flash when the cancel lands right after the second unlock key, before the read-back", async () => {
+    // Both keys have gone out, so the flash is open in hardware — but the
+    // driver's `unlocked` flag was only set after the read-back it never
+    // reached, so the cleanup saw nothing to re-lock.
+    const hardware = fakeStlink();
+    const controller = new AbortController();
+    abortWhen(hardware, controller, (command) =>
+      isDebugWrite(command, FLASH_KEYR, 0xcdef89ab),
+    );
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(4096),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      signal: controller.signal,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const error = result.error as Stm32StlinkError;
+    expect(error.code).toBe("ABORTED");
+    expect((hardware.debug.get(FLASH_CR) ?? 0) & 0x80).toBe(0x80);
+    expect(error.cleanupSteps).toMatchObject({ flashRelocked: "yes" });
+    expect(error.cleanupVerified).toBe(true);
+  });
+
+  it("re-locks the flash when the cancel interrupts the unlock read-back itself", async () => {
+    const hardware = fakeStlink();
+    const controller = new AbortController();
+    let keysSent = false;
+    abortWhen(hardware, controller, (command) => {
+      if (isDebugWrite(command, FLASH_KEYR, 0xcdef89ab)) {
+        keysSent = true;
+        return false;
+      }
+      return keysSent && isDebugRead(command, FLASH_CR);
+    });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(4096),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      signal: controller.signal,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const error = result.error as Stm32StlinkError;
+    expect(error.code).toBe("ABORTED");
+    expect((hardware.debug.get(FLASH_CR) ?? 0) & 0x80).toBe(0x80);
+    expect(error.cleanupSteps).toMatchObject({ flashRelocked: "yes" });
+    expect(error.cleanupVerified).toBe(true);
+  });
+
+  it("leaves debug when the cancel lands during SWD entry, before the driver noted it was in debug", async () => {
+    // The analogous boundary: the enter-SWD command has gone out, so the probe
+    // may be in debug, but `inDebug` was only set after the call returned.
+    const hardware = fakeStlink();
+    const controller = new AbortController();
+    abortWhen(
+      hardware,
+      controller,
+      (command) => command[0] === 0xf2 && command[1] === 0x30,
+    );
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(64),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      signal: controller.signal,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const error = result.error as Stm32StlinkError;
+    expect(error.code).toBe("ABORTED");
+    expect(error.cleanupSteps).toMatchObject({ debugExited: "yes" });
+    // A DEBUG_EXIT went out after the enter-SWD command (the one leaveState
+    // sent before it does not count).
+    const enterIndex = hardware.commands.findIndex(
+      (command) => command[0] === 0xf2 && command[1] === 0x30,
+    );
+    expect(enterIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      hardware.commands
+        .slice(enterIndex + 1)
+        .some((command) => command[0] === 0xf2 && command[1] === 0x21),
+    ).toBe(true);
+  });
+
+  it("does not report success when the final lock write is not confirmed by a read-back, and does not run the firmware", async () => {
+    // LOCKED must mean "a read-back showed LOCK set", on the happy path too:
+    // a lock write that merely returned is not a confirmed lock, and a flash
+    // left open must not be reported as a clean success nor reset into.
+    const hardware = fakeStlink({ relockReadsUnlocked: true });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(64),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const error = result.error as Stm32StlinkError;
+    expect(error.code).toBe("FLASH_NOT_LOCKED");
+    expect(error.cleanupVerified).toBe(false);
+    expect(error.cleanupSteps).toMatchObject({
+      flashRelocked: "no",
+      debugExited: "yes",
+    });
+    // No reset-into-firmware went out (DEMCR cleared to run after reset).
+    expect(
+      hardware.commands.some((command) => isDebugWrite(command, DEMCR_REG, 0)),
+    ).toBe(false);
   });
 
   it("validates the Target and segment before asking for a probe", async () => {

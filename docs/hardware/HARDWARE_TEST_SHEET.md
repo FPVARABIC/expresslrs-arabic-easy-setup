@@ -60,7 +60,7 @@ Risk: R read-only · W reversible write · RF transmits · F flash · X destruct
 | H24 | W | AirPort disabled **with rx-as-tx on** | The role changed; AirPort is not enabled | UNVERIFIED |
 | H25 | — | Android OTG | Every row in [ANDROID.md](../ANDROID.md#still-open--needs-a-physical-android-device) A1–A19 | UNVERIFIED |
 | W1 | R | Betaflight `serialrx_*` sanity check | Behind a flight controller whose `serialrx_provider` is not CRSF/ELRS, or whose `serialrx_inverted` is ON, or whose `serialrx_halfduplex` is ON, the write is refused **before** `serialpassthrough`, naming the setting and the value read. Nothing is written; the CLI is left | UNVERIFIED |
-| W2 | F | ST-Link route over SWD | The probe's firmware version and the target voltage are shown; the connected MCU is named and matched to the Target's `stlink.cpus` **before** any erase; only the application pages are erased and written; every block is read back; the core is released to run | UNVERIFIED |
+| W2 | F | ST-Link route over SWD | The probe's firmware version and the target voltage are shown; the connected MCU is named and matched to the Target's `stlink.cpus` **before** any erase; only the application pages are erased and written; every block is read back; the flash is locked again and the lock confirmed by a read-back before the core is released to run | UNVERIFIED |
 
 ## The functional TX test (H17, H18, H19)
 

@@ -257,6 +257,7 @@ const STLINK_FAILURE_KEYS: Partial<Record<Stm32StlinkErrorCode, MessageKey>> =
     CPU_UNSUPPORTED: "wb.stlink.CPU_UNSUPPORTED",
     CPU_MISMATCH: "wb.stlink.CPU_MISMATCH",
     FLASH_LOCKED: "wb.stlink.FLASH_LOCKED",
+    FLASH_NOT_LOCKED: "wb.stlink.FLASH_NOT_LOCKED",
     FLASH_ERROR: "wb.stlink.FLASH_ERROR",
     VERIFY_FAILED: "wb.stlink.VERIFY_FAILED",
     SWD_FAULT: "wb.stlink.SWD_FAULT",

@@ -83,6 +83,8 @@ export const workbenchEn = {
     "The Target is built for {expected}, but the part on the probe is {detected}. Nothing was erased.",
   "wb.stlink.FLASH_LOCKED":
     "The flash controller stayed locked after the unlock keys; the part may be read-protected.",
+  "wb.stlink.FLASH_NOT_LOCKED":
+    "The flash controller did not report LOCK after the lock write (CR {control}). The flash may still be open; the core was not reset into the firmware. Run the recovery.",
   "wb.stlink.FLASH_ERROR":
     "The flash controller reported an error (status {status}). The flash is locked again; run the recovery.",
   "wb.stlink.VERIFY_FAILED":

@@ -396,6 +396,7 @@ export type Stm32StlinkErrorCode =
   | "CPU_UNSUPPORTED"
   | "CPU_MISMATCH"
   | "FLASH_LOCKED"
+  | "FLASH_NOT_LOCKED"
   | "FLASH_ERROR"
   | "TRANSFER_FAILED"
   | "SWD_FAULT"
@@ -1051,8 +1052,21 @@ async function detectMcu(
 
 // ---- flash programming (F0/F1/F3 page interface) ---------------------------
 
+/**
+ * What the driver knows about the flash controller's LOCK bit, tracked by
+ * intent rather than by a flag set after an await. A boolean that only turns
+ * "unlocked" once a read-back has confirmed it cannot describe the window in
+ * which the keys have reached the part but the read-back was cancelled — and a
+ * cleanup that consults such a flag then sees nothing to re-lock while the
+ * flash is open. So the state moves to MAYBE_UNLOCKED the moment the keys are
+ * about to go out, and only a verified re-lock moves it back to LOCKED. Any
+ * state but LOCKED means the cleanup must re-lock and read it back, or report
+ * the cleanup as unconfirmed and keep the recovery journal.
+ */
+type FlashLockState = "LOCKED" | "MAYBE_UNLOCKED" | "UNLOCKED";
+
 class FlashController {
-  public unlocked = false;
+  public lockState: FlashLockState = "LOCKED";
 
   public constructor(
     private readonly probe: StlinkProbe,
@@ -1075,6 +1089,11 @@ class FlashController {
   public async unlock(): Promise<void> {
     await this.resetHalt();
     let control = await this.probe.readDebugReg32(FLASH_CR_REG);
+    // From here the flash may be open even if the very next transfer or the
+    // read-back below is cancelled: the keys are on their way, or the part
+    // was already open. Marked before the first key, never after a read-back
+    // that may not complete.
+    this.lockState = "MAYBE_UNLOCKED";
     if ((control & FLASH_CR_LOCK) !== 0) {
       await this.probe.writeDebugReg32(FLASH_KEYR_REG, FLASH_KEY1);
       await this.probe.writeDebugReg32(FLASH_KEYR_REG, FLASH_KEY2);
@@ -1086,32 +1105,40 @@ class FlashController {
         "The flash controller stayed locked after the unlock keys",
       );
     }
-    this.unlocked = true;
+    this.lockState = "UNLOCKED";
   }
 
   public async lock(): Promise<void> {
-    await this.probe.writeDebugReg32(FLASH_CR_REG, FLASH_CR_LOCK);
-    this.unlocked = false;
+    // LOCKED means "a read-back showed LOCK set", on the happy path too: a
+    // lock write that merely returned is not a confirmed lock. An interruption
+    // or a read-back that shows the flash still open leaves MAYBE_UNLOCKED, so
+    // the cleanup re-locks and confirms rather than trusting an unseen write —
+    // and the operation is not reported as a success nor reset into.
+    await this.relockAndVerify();
     await this.resetHalt();
   }
 
   /**
-   * Re-locks the flash after a cancelled or failed write and reads the control
-   * register back to prove it: LOCK set, and no erase or program bit left
-   * standing (a cancel mid-erase leaves CR at PER|STRT). Throws if it cannot be
-   * confirmed, so the caller reports the cleanup as unverified rather than
-   * assuming a safe device. No reset: a partially written image is not booted.
+   * Locks the flash and reads the control register back to prove it: LOCK
+   * set, and no erase or program bit left standing (a cancel mid-erase leaves
+   * CR at PER|STRT). Used both at the end of a verified write and by the
+   * cleanup after a cancelled or failed one. Throws if the lock cannot be
+   * confirmed, so the caller reports it (and the cleanup as unverified) rather
+   * than assuming a safe device. No reset here: a partially written image is
+   * not booted by the cleanup.
    */
   public async relockAndVerify(): Promise<void> {
     await this.probe.writeDebugReg32(FLASH_CR_REG, FLASH_CR_LOCK);
     const control = await this.probe.readDebugReg32(FLASH_CR_REG);
     const locked = (control & FLASH_CR_LOCK) !== 0;
     const idle = (control & (FLASH_CR_PER | FLASH_CR_STRT | FLASH_CR_PG)) === 0;
-    this.unlocked = !locked;
+    // Only a read-back that shows LOCK set and no erase/program bit standing
+    // counts as locked; anything else stays "maybe open" so it is reported.
+    this.lockState = locked && idle ? "LOCKED" : "MAYBE_UNLOCKED";
     if (!locked || !idle) {
       throw new Stm32StlinkError(
-        "FLASH_LOCKED",
-        `The flash controller did not re-lock cleanly after the cancel (CR ${hex32(control)})`,
+        "FLASH_NOT_LOCKED",
+        `The flash controller did not report LOCK after the lock write (CR ${hex32(control)})`,
         { control: hex32(control) },
       );
     }
@@ -1379,8 +1406,12 @@ export async function flashStm32StlinkFirmware(input: {
     await probe.leaveState();
     const voltage = await probe.readTargetVoltage();
     if (probe.jtagVersion >= 22) await probe.setSwdFrequency();
-    await probe.enterSwd();
+    // Noted before the command goes out, not after it returns: a cancel that
+    // lands once enter-SWD has been sent leaves the probe in debug either way,
+    // and the cleanup must then leave it — which DEBUG_EXIT does harmlessly
+    // if the probe never got there.
     inDebug = true;
+    await probe.enterSwd();
     const coreId = await probe.readCoreId();
     if (coreId === 0) {
       throw new Stm32StlinkError(
@@ -1520,9 +1551,11 @@ export async function flashStm32StlinkFirmware(input: {
     // be rejected before it was sent — which left the flash unlocked mid-erase
     // (CR at PER|STRT) while we still reported the cleanup as verified.
     probe.beginCleanup();
-    // Re-lock the flash and confirm it, so a stray program cannot happen and a
-    // half-written image is left inert rather than re-run.
-    if (flash.unlocked) {
+    // Re-lock the flash and confirm it whenever it may be open — not only
+    // when a read-back had confirmed it open, since a cancel can land between
+    // the keys reaching the part and that read-back. "n/a" below therefore
+    // means the keys never went out at all.
+    if (flash.lockState !== "LOCKED") {
       const relocked = await settleCleanupWithin(() => flash.relockAndVerify());
       flashRelocked = relocked ? "yes" : "no";
       if (!relocked) markCleanupUnverified(operationFailure);
