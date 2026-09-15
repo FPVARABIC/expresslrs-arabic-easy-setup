@@ -69,6 +69,28 @@ pinned revision rather than from memory.
 | `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/lib/rx-crsf/RXParameters.cpp` | The receiver's Lua parameters, including the `version_domain` info entry |
 | `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` | `src/lib/FHSS/FHSS.cpp` | The regulatory-domain names (`AU915 FCC915 EU868 IN866 AU433 EU433 US433 US433W ISM2G4 CE_LBT`) and `addDomainInfo()`, which appends them to the version string the device reports |
 
+### Files read for the write-route audit
+
+The ST-Link route, the XMODEM trailer and retransmission rules, the Betaflight
+sanity checks, the STM32 buzzer options and the `prior_target_name` handling in
+`stm32-stlink.ts`, `xmodem.ts`, `passthrough.ts`, `buzzer-melody.ts`,
+`firmware-package.ts` and `useDeviceController.ts` cite these. Each saved copy
+was compared byte-for-byte against the revision named before this table was
+written.
+
+| Repository @ revision | File | What it settles |
+| --- | --- | --- |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/stlink.js`, `src/pages/STLinkFlash.vue` | The `stlink` upload method is a WebUSB ST-Link probe over SWD, not a DFU device: `detect_cpu(config.stlink.cpus)` must name the connected part, the core is halted, and only the application image is written at `flash_start + stlink.offset`; a bootloader argument exists but the page never passes one |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/stlink/webstlink.js`, `src/js/stlink/lib/stlinkv2.js`, `src/js/stlink/lib/stlinkusb.js` | The probe protocol — `GET_VERSION` (JTAG firmware below 21 refused), leaving DFU/DEBUG/SWIM mode, the target voltage, `SWD_SET_FREQ`, entering SWD, `READCOREID`, the debug-register and memory commands in 16-byte packets — and the V2 (`0x3748`) / V2-1 (`0x374B`) endpoints; `flash()` calls `flash_write(addr, data, {erase: true, verify: true})`, so every written block is read back and compared, and the core is left halted afterwards |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/stlink/lib/stm32.js`, `src/js/stlink/lib/stm32fp.js`, `src/js/stlink/lib/stm32devices.js` | CPUID part numbers, the F0/F1/F3 flash registers and unlock keys, page erase, the on-core halfword writer loaded at `0x20000000`, the read-back verify, and the device table (`dev_id` → family, page size, flash-size register) |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/xmodem.js` | The receiver chooses the trailer: `C` selects CRC-16 (133-byte frames), `NAK` selects the 8-bit checksum (132-byte frames); a block is re-sent unchanged after a `NAK` or silence; `EOT` is repeated until acknowledged; `CAN CAN` cancels |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/passthrough.js` | `betaflight()`: before `serialpassthrough`, `get serialrx_provider` must answer `CRSF` or `ELRS`, `get serialrx_inverted` must be `OFF`, and `get serialrx_halfduplex` must be `OFF` or `AUTO`; when the provider check fails, `get rx_spi_protocol` = `EXPRESSLRS` identifies an SPI receiver, which cannot be flashed this way |
+| `ExpressLRS/web-flasher` @ `4125a4e0…` | `src/js/configure.js`, `src/js/firmware.js`, `src/pages/TransmitterOptions.vue` | `#patch_buzzer`: the buzzer mode and melody are appended to the STM32 transmitter options only for Targets whose `features` include `buzzer`; the page offers quiet, one beep, the beep tune, the default tune and a custom melody |
+| `ExpressLRS/ExpressLRS` @ `41daca2a…` (3.4.3) | `src/lib/OPTIONS/options.h`, `src/lib/OPTIONS/options.cpp` | The STM32 options struct: magic, version, domain, `hasUID`, `uid[6]`, `flash_discriminator`, then for a transmitter `tlm_report`, `fan_min_runtime`, the flags byte (`uart_inverted`, `unlock_higher_power`) and, under `#if GPIO_PIN_BUZZER`, the `buzzer_mode` byte and `buzzer_melody[32][2]`; the enum `buzzerQuiet = 0`, `buzzerOne = 1`, `buzzerTune = 2` |
+| `ExpressLRS/ExpressLRS` @ `41daca2a…` (3.4.3) and `40555e14…` (3.5.3) | `src/python/binary_configurator.py` | `patch_buzzer`: the mode byte then 32 little-endian `(note, duration)` pairs; from 3.5 `fan_min_runtime` precedes the transmitter fields; `prior_target_name` feeds only `args.accept` for the Wi-Fi upload, never a byte of the binary |
+| `ExpressLRS/ExpressLRS` @ `41daca2a…` (3.4.3) | `src/python/melodyparser.py`, `src/python/external/rtttl.py` | The two melody notations: `notes\|bpm\|transpose` with the key-number formula and `P<length>` pauses, and RTTTL with dotted notes; unknown tokens are skipped or read as pauses |
+| `ExpressLRS/ExpressLRS` @ `a9d4a9cb…` (4.1.0) | `src/lib/WIFI/devWIFI.cpp` | The Wi-Fi updater scans the uploaded image for the device's own `target_name`; if it is absent it names the Target it found and asks for *Flash Anyway* (`force`), which is what `--accept` automates for a device still reporting its `prior_target_name`. The firmware itself never reads `prior_target_name` |
+
 ## Runtime sources — what actually reaches a device
 
 Everything is fetched from the official Web Flasher mirror:

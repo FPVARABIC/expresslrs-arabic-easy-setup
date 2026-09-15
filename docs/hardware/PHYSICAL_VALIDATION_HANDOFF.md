@@ -144,6 +144,8 @@ Consolidated, the smallest kit that closes every row is:
 | 9 | Something on the far end of a serial link to watch bytes cross | H23, H24 | AirPort is a transparent bridge; the only proof is bytes arriving |
 | 10 | An **Android phone with USB OTG** and a USB OTG adapter | H25, and A1–A13 in [ANDROID.md](../ANDROID.md) | No emulator has a USB host |
 | 11 | A **stable USB supply**, and a USB-serial adapter if the module has no USB | all | A brownout mid-write is row H16, not an accident |
+| 12 | An **ST-Link/V2 or V2-1 probe** wired to the SWD pads of an STM32 Target (optional) | W2, and H13–H15 by the `stlink` method | The `stlink` upload method is a WebUSB probe over SWD, not a DFU device; an ST-Link/V3 is refused by name |
+| 13 | A **flight controller running Betaflight** with a receiver on one of its UARTs (optional) | W1, and H13–H15 by the `betaflight` method | The passthrough route exists only behind a flight controller |
 
 Rows whose hardware you do not have stay `UNVERIFIED`. Do not mark them
 failed — "not tested" and "does not work" are different findings.
@@ -165,7 +167,7 @@ being complete is not the same as the rows being done.
 | 3 — **durable recovery** | D1–D9 | nothing; it is the safety net for stage 6 |
 | 4 — reversible settings | H6–H8 | a write that is put straight back |
 | 5 — binding and telemetry | H9–H11 | RF |
-| 6 — firmware | H12–H15 | a destructive write |
+| 6 — firmware | H12–H15, W1, W2 | a destructive write |
 | 7 — interruption and recovery | H16, A6, A11 | deliberate breakage; spare only |
 | 8 — RX-as-TX | H17–H20, H22 | the hardest change to undo; spare only |
 | 9 — AirPort, on its own | H23, H24 | nothing new, but must not be mixed with stage 8 |
@@ -260,9 +262,17 @@ application refuses to write until you have confirmed that.
 | Step | Do | Expect | Fails if |
 | --- | --- | --- | --- |
 | H12 | Build the package | Target, release, method, and every segment's name, address and SHA-256 recorded. The recovery archive downloads | Any segment has no digest, or the recovery archive is not offered |
-| H13 | Start the write and watch the bootloader stage | The tool names the correct chip, Target or DFU interface **before** any erase | It erases before naming the device, or names the wrong one |
-| H14 | Let it complete | Erase and write complete with read-back or tool-side segment verification | It reports success without verifying |
-| H15 | Let it reboot and reconnect | The same identity returns, reporting the expected release | The identity changed, or the version is not what was written |
+| H13 | Start the write and watch the bootloader stage | The tool names the correct chip, Target, DFU interface, or ST-Link probe and MCU part **before** any erase | It erases before naming the device, or names the wrong one |
+| H14 | Let it complete | Erase and write complete, and the completion text names the evidence of the route used — ESP: the chip computed the MD5 of every written region and it matched the image; ST-Link and DFU: every block read back and compared; STM32 XMODEM behind a flight controller: every frame acknowledged by the bootloader, **nothing read back**. Record the sentence shown | It reports success without naming its evidence, or names stronger evidence than the route can produce — a read-back claimed on the XMODEM route fails this row |
+| H15 | Let it reboot and reconnect | The same identity returns, reporting the expected release, and the regulatory domain matches the Target's band when the device publishes one. The completion text says compiled-in options are **not** read back — each option you set (binding phrase, Wi-Fi, buzzer…) is proven only by its own effect, at stage 10 or in a settings read | The identity changed, the version is not what was written, or the reported domain contradicts the Target's band |
+| W1 | With the receiver behind a Betaflight flight controller (section 3, item 13), set `serialrx_provider` to something other than CRSF/ELRS, or `serialrx_inverted` to ON, or `serialrx_halfduplex` to ON, then start the write by the `betaflight` method | Refused **before** `serialpassthrough`, naming the setting and the value the flight controller answered. Nothing is written, and the CLI is left. Restore the setting and the write proceeds | It enters passthrough anyway, or the refusal does not say which setting |
+| W2 | With an ST-Link/V2 or V2-1 probe (section 3, item 12), start the write by the `stlink` method | The probe's firmware version and the target voltage are shown; the connected MCU is named and matched to the Target's `stlink.cpus` **before** any erase; only the application pages are erased and written; every block is read back; the core is released to run and the device reboots into the new image | It writes to a part that does not match the Target, reports success without the read-back, or leaves the device halted |
+
+W1 and W2 exist only where the hardware in section 3, items 12 and 13, is
+present; without it they stay `UNVERIFIED`. The evidence sentence in H14 is
+route-specific on purpose: the XMODEM route can never state more than
+acknowledged frames, so a completion text claiming a read-back on that route is
+a failed H14, not a stronger pass.
 
 ### Stage 7 — controlled interruption and recovery (H16, A6, A11)
 
@@ -410,6 +420,8 @@ watched it happen.
 | H23 | | | |
 | H24 | | | |
 | H25 | | | |
+| W1 | | | |
+| W2 | | | |
 
 ### Raw CRSF evidence
 

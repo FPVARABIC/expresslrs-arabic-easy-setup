@@ -46,9 +46,9 @@ Risk: R read-only · W reversible write · RF transmits · F flash · X destruct
 | H10 | RF | Binding command sent to RX | Command type and any response recorded, without assuming a link | UNVERIFIED |
 | H11 | RF | Link observed from both ends | Independent evidence at TX *and* RX — telemetry returning, or both indicators. A bind acknowledgement alone fails this row. | UNVERIFIED |
 | H12 | F | Package built and verified | Target, release, method, and every segment name, address and SHA-256 recorded; recovery archive downloaded | UNVERIFIED |
-| H13 | F | Bootloader entered | The tool names the correct chip, Target or DFU interface **before** any erase | UNVERIFIED |
-| H14 | F | Normal flash with verification | Erase and write complete with read-back or tool-side segment verification | UNVERIFIED |
-| H15 | F | Reboot, Target and version verified | Same identity returns; the expected release or commit is reported | UNVERIFIED |
+| H13 | F | Bootloader entered | The tool names the correct chip, Target, DFU interface, or ST-Link probe and MCU part **before** any erase | UNVERIFIED |
+| H14 | F | Normal flash with the route's own verification | Erase and write complete, and the completion text names the evidence of the route used — ESP: the chip computed the MD5 of every written region and it matched the image; ST-Link and DFU: every block read back and compared; STM32 XMODEM behind a flight controller: every frame acknowledged by the bootloader, **nothing read back**. Record the sentence shown. A completion text claiming a read-back on the XMODEM route fails this row | UNVERIFIED |
+| H15 | F | Reboot, Target, version and domain verified | The same identity returns, reporting the expected release, and the regulatory domain matches the Target's band when the device publishes one. The completion text says compiled-in options are **not** read back — each option you set (binding phrase, Wi-Fi, buzzer…) is proven only by its own effect, at stage 10 or in a settings read | UNVERIFIED |
 | H16 | X | Interrupted write and recovery | Interrupt during WRITING; `RECOVERY_REQUIRED` appears; recovery restores the original and the identity and version return. **Spare device only.** | UNVERIFIED |
 | H17 | X | ESP32 RX-as-TX, **internal** | See the functional TX test below | UNVERIFIED |
 | H18 | X | ESP32 RX-as-TX, **external** | See the functional TX test below | UNVERIFIED |
@@ -58,7 +58,9 @@ Risk: R read-only · W reversible write · RF transmits · F flash · X destruct
 | H22 | X | Recovery from RX-as-TX | The recovery archive restores the **original receiver firmware**; the device returns to reporting a receiver role | UNVERIFIED |
 | H23 | W | AirPort enabled **with rx-as-tx off** | `is-airport` takes effect; the device is still a receiver | UNVERIFIED |
 | H24 | W | AirPort disabled **with rx-as-tx on** | The role changed; AirPort is not enabled | UNVERIFIED |
-| H25 | — | Android OTG | Every row in [ANDROID.md](../ANDROID.md#still-open--needs-a-physical-android-device) A1–A13 | UNVERIFIED |
+| H25 | — | Android OTG | Every row in [ANDROID.md](../ANDROID.md#still-open--needs-a-physical-android-device) A1–A19 | UNVERIFIED |
+| W1 | R | Betaflight `serialrx_*` sanity check | Behind a flight controller whose `serialrx_provider` is not CRSF/ELRS, or whose `serialrx_inverted` is ON, or whose `serialrx_halfduplex` is ON, the write is refused **before** `serialpassthrough`, naming the setting and the value read. Nothing is written; the CLI is left | UNVERIFIED |
+| W2 | F | ST-Link route over SWD | The probe's firmware version and the target voltage are shown; the connected MCU is named and matched to the Target's `stlink.cpus` **before** any erase; only the application pages are erased and written; every block is read back; the core is released to run | UNVERIFIED |
 
 ## The functional TX test (H17, H18, H19)
 
@@ -108,6 +110,8 @@ Rows that cannot be run because the hardware is not present stay
 | H17–H19 step 2 | A handset outputting CRSF, or a bench CRSF generator capable of 50 Hz RC frames |
 | H23, H24 | Any supported ESP receiver, plus something on the far end of the serial link to observe the AirPort bridge carrying bytes |
 | H25 | See [ANDROID.md](../ANDROID.md#hardware-required-to-close-them) |
+| W1 | A **flight controller running Betaflight** with the receiver under test on one of its UARTs, and that receiver's Target chosen |
+| W2 | An **ST-Link/V2 or V2-1 probe** (an ST-Link/V3 is refused by name) wired to the SWD pads of an STM32 Target that lists the `stlink` method — for example an FrSky R9M transmitter or an R9 Mini receiver |
 
 ## Recording
 
