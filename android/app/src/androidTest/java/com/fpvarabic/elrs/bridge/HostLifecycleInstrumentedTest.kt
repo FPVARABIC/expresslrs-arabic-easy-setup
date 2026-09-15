@@ -1,6 +1,7 @@
 package com.fpvarabic.elrs.bridge
 
 import android.accessibilityservice.AccessibilityService
+import android.util.Log
 import android.view.WindowManager
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
@@ -91,47 +92,81 @@ class HostLifecycleInstrumentedTest {
 
     @Test
     fun aStopBehindTheHostsOwnPickerKeepsThePortAndThePendingCall() {
+        // The flake here was blamed on a dropped BACK. Non-determinism alone did
+        // not prove that, so this runs the cycle several times and records, each
+        // time, which window is in front (the real DocumentsUI picker vs this
+        // host) and how many BACK presses the dismissal took — then proves the
+        // two things that must hold whatever the picker's load timing: the
+        // cancel resolves to PICKER_CANCELLED with the port kept, and no BACK
+        // reaches this host after it resumes (which would finish the Activity,
+        // bring up a new instance, and close the port).
+        val evidence = StringBuilder()
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.awaitApplication()
             scenario.openFakePort()
             val connection = requireNotNull(backend.lastConnection())
+            var activityId = 0
+            scenario.onActivity { activityId = System.identityHashCode(it) }
 
-            scenario.evaluate(
-                """
-                window.__documentReply = null;
-                window.elrsNativeBridge.documents.create({
-                  suggestedName: 'lifecycle.zip', mimeType: 'application/zip',
-                }).then(function () {
-                  window.__documentReply = JSON.stringify({ ok: true });
-                }).catch(function (error) {
-                  window.__documentReply = JSON.stringify({ ok: false, name: error.name });
-                });
-                """.trimIndent(),
-            )
-            // The Storage Access Framework picker is a full-screen Activity:
-            // this host is stopped underneath it while its own call waits.
-            scenario.awaitUntil("the picker never took the host off screen") {
-                scenario.state == Lifecycle.State.CREATED
+            repeat(PICKER_CYCLES) { cycle ->
+                scenario.evaluate(
+                    """
+                    window.__documentReply = null;
+                    window.elrsNativeBridge.documents.create({
+                      suggestedName: 'lifecycle.zip', mimeType: 'application/zip',
+                    }).then(function () {
+                      window.__documentReply = JSON.stringify({ ok: true });
+                    }).catch(function (error) {
+                      window.__documentReply = JSON.stringify({ ok: false, name: error.name });
+                    });
+                    """.trimIndent(),
+                )
+                // The picker is a full-screen Activity: this host stops under it
+                // while its own call waits.
+                scenario.awaitUntil("the picker never took the host off screen") {
+                    scenario.state == Lifecycle.State.CREATED
+                }
+                val front = foregroundPackage()
+                assertEquals(
+                    "a stop behind the host's own picker must keep the port",
+                    0,
+                    connection.closeCount.get(),
+                )
+                assertEquals(
+                    "the call that opened the picker must still be pending",
+                    "null",
+                    scenario.evaluate("window.__documentReply"),
+                )
+
+                val presses = scenario.dismissOwnPickerAndAwaitResume()
+                evidence.append(
+                    "cycle ${cycle + 1}: stopped behind \"$front\", " +
+                        "$presses BACK press(es), resumed; ",
+                )
+
+                val reply = JSONObject(scenario.awaitValue("window.__documentReply"))
+                assertFalse(reply.toString(), reply.getBoolean("ok"))
+                assertEquals("PICKER_CANCELLED", reply.getString("name"))
+                assertEquals(
+                    "the port survived the picker",
+                    0,
+                    connection.closeCount.get(),
+                )
+                assertTrue(connection.isOpen)
+                // A BACK that reached the resumed host would have finished it and
+                // brought up a new Activity instance; the port would be closed.
+                var current = 0
+                scenario.onActivity { current = System.identityHashCode(it) }
+                assertEquals(
+                    "no BACK reached the host after it resumed (same Activity)",
+                    activityId,
+                    current,
+                )
             }
-            assertEquals(
-                "a stop behind the host's own picker must keep the port",
-                0,
-                connection.closeCount.get(),
-            )
-            assertEquals(
-                "the call that opened the picker must still be pending",
-                "null",
-                scenario.evaluate("window.__documentReply"),
-            )
-
-            // The operator dismisses the picker, and the host comes back.
-            scenario.dismissOwnPickerAndAwaitResume()
-            val reply = JSONObject(scenario.awaitValue("window.__documentReply"))
-            assertFalse(reply.toString(), reply.getBoolean("ok"))
-            assertEquals("PICKER_CANCELLED", reply.getString("name"))
-            assertEquals("the port survived the picker", 0, connection.closeCount.get())
-            assertTrue(connection.isOpen)
         }
+        // Recorded so a reviewer can see the transitions, the picker window and
+        // the per-cycle BACK count that the fix is built on.
+        Log.i("ELRS_PICKER_EVIDENCE", evidence.toString())
     }
 
     @Test
@@ -190,12 +225,16 @@ class HostLifecycleInstrumentedTest {
      * picker-load race is taken out of it. BACK is never sent once the host is
      * back, so it cannot leak through to the application.
      */
-    private fun ActivityScenario<MainActivity>.dismissOwnPickerAndAwaitResume() {
+    private fun ActivityScenario<MainActivity>.dismissOwnPickerAndAwaitResume(): Int {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val deadline = System.currentTimeMillis() + AWAIT_SECONDS * 1_000
+        var presses = 0
         while (System.currentTimeMillis() < deadline) {
-            if (state == Lifecycle.State.RESUMED) return
+            // Checked before each press and never once the host is back, so a
+            // BACK is only ever sent while the picker is still in front.
+            if (state == Lifecycle.State.RESUMED) return presses
             automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            presses += 1
             Thread.sleep(BACK_RETRY_MILLIS)
         }
         throw AssertionError(
@@ -203,6 +242,17 @@ class HostLifecycleInstrumentedTest {
                 "reply=${evaluate("window.__documentReply")}",
         )
     }
+
+    /** The package that owns the active window, for recording which app is in
+     *  front — the DocumentsUI picker while the host is stopped, the host after
+     *  it resumes. Best effort: accessibility may not answer, hence "unknown". */
+    private fun foregroundPackage(): String =
+        runCatching {
+            InstrumentationRegistry.getInstrumentation()
+                .uiAutomation.rootInActiveWindow
+                ?.packageName
+                ?.toString()
+        }.getOrNull() ?: "unknown"
 
     private fun ActivityScenario<MainActivity>.awaitUntil(failure: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + AWAIT_SECONDS * 1_000
@@ -279,5 +329,8 @@ class HostLifecycleInstrumentedTest {
         // Long enough for the DocumentsUI picker to finish loading between
         // BACK presses, short enough to retry several times within the window.
         const val BACK_RETRY_MILLIS = 1_000L
+        // How many open/stop/dismiss/resume cycles one run exercises, so the
+        // picker-load non-determinism is met more than once per CI run.
+        const val PICKER_CYCLES = 3
     }
 }
