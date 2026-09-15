@@ -106,6 +106,24 @@ export const workbenchEn = {
     "The buzzer options need an STM32 transmitter Target with a buzzer; {target} ({platform}) has none.",
   "wb.flash.wifiHandoffPrior":
     "The OTA file was downloaded and 10.0.0.1 opened. Choose the downloaded file inside the device's own page. If the device reports its current target as {prior}, that is this Target's earlier name ({target}); the firmware's own configurator accepts it, so continue.",
+  "wb.evidence.write.DEVICE_FLASH_MD5_MATCHED":
+    "Bytes on the device: the chip computed the MD5 of every written region and it matched the image.",
+  "wb.evidence.write.SWD_READ_BACK_MATCHED":
+    "Bytes on the device: every programmed block was read back over SWD and compared byte for byte.",
+  "wb.evidence.write.DFU_UPLOAD_READ_BACK_MATCHED":
+    "Bytes on the device: every block was read back from the DFU bootloader and compared byte for byte.",
+  "wb.evidence.write.RECEIVER_ACKNOWLEDGED_FRAMES":
+    "Bytes on the device: the bootloader acknowledged every XMODEM frame after checking it, and nothing was read back — the flash contents themselves were not verified.",
+  "wb.evidence.identityAndVersion":
+    "After the reboot the Target, role and version/commit were read over CRSF and matched.",
+  "wb.evidence.domain.MATCHED":
+    "Regulatory domain: the device reports {domain}, which matches the Target's band.",
+  "wb.evidence.domain.NOT_PUBLISHED":
+    "Regulatory domain: the device publishes none over CRSF, so it was not checked.",
+  "wb.evidence.optionsNotReadBack":
+    "Compiled-in options (binding phrase, Wi-Fi, telemetry, fan, flags, buzzer) cannot be read back over CRSF, so nothing here proves the device is running them; only the image check above covers them.",
+  "wb.reconnect.domainMismatch":
+    "The device came back reporting the {observed} domain, but the Target is {expected}; the write is not verified.",
   "wb.method.download": "Download only",
 
   // --- receiver as transmitter (upstream `--rx-as-tx`) --------------------
@@ -325,7 +343,7 @@ export const workbenchEn = {
   "wb.flash.espCloseUnproven":
     "The ESP port close could not be confirmed after the write; reload the page before any further attempt.",
   "wb.flash.complete":
-    "The flash completed and the device came back with the expected version/commit.",
+    "The write finished, and the device came back as the expected Target reporting the expected version/commit.",
   "wb.flash.writeCloseUnproven":
     "The write port close could not be proven after the flash stopped",
   "wb.flash.stopped":
@@ -368,7 +386,7 @@ export const workbenchEn = {
     "The ESP port close could not be confirmed after the recovery; reload the page before any further attempt.",
   "wb.recovery.platformUnsupported": "The recovery platform is unsupported.",
   "wb.recovery.complete":
-    "The recovery completed and the device came back with the expected version/commit.",
+    "The recovery finished, and the device came back as the expected Target reporting the expected version/commit.",
   "wb.recovery.writeCloseUnproven":
     "The write port close could not be proven after the recovery stopped",
   "wb.recovery.incomplete":

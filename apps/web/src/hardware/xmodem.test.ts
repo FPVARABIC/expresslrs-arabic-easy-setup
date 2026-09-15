@@ -107,7 +107,12 @@ describe("XMODEM-CRC flasher", () => {
       firmware,
     });
 
-    expect(result).toEqual({ bytesWritten: 129, blocks: 2, mode: "crc" });
+    expect(result).toEqual({
+      bytesWritten: 129,
+      blocks: 2,
+      mode: "crc",
+      verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+    });
     expect(hardware.writes).toHaveLength(3);
     expect(hardware.writes[0]?.byteLength).toBe(133);
     expect(hardware.writes[1]?.byteLength).toBe(133);
@@ -274,7 +279,12 @@ describe("XMODEM negotiation: the receiver's opening byte selects the trailer", 
     });
     await expect(
       flashXmodemFirmware({ port: checksum.port, firmware }),
-    ).resolves.toEqual({ bytesWritten: 200, blocks: 2, mode: "checksum" });
+    ).resolves.toEqual({
+      bytesWritten: 200,
+      blocks: 2,
+      mode: "checksum",
+      verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+    });
     expect(checksum.writes).toEqual([
       expectedFrame(1, padded(firmware, 0), "checksum"),
       expectedFrame(2, padded(firmware, 128), "checksum"),
@@ -292,6 +302,7 @@ describe("XMODEM negotiation: the receiver's opening byte selects the trailer", 
       bytesWritten: 200,
       blocks: 2,
       mode: "crc",
+      verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
     });
     expect(crc.writes).toEqual([
       expectedFrame(1, padded(firmware, 0), "crc"),
@@ -313,7 +324,12 @@ describe("XMODEM negotiation: the receiver's opening byte selects the trailer", 
         port: hardware.port,
         firmware: new Uint8Array([9]),
       }),
-    ).resolves.toEqual({ bytesWritten: 1, blocks: 1, mode: "crc" });
+    ).resolves.toEqual({
+      bytesWritten: 1,
+      blocks: 1,
+      mode: "crc",
+      verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+    });
     expect(hardware.writes.filter(isFrame)).toHaveLength(1);
   });
 });
@@ -340,7 +356,12 @@ describe("XMODEM handshake window", () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(await outcome).toEqual({
       ok: true,
-      value: { bytesWritten: 3, blocks: 1, mode: "crc" },
+      value: {
+        bytesWritten: 3,
+        blocks: 1,
+        mode: "crc",
+        verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+      },
     });
   });
 
@@ -361,7 +382,12 @@ describe("XMODEM handshake window", () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(await outcome).toEqual({
       ok: true,
-      value: { bytesWritten: 1, blocks: 1, mode: "checksum" },
+      value: {
+        bytesWritten: 1,
+        blocks: 1,
+        mode: "checksum",
+        verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+      },
     });
   });
 
@@ -413,7 +439,12 @@ describe("XMODEM retransmission, completion and cancellation", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(await outcome).toEqual({
       ok: true,
-      value: { bytesWritten: 2, blocks: 1, mode: "crc" },
+      value: {
+        bytesWritten: 2,
+        blocks: 1,
+        mode: "crc",
+        verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+      },
     });
     const frames = hardware.writes.filter(isFrame);
     expect(frames).toHaveLength(2);
@@ -475,7 +506,12 @@ describe("XMODEM retransmission, completion and cancellation", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(await outcome).toEqual({
       ok: true,
-      value: { bytesWritten: 1, blocks: 1, mode: "crc" },
+      value: {
+        bytesWritten: 1,
+        blocks: 1,
+        mode: "crc",
+        verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
+      },
     });
     expect(hardware.writes.filter(isEot)).toHaveLength(3);
   });

@@ -34,6 +34,7 @@ import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
 import type {
   BindingOperationResult,
   DeviceController,
+  DeviceOperationResult,
 } from "../hardware/useDeviceController";
 
 export interface EasySetupProps {
@@ -286,9 +287,20 @@ export function EasySetup({
     setFailed(!result.verified);
     setOutcome(
       result.verified
-        ? { kind: "verified", text: t("easy.fw.verified") }
+        ? { kind: "verified", text: verifiedText(result) }
         : { kind: "failed", text: renderMessage(result.message) },
     );
+  }
+
+  /**
+   * The headline is Easy Mode's; the sentences after it are the controller's
+   * statement of exactly what the write proved, route by route, and what it
+   * could not read back. A write is never called done without them.
+   */
+  function verifiedText(result: DeviceOperationResult): string {
+    return result.evidenceMessage === undefined
+      ? t("easy.fw.verified")
+      : `${t("easy.fw.verified")} ${renderMessage(result.evidenceMessage)}`;
   }
 
   async function runRecovery(file: File): Promise<void> {
@@ -298,7 +310,7 @@ export function EasySetup({
     setFailed(!result.verified);
     setOutcome(
       result.verified
-        ? { kind: "verified", text: t("easy.fw.verified") }
+        ? { kind: "verified", text: verifiedText(result) }
         : { kind: "failed", text: renderMessage(result.message) },
     );
   }

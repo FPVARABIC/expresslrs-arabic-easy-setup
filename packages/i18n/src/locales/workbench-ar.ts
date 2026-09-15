@@ -93,6 +93,24 @@ export const workbenchAr = {
     "خيارات الصفّارة تحتاج Target لجهاز إرسال STM32 مزوّد بصفّارة؛ {target} ({platform}) لا يملك واحدة.",
   "wb.flash.wifiHandoffPrior":
     "نُزّل ملف OTA وفُتح 10.0.0.1. اختر الملف المنزّل داخل صفحة الجهاز نفسها. إذا أبلغ الجهاز أن Target الحالي هو {prior} فهذا هو الاسم السابق لهذا الـTarget ({target})؛ مُهيّئ Firmware نفسه يقبله، فتابع.",
+  "wb.evidence.write.DEVICE_FLASH_MD5_MATCHED":
+    "البايتات على الجهاز: حسبت الشريحة MD5 لكل منطقة كُتبت وطابقت الصورة.",
+  "wb.evidence.write.SWD_READ_BACK_MATCHED":
+    "البايتات على الجهاز: قُرئت كل كتلة مبرمجة رجعيًا عبر SWD وقورنت بايتًا ببايت.",
+  "wb.evidence.write.DFU_UPLOAD_READ_BACK_MATCHED":
+    "البايتات على الجهاز: قُرئت كل كتلة رجعيًا من محمّل إقلاع DFU وقورنت بايتًا ببايت.",
+  "wb.evidence.write.RECEIVER_ACKNOWLEDGED_FRAMES":
+    "البايتات على الجهاز: أقرّ محمّل الإقلاع كل إطار XMODEM بعد فحصه، ولم يُقرأ شيء رجعيًا؛ محتوى الذاكرة نفسه لم يُتحقق منه.",
+  "wb.evidence.identityAndVersion":
+    "بعد إعادة الإقلاع قُرئت Target والدور والإصدار/Commit عبر CRSF وطابقت المتوقع.",
+  "wb.evidence.domain.MATCHED":
+    "النطاق التنظيمي: يبلغ الجهاز {domain}، وهو يطابق نطاق الـTarget.",
+  "wb.evidence.domain.NOT_PUBLISHED":
+    "النطاق التنظيمي: لا ينشر الجهاز أي نطاق عبر CRSF، فلم يُفحص.",
+  "wb.evidence.optionsNotReadBack":
+    "الخيارات المضمّنة في الصورة (عبارة الربط وWi-Fi والتيليمتري والمروحة والأعلام والصفّارة) لا يمكن قراءتها رجعيًا عبر CRSF، فلا شيء هنا يثبت أن الجهاز يعمل بها؛ فحص الصورة أعلاه وحده يغطيها.",
+  "wb.reconnect.domainMismatch":
+    "عاد الجهاز مبلغًا عن نطاق {observed}، بينما الـTarget من نطاق {expected}؛ الكتابة غير متحقق منها.",
   "wb.method.download": "تنزيل فقط",
 
   // --- receiver as transmitter (upstream `--rx-as-tx`) --------------------
@@ -282,7 +300,8 @@ export const workbenchAr = {
     "اكتملت كتابة ESP لكن تعذر إثبات إغلاق منفذها التسلسلي",
   "wb.flash.espCloseUnproven":
     "تعذر تأكيد إغلاق منفذ ESP بعد الكتابة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
-  "wb.flash.complete": "اكتمل التفليش وعاد الجهاز بالإصدار/Commit المتوقع.",
+  "wb.flash.complete":
+    "اكتمل التفليش وعاد الجهاز بوصفه Target المتوقع مبلغًا عن الإصدار/Commit المتوقع.",
   "wb.flash.writeCloseUnproven":
     "تعذر إثبات إغلاق منفذ الكتابة بعد توقف التفليش",
   "wb.flash.stopped": "توقف التفليش وتحتاج العملية إلى الاستعادة: {detail}",
@@ -320,7 +339,7 @@ export const workbenchAr = {
     "تعذر تأكيد إغلاق منفذ ESP بعد الاستعادة؛ أعد تحميل الصفحة قبل أي محاولة أخرى.",
   "wb.recovery.platformUnsupported": "منصة الاستعادة غير مدعومة.",
   "wb.recovery.complete":
-    "اكتملت الاستعادة وعاد الجهاز بالإصدار/Commit المتوقع.",
+    "اكتملت الاستعادة وعاد الجهاز بوصفه Target المتوقع مبلغًا عن الإصدار/Commit المتوقع.",
   "wb.recovery.writeCloseUnproven":
     "تعذر إثبات إغلاق منفذ الكتابة بعد توقف الاستعادة",
   "wb.recovery.incomplete":

@@ -233,6 +233,8 @@ export interface XmodemTransferResult {
   readonly blocks: number;
   /** The trailer the receiver negotiated, which is the only thing it verified per block. */
   readonly mode: XmodemMode;
+  /** Per-frame acknowledgement is all this protocol offers: nothing is read back. */
+  readonly verification: "RECEIVER_ACKNOWLEDGED_FRAMES";
 }
 
 export async function flashXmodemFirmware(input: {
@@ -499,6 +501,7 @@ export async function flashXmodemFirmware(input: {
       bytesWritten: input.firmware.byteLength,
       blocks: blockCount,
       mode: negotiatedMode,
+      verification: "RECEIVER_ACKNOWLEDGED_FRAMES",
     });
   } catch (error: unknown) {
     if (error instanceof XmodemError && error.code === "ABORTED") {

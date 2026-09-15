@@ -381,6 +381,12 @@ export async function flashEspFirmware(input: {
     chipName: string;
     bytesWritten: number;
     cleanupVerified: boolean;
+    /**
+     * esptool-js compares the MD5 the chip's stub computes over each written
+     * region with the image's own (`calculateMD5Hash` above) and throws on a
+     * mismatch, so a completed write means the device's flash matched.
+     */
+    verification: "DEVICE_FLASH_MD5_MATCHED";
   }>
 > {
   if (isAbortRequested(input.signal)) {
@@ -403,6 +409,7 @@ export async function flashEspFirmware(input: {
     chipName: string;
     bytesWritten: number;
     cleanupVerified: boolean;
+    verification: "DEVICE_FLASH_MD5_MATCHED";
   } | null = null;
   let operationFailure: unknown = null;
 
@@ -552,7 +559,8 @@ export async function flashEspFirmware(input: {
       stage: "VERIFY",
       writtenBytes: byteCount,
       totalBytes: byteCount,
-      detail: "Bootloader accepted the verified image checksums",
+      detail:
+        "The chip computed the MD5 of every written region and it matched the image",
     });
     try {
       await runBoundedOperation({
@@ -574,7 +582,12 @@ export async function flashEspFirmware(input: {
       totalBytes: byteCount,
       detail: "Device reset requested",
     });
-    completion = { chipName, bytesWritten: byteCount, cleanupVerified: true };
+    completion = {
+      chipName,
+      bytesWritten: byteCount,
+      cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
+    };
     return completion;
   } catch (error: unknown) {
     operationFailure = error;

@@ -503,6 +503,7 @@ describe("public product shell", () => {
       chipName: "ESP32",
       bytesWritten: 3,
       cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
     render(
       <ProductShell
@@ -568,6 +569,14 @@ describe("public product shell", () => {
       ),
     ).toBeInTheDocument();
     expect(document.querySelector('[data-outcome="verified"]')).not.toBeNull();
+    // …and says what the write itself proved: for an ESP image, the chip's
+    // own MD5 of every written region — and what it could not read back.
+    expect(
+      screen.getByText(/حسبت الشريحة MD5 لكل منطقة كُتبت وطابقت الصورة/u),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/لا يمكن قراءتها رجعيًا عبر CRSF/u),
+    ).toBeInTheDocument();
   });
 
   it("compiles a binding phrase into the package and then forgets it", async () => {
@@ -657,6 +666,7 @@ describe("public product shell", () => {
       chipName: "ESP32",
       bytesWritten: 3,
       cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
     const connector = connectedConnector({ withBootloaderCommand: true });
     (connector as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(

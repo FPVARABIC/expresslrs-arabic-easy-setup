@@ -559,6 +559,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       chipName: "ESP32",
       bytesWritten: 3,
       cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
     mocks.initializeSerialPassthrough.mockReset().mockResolvedValue(undefined);
     // A receiver that prints nothing: the official flasher then flashes on
@@ -2108,6 +2109,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
           chipName: "ESP32",
           bytesWritten: 3,
           cleanupVerified: false,
+          verification: "DEVICE_FLASH_MD5_MATCHED",
         }),
     ],
     [

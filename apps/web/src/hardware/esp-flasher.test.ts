@@ -264,6 +264,7 @@ describe("Espressif firmware flashing", () => {
       chipName: "ESP32",
       bytesWritten: 3,
       cleanupVerified: false,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
   });
 
@@ -362,6 +363,7 @@ describe("Espressif firmware flashing", () => {
       chipName: "ESP32",
       bytesWritten: 5,
       cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
     expect(mocks.writeFlash).toHaveBeenCalledTimes(1);
     expect(mocks.writeFlash.mock.calls[0]?.[0].fileArray).toEqual([

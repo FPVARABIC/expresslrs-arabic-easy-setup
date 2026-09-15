@@ -486,7 +486,12 @@ describe("runtime availability, from the production entry point", () => {
     );
     mocks.preparePackage.mockResolvedValue(preparedPackage);
     mocks.downloadPreparedBytes.mockReturnValue(undefined);
-    mocks.flashEspFirmware.mockResolvedValue({ status: "WRITE_VERIFIED" });
+    mocks.flashEspFirmware.mockResolvedValue({
+      chipName: "ESP32",
+      bytesWritten: 3,
+      cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
+    });
   });
 
   afterEach(() => {
@@ -752,7 +757,7 @@ describe("runtime availability, from the production entry point", () => {
       recoveryCheckpoint:
         "the checkpoint is what makes this available, and it is cleared only once the device is verified back",
       verification:
-        "the restored image is read back and the device must reconnect as the identity the checkpoint recorded",
+        "per route, as for any write (ESP: the chip's own MD5 of every written region; ST-Link and DFU: every block read back; STM32 XMODEM: frames acknowledged, nothing read back), then the device must reconnect as the identity the checkpoint recorded; the completion text names which",
       onFailure:
         "the checkpoint stands so recovery can be retried; it is never cleared by a failed attempt",
     });
@@ -849,7 +854,7 @@ describe("runtime availability, from the production entry point", () => {
       recoveryCheckpoint:
         "written before the first byte; kept until the device is verified back",
       verification:
-        "segment read-back and reconnect; success requires the expected role, so an rx-as-tx write that comes back a receiver fails",
+        "per route: ESP — the chip computes the MD5 of every written region and it must match the image; ST-Link and DFU — every block read back and compared; STM32 XMODEM — each frame acknowledged after the bootloader's check, nothing read back. Then reconnect: Target, role and version/commit matched over CRSF, and the regulatory domain when the device publishes one; compiled-in options are never read back. Success requires the expected role, so an rx-as-tx write that comes back a receiver fails. The completion text states all of this",
       onFailure:
         "the checkpoint stands, recovery becomes available, and the state is WRITE_COMPLETED_RECONNECT_UNVERIFIED rather than SUCCESS",
     });
@@ -1407,7 +1412,8 @@ describe("runtime availability, from the production entry point", () => {
       writeAuthority:
         "single-use capability for FIRMWARE_WRITE, as in Advanced",
       recoveryCheckpoint: "the same checkpoint, written by the same controller",
-      verification: "the same read-back and reconnect verification",
+      verification:
+        "the same per-route evidence and reconnect verification, and the same completion text naming it",
       onFailure: "the same recovery path, surfaced in the operator's language",
     });
   });
@@ -1765,7 +1771,7 @@ describe("runtime availability, from the production entry point", () => {
       recoveryCheckpoint:
         "reconstituted from the imported package's own digest, because an uninstall erased the journal — which is the case this path exists for",
       verification:
-        "the same read-back and post-write identity verification as any recovery",
+        "the same per-route evidence and post-write identity verification as any recovery",
       onFailure:
         "the imported package is kept in state, so the restore can be retried without picking the file again",
     });

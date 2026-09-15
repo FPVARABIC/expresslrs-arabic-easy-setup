@@ -155,6 +155,13 @@ import {
   type UserHardwareSession,
   type WritableCrsfParameter,
 } from "./userSession";
+import {
+  firmwareWriteEvidence,
+  firmwareWriteEvidenceSentences,
+  type DomainEvidence,
+  type FirmwareWriteEvidence,
+  type FirmwareWriteVerification,
+} from "./write-evidence";
 import { flashXmodemFirmware, XmodemError } from "./xmodem";
 import {
   DeviceWriteAuthority,
@@ -306,6 +313,21 @@ function message(
   }) as ControllerMessage;
 }
 
+/** The evidence sentences as one chained message, first sentence outermost. */
+function evidenceMessageFor(
+  evidence: FirmwareWriteEvidence,
+): ControllerMessage {
+  const sentences = firmwareWriteEvidenceSentences(evidence);
+  let chained: ControllerMessage | undefined;
+  for (let index = sentences.length - 1; index >= 0; index -= 1) {
+    const sentence = sentences[index];
+    if (sentence === undefined) continue;
+    chained = message(sentence.key, sentence.params, chained);
+  }
+  if (chained === undefined) throw new TypeError("evidence without sentences");
+  return chained;
+}
+
 /** An error carrying a named message, so a refusal survives translation. */
 class ControllerError extends Error {
   public constructor(public readonly controllerMessage: ControllerMessage) {
@@ -354,6 +376,10 @@ async function waitForObservedLink(
 export interface DeviceOperationResult {
   readonly verified: boolean;
   readonly message: ControllerMessage;
+  /** For a verified write: exactly what was proven, route by route. */
+  readonly evidence?: FirmwareWriteEvidence;
+  /** The evidence as sentences, for a surface that words the headline itself. */
+  readonly evidenceMessage?: ControllerMessage;
 }
 
 /** What a bind attempt established, with the text that describes it. */
@@ -2167,7 +2193,7 @@ export function useDeviceController({
      * recovery checkpoint. Never called on a verified reconnect.
      */
     readonly markUnverified: (reason: string) => Promise<void>;
-  }): Promise<void> {
+  }): Promise<Readonly<{ domain: DomainEvidence }>> {
     setFlashProgress({
       stage: "RECONNECT",
       writtenBytes: input.totalBytes,
@@ -2269,6 +2295,33 @@ export function useDeviceController({
       detail: "",
       detailKey: "wb.reconnect.confirmingVersion",
     });
+    // The regulatory domain the rebooted firmware publishes in its version
+    // entry is the one compiled-in option the device does read back. A
+    // contradiction with the Target's band is a failed write, not a success
+    // with a footnote; a device that publishes none was simply not checked.
+    const bandAfter = deviceBandEvidence({
+      parameters: outcome.session.parameters,
+      match,
+    });
+    if (bandKnownToMismatch(bandAfter, input.target.radioKey)) {
+      await closeSessionOrLatch(
+        outcome.session,
+        message("wb.reconnect.closeMismatchedFailed"),
+      );
+      await input.markUnverified(`domain ${bandAfter?.detail ?? ""}`);
+      throw new ControllerError(
+        message("wb.reconnect.domainMismatch", {
+          observed: bandAfter?.detail ?? "",
+          expected:
+            bandFamilyForRadioKey(input.target.radioKey) ??
+            input.target.radioKey,
+        }),
+      );
+    }
+    const domainEvidence: DomainEvidence =
+      bandAfter !== null && bandAfter.source === "REGULATORY_DOMAIN"
+        ? Object.freeze({ state: "MATCHED" as const, detail: bandAfter.detail })
+        : Object.freeze({ state: "NOT_PUBLISHED" as const });
     const oldSession = sessionRef.current;
     disconnectUnsubscribeRef.current?.();
     disconnectUnsubscribeRef.current = null;
@@ -2357,6 +2410,7 @@ export function useDeviceController({
       detail: "",
       detailKey: "wb.reconnect.complete",
     });
+    return Object.freeze({ domain: domainEvidence });
   }
 
   async function prepareSerialTransport(input: {
@@ -2579,6 +2633,7 @@ export function useDeviceController({
         throw new ControllerError(message("wb.flash.platformUnsupported"));
       }
       await saveCheckpoint(prepared, "BOOTLOADER");
+      let writeVerification: FirmwareWriteVerification | null = null;
       if (method === "dfu" || method === "stlink") {
         if (family !== "stm32") {
           throw new ControllerError(
@@ -2612,6 +2667,7 @@ export function useDeviceController({
                 signal: controller.signal,
                 onProgress: setFlashProgress,
               });
+        writeVerification = flashResult.verification;
         if (!flashResult.cleanupVerified) {
           latchUnconfirmedHardwareClose(
             message("wb.flash.stm32CleanupUnproven"),
@@ -2636,6 +2692,7 @@ export function useDeviceController({
             signal: controller.signal,
             onProgress: setFlashProgress,
           });
+          writeVerification = flashResult.verification;
           if (!flashResult.cleanupVerified) {
             latchUnconfirmedHardwareClose(
               message("wb.flash.espCleanupUnproven"),
@@ -2649,16 +2706,20 @@ export function useDeviceController({
           if (firmware === undefined) {
             throw new ControllerError(message("wb.flash.stm32MissingFirmware"));
           }
-          await flashXmodemFirmware({
+          const xmodemResult = await flashXmodemFirmware({
             port: serial.port,
             firmware: firmware.bytes,
             signal: controller.signal,
             onProgress: setFlashProgress,
           });
+          writeVerification = xmodemResult.verification;
         }
       }
+      if (writeVerification === null) {
+        throw new ControllerError(message("wb.flash.platformUnsupported"));
+      }
       await saveCheckpoint(prepared, "RECONNECTING");
-      await reconnectAndVerify({
+      const reconnect = await reconnectAndVerify({
         target: selectedTarget,
         release: prepared.release,
         expectedIdentity,
@@ -2673,9 +2734,19 @@ export function useDeviceController({
             reason,
           ),
       });
-      const reported = message("wb.flash.complete");
+      const evidence = firmwareWriteEvidence({
+        write: writeVerification,
+        domain: reconnect.domain,
+      });
+      const evidenceMessage = evidenceMessageFor(evidence);
+      const reported = message("wb.flash.complete", undefined, evidenceMessage);
       setStatus(reported);
-      return Object.freeze({ verified: true, message: reported });
+      return Object.freeze({
+        verified: true,
+        message: reported,
+        evidence,
+        evidenceMessage,
+      });
     } catch (error: unknown) {
       const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {
@@ -2770,6 +2841,7 @@ export function useDeviceController({
         (sum, segment) => sum + segment.bytes.byteLength,
         0,
       );
+      let writeVerification: FirmwareWriteVerification | null = null;
       if (method === "dfu" || method === "stlink") {
         if (family !== "stm32") {
           throw new ControllerError(
@@ -2800,6 +2872,7 @@ export function useDeviceController({
                 signal: controller.signal,
                 onProgress: setFlashProgress,
               });
+        writeVerification = flashResult.verification;
         if (!flashResult.cleanupVerified) {
           latchUnconfirmedHardwareClose(
             message("wb.recovery.stm32CleanupUnproven"),
@@ -2862,6 +2935,7 @@ export function useDeviceController({
             signal: controller.signal,
             onProgress: setFlashProgress,
           });
+          writeVerification = flashResult.verification;
           if (!flashResult.cleanupVerified) {
             latchUnconfirmedHardwareClose(
               message("wb.recovery.espCleanupUnproven"),
@@ -2875,12 +2949,13 @@ export function useDeviceController({
           if (firmware === undefined) {
             throw new ControllerError(message("wb.recovery.missingFirmware"));
           }
-          await flashXmodemFirmware({
+          const xmodemResult = await flashXmodemFirmware({
             port,
             firmware: firmware.bytes,
             signal: controller.signal,
             onProgress: setFlashProgress,
           });
+          writeVerification = xmodemResult.verification;
         } else {
           throw new ControllerError(message("wb.recovery.platformUnsupported"));
         }
@@ -2888,7 +2963,10 @@ export function useDeviceController({
       // The write finished. That is not yet a recovery: the device still has
       // to come back and prove its Target and version.
       writeFinished = true;
-      await reconnectAndVerify({
+      if (writeVerification === null) {
+        throw new ControllerError(message("wb.recovery.platformUnsupported"));
+      }
+      const reconnect = await reconnectAndVerify({
         target: selectedTarget,
         release: officialReleaseFromRecovery(validated),
         expectedIdentity: null,
@@ -2904,9 +2982,23 @@ export function useDeviceController({
         // not be overwritten here.
         markUnverified: async () => undefined,
       });
-      const reported = message("wb.recovery.complete");
+      const evidence = firmwareWriteEvidence({
+        write: writeVerification,
+        domain: reconnect.domain,
+      });
+      const evidenceMessage = evidenceMessageFor(evidence);
+      const reported = message(
+        "wb.recovery.complete",
+        undefined,
+        evidenceMessage,
+      );
       setStatus(reported);
-      return Object.freeze({ verified: true, message: reported });
+      return Object.freeze({
+        verified: true,
+        message: reported,
+        evidence,
+        evidenceMessage,
+      });
     } catch (error: unknown) {
       const cleanupUnconfirmed = reportsUnconfirmedHardwareCleanup(error);
       if (cleanupUnconfirmed && !hardwareCloseUncertainRef.current) {

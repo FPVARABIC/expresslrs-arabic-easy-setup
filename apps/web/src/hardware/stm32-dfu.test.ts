@@ -204,6 +204,7 @@ describe("STM32 WebUSB DFU", () => {
       bytesWritten: firmware.byteLength,
       baseAddress: 0x0800_4000,
       cleanupVerified: true,
+      verification: "DFU_UPLOAD_READ_BACK_MATCHED",
     });
     expect(hardware.erasedPages).toEqual([0x0800_4000]);
     expect(hardware.memory.slice(0x4000, 0x4000 + firmware.byteLength)).toEqual(

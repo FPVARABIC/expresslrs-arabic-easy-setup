@@ -1077,6 +1077,7 @@ export interface Stm32StlinkWriteResult {
   readonly targetVoltage: number | null;
   /** Every programmed byte was read back over SWD and compared. */
   readonly readBackVerified: true;
+  readonly verification: "SWD_READ_BACK_MATCHED";
 }
 
 function progress(
@@ -1210,6 +1211,7 @@ export async function flashStm32StlinkFirmware(input: {
     mcu: DetectedStm32;
     targetVoltage: number | null;
     readBackVerified: true;
+    verification: "SWD_READ_BACK_MATCHED";
   } | null = null;
   let operationFailure: unknown = null;
 
@@ -1372,6 +1374,7 @@ export async function flashStm32StlinkFirmware(input: {
       mcu,
       targetVoltage: voltage,
       readBackVerified: true,
+      verification: "SWD_READ_BACK_MATCHED",
     };
     return completion;
   } catch (error: unknown) {
