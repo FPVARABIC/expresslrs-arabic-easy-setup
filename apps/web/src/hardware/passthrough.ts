@@ -33,21 +33,33 @@ interface NavigatorWithSerial {
   readonly serial?: SerialApi;
 }
 
+export type PassthroughErrorCode =
+  | "UNSUPPORTED"
+  | "CANCELLED"
+  | "PERMISSION_DENIED"
+  | "MULTIPLE_DEVICES"
+  | "OPEN_FAILED"
+  | "STREAMS_UNAVAILABLE"
+  | "TIMEOUT"
+  | "UNEXPECTED_RESPONSE"
+  | "UART_NOT_FOUND"
+  /** `serialrx_provider` is not CRSF (or ELRS), so the UART carries another protocol. */
+  | "SERIALRX_PROVIDER"
+  /** `serialrx_inverted` is ON: the receiver UART is inverted in the flight controller. */
+  | "SERIALRX_INVERTED"
+  /** `serialrx_halfduplex` is ON: the receiver UART is not full duplex. */
+  | "SERIALRX_HALFDUPLEX"
+  /** `rx_spi_protocol` is EXPRESSLRS: the receiver is inside the flight controller. */
+  | "SPI_RECEIVER"
+  | "CLEANUP_UNCONFIRMED"
+  | "ABORTED";
+
 export class PassthroughError extends Error {
   public constructor(
-    public readonly code:
-      | "UNSUPPORTED"
-      | "CANCELLED"
-      | "PERMISSION_DENIED"
-      | "MULTIPLE_DEVICES"
-      | "OPEN_FAILED"
-      | "STREAMS_UNAVAILABLE"
-      | "TIMEOUT"
-      | "UNEXPECTED_RESPONSE"
-      | "UART_NOT_FOUND"
-      | "CLEANUP_UNCONFIRMED"
-      | "ABORTED",
+    public readonly code: PassthroughErrorCode,
     message: string,
+    /** Facts the operator's message is built from, never free text from the device. */
+    public readonly detail: Readonly<Record<string, string>> = {},
   ) {
     super(message);
     this.name = "PassthroughError";
@@ -480,6 +492,102 @@ async function initializeEdgeTx(
   await waitForPassthroughReady(signal);
 }
 
+/**
+ * The value Betaflight prints for `get <name>`: the first line of the answer
+ * is `<name> = <value>`, followed by the allowed values and a fresh prompt.
+ * Null when the flight controller does not report the setting at all.
+ */
+function parseCliSetting(output: string, name: string): string | null {
+  const pattern = new RegExp(`^\\s*${name}\\s*=\\s*(\\S+)`, "imu");
+  for (const line of output.split(/\r?\n/u)) {
+    const match = pattern.exec(line);
+    if (match?.[1] !== undefined) return match[1].trim();
+  }
+  return null;
+}
+
+/**
+ * The receiver-UART checks the official flasher performs before it opens the
+ * passthrough (`web-flasher/src/js/passthrough.js` `betaflight()`): the UART
+ * must carry CRSF, must not be inverted, and must be full duplex. A UART that
+ * fails them is not one this passthrough can reach a receiver through, and an
+ * SPI receiver has no UART at all.
+ */
+const BETAFLIGHT_SERIALRX_CHECKS = Object.freeze([
+  Object.freeze({
+    setting: "serialrx_provider",
+    accepted: Object.freeze(["CRSF", "ELRS"]),
+    expected: "CRSF",
+    code: "SERIALRX_PROVIDER" as const,
+  }),
+  Object.freeze({
+    setting: "serialrx_inverted",
+    accepted: Object.freeze(["OFF"]),
+    expected: "OFF",
+    code: "SERIALRX_INVERTED" as const,
+  }),
+  Object.freeze({
+    setting: "serialrx_halfduplex",
+    accepted: Object.freeze(["OFF", "AUTO"]),
+    expected: "OFF or AUTO",
+    code: "SERIALRX_HALFDUPLEX" as const,
+  }),
+]);
+
+async function assertBetaflightReceiverUart(
+  transport: CliSerialTransport,
+  signal?: AbortSignal,
+): Promise<void> {
+  const failures: {
+    readonly setting: string;
+    readonly observed: string;
+    readonly expected: string;
+    readonly code: PassthroughErrorCode;
+  }[] = [];
+  for (const check of BETAFLIGHT_SERIALRX_CHECKS) {
+    const output = await transport.command(
+      `get ${check.setting}\r\n`,
+      /#\s*$/mu,
+      signal,
+    );
+    const observed = parseCliSetting(output, check.setting) ?? "";
+    if (!check.accepted.includes(observed.toLocaleUpperCase("en-US"))) {
+      failures.push({
+        setting: check.setting,
+        observed,
+        expected: check.expected,
+        code: check.code,
+      });
+    }
+  }
+  const first = failures[0];
+  if (first === undefined) return;
+  // A receiver inside the flight controller fails every check above; that is
+  // a different message from a misconfigured UART.
+  const spiOutput = await transport.command(
+    "get rx_spi_protocol\r\n",
+    /#\s*$/mu,
+    signal,
+  );
+  const spiProtocol = parseCliSetting(spiOutput, "rx_spi_protocol") ?? "";
+  if (spiProtocol.toLocaleUpperCase("en-US") === "EXPRESSLRS") {
+    throw new PassthroughError(
+      "SPI_RECEIVER",
+      "Flight controller reports rx_spi_protocol = EXPRESSLRS: the receiver is an SPI receiver updated through Betaflight, not through a UART passthrough",
+      { setting: "rx_spi_protocol", observed: spiProtocol, expected: "" },
+    );
+  }
+  throw new PassthroughError(
+    first.code,
+    `Flight controller reports ${first.setting} = ${first.observed || "(not reported)"}, expected ${first.expected}`,
+    {
+      setting: first.setting,
+      observed: first.observed,
+      expected: first.expected,
+    },
+  );
+}
+
 async function initializeBetaflight(
   transport: CliSerialTransport,
   flashBaud: number,
@@ -487,6 +595,7 @@ async function initializeBetaflight(
   signal?: AbortSignal,
 ): Promise<void> {
   await transport.command("#\r\n", /#\s*$/mu, signal);
+  await assertBetaflightReceiverUart(transport, signal);
   let identifier = uartIdentifier;
   if (identifier === null) {
     const serialOutput = await transport.command(

@@ -118,6 +118,144 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** What a correctly configured Betaflight answers to the three `get` checks. */
+const CRSF_SERIALRX_ANSWERS = [
+  "serialrx_provider = CRSF\r\nAllowed values: NONE, SPEK1024, SBUS, CRSF, GHST\r\n\r\n# ",
+  "serialrx_inverted = OFF\r\nAllowed values: OFF, ON\r\n\r\n# ",
+  "serialrx_halfduplex = OFF\r\nAllowed values: OFF, ON, AUTO\r\n\r\n# ",
+] as const;
+
+describe("Betaflight receiver-UART sanity checks (the official flasher's `serialrx_*` refusals)", () => {
+  async function refusal(input: {
+    readonly answers: readonly string[];
+    readonly spiAnswer?: string;
+  }) {
+    const serial = fakeSerial({
+      responses: [
+        "#\r\n",
+        ...input.answers,
+        ...(input.spiAnswer === undefined ? [] : [input.spiAnswer]),
+        "serial 0 1 115200 57600 0 115200\r\nserial 3 64 115200 57600 0 115200\r\n#\r\n",
+      ],
+    });
+    const outcome = await initializeSerialPassthrough({
+      method: "betaflight",
+      port: serial.port,
+      flashBaud: 420_000,
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    return { serial, outcome };
+  }
+
+  it("refuses a flight controller whose serial receiver protocol is not CRSF, before any passthrough command", async () => {
+    const { serial, outcome } = await refusal({
+      answers: [
+        "serialrx_provider = SBUS\r\nAllowed values: NONE, SBUS, CRSF\r\n\r\n# ",
+        CRSF_SERIALRX_ANSWERS[1],
+        CRSF_SERIALRX_ANSWERS[2],
+      ],
+      spiAnswer: "rx_spi_protocol = NONE\r\n\r\n# ",
+    });
+    expect(outcome).toMatchObject({
+      name: "PassthroughError",
+      code: "SERIALRX_PROVIDER",
+      detail: {
+        setting: "serialrx_provider",
+        observed: "SBUS",
+        expected: "CRSF",
+      },
+    });
+    expect(
+      serial.writes.some((line) => line.startsWith("serialpassthrough")),
+    ).toBe(false);
+    expect(serial.writes).toContain("get rx_spi_protocol\r\n");
+    expectClosed(serial);
+  });
+
+  it("refuses an inverted receiver UART by name", async () => {
+    const { outcome } = await refusal({
+      answers: [
+        CRSF_SERIALRX_ANSWERS[0],
+        "serialrx_inverted = ON\r\nAllowed values: OFF, ON\r\n\r\n# ",
+        CRSF_SERIALRX_ANSWERS[2],
+      ],
+      spiAnswer: "rx_spi_protocol = NONE\r\n\r\n# ",
+    });
+    expect(outcome).toMatchObject({
+      code: "SERIALRX_INVERTED",
+      detail: { setting: "serialrx_inverted", observed: "ON", expected: "OFF" },
+    });
+  });
+
+  it("refuses a half-duplex receiver UART by name, and accepts AUTO", async () => {
+    const { outcome } = await refusal({
+      answers: [
+        CRSF_SERIALRX_ANSWERS[0],
+        CRSF_SERIALRX_ANSWERS[1],
+        "serialrx_halfduplex = ON\r\nAllowed values: OFF, ON, AUTO\r\n\r\n# ",
+      ],
+      spiAnswer: "rx_spi_protocol = NONE\r\n\r\n# ",
+    });
+    expect(outcome).toMatchObject({
+      code: "SERIALRX_HALFDUPLEX",
+      detail: {
+        setting: "serialrx_halfduplex",
+        observed: "ON",
+        expected: "OFF or AUTO",
+      },
+    });
+
+    const auto = fakeSerial({
+      responses: [
+        "#\r\n",
+        CRSF_SERIALRX_ANSWERS[0],
+        CRSF_SERIALRX_ANSWERS[1],
+        "serialrx_halfduplex = AUTO\r\nAllowed values: OFF, ON, AUTO\r\n\r\n# ",
+        "serial 3 64 115200 57600 0 115200\r\n#\r\n",
+      ],
+    });
+    vi.useFakeTimers();
+    const operation = initializeSerialPassthrough({
+      method: "betaflight",
+      port: auto.port,
+      flashBaud: 420_000,
+    });
+    await flushUntil(() => auto.writes.length === 6);
+    await vi.advanceTimersByTimeAsync(350);
+    await expect(operation).resolves.toBe(auto.port);
+  });
+
+  it("names an SPI receiver built into the flight controller, which this passthrough cannot update", async () => {
+    const { outcome } = await refusal({
+      answers: [
+        "serialrx_provider = NONE\r\nAllowed values: NONE, SBUS, CRSF\r\n\r\n# ",
+        CRSF_SERIALRX_ANSWERS[1],
+        CRSF_SERIALRX_ANSWERS[2],
+      ],
+      spiAnswer:
+        "rx_spi_protocol = EXPRESSLRS\r\nAllowed values: NONE, EXPRESSLRS\r\n\r\n# ",
+    });
+    expect(outcome).toMatchObject({ code: "SPI_RECEIVER" });
+  });
+
+  it("treats a setting the flight controller cannot report as a failed check, not as a pass", async () => {
+    const { outcome } = await refusal({
+      answers: [
+        "Invalid name\r\n\r\n# ",
+        CRSF_SERIALRX_ANSWERS[1],
+        CRSF_SERIALRX_ANSWERS[2],
+      ],
+      spiAnswer: "Invalid name\r\n\r\n# ",
+    });
+    expect(outcome).toMatchObject({
+      code: "SERIALRX_PROVIDER",
+      detail: { setting: "serialrx_provider", observed: "", expected: "CRSF" },
+    });
+  });
+});
+
 describe("serial passthrough protocol and resource safety", () => {
   it("rejects a pre-aborted direct passthrough without touching the port", async () => {
     const serial = fakeSerial();
@@ -176,6 +314,7 @@ describe("serial passthrough protocol and resource safety", () => {
     const serial = fakeSerial({
       responses: [
         "#\r\n",
+        ...CRSF_SERIALRX_ANSWERS,
         "serial 0 1 115200 57600 0 115200\r\nserial 3 64 115200 57600 0 115200\r\n#\r\n",
       ],
     });
@@ -185,12 +324,17 @@ describe("serial passthrough protocol and resource safety", () => {
       flashBaud: 420_000,
     });
 
-    await flushUntil(() => serial.writes.length === 3);
+    await flushUntil(() => serial.writes.length === 6);
     await vi.advanceTimersByTimeAsync(350);
 
     await expect(operation).resolves.toBe(serial.port);
+    // The official flasher's order: enter the CLI, prove the receiver UART is
+    // configured for CRSF, find it, then open the passthrough.
     expect(serial.writes).toEqual([
       "#\r\n",
+      "get serialrx_provider\r\n",
+      "get serialrx_inverted\r\n",
+      "get serialrx_halfduplex\r\n",
       "serial\r\n",
       "serialpassthrough 3 420000\r\n",
     ]);
@@ -353,7 +497,9 @@ describe("serial passthrough protocol and resource safety", () => {
   });
 
   it("makes the final passthrough-ready wait cancellation-aware", async () => {
-    const serial = fakeSerial({ responses: ["#\r\n"] });
+    const serial = fakeSerial({
+      responses: ["#\r\n", ...CRSF_SERIALRX_ANSWERS],
+    });
     const controller = new AbortController();
     const operation = initializeSerialPassthrough({
       method: "betaflight",
@@ -366,11 +512,17 @@ describe("serial passthrough protocol and resource safety", () => {
       code: "ABORTED",
     });
 
-    await flushUntil(() => serial.writes.length === 2);
+    await flushUntil(() => serial.writes.length === 5);
     controller.abort();
 
     await rejection;
-    expect(serial.writes).toEqual(["#\r\n", "serialpassthrough 2 420000\r\n"]);
+    expect(serial.writes).toEqual([
+      "#\r\n",
+      "get serialrx_provider\r\n",
+      "get serialrx_inverted\r\n",
+      "get serialrx_halfduplex\r\n",
+      "serialpassthrough 2 420000\r\n",
+    ]);
     expectClosed(serial);
   });
 
@@ -411,7 +563,7 @@ describe("serial passthrough protocol and resource safety", () => {
   it("fails closed when a successful passthrough setup cannot confirm port cleanup", async () => {
     vi.useFakeTimers();
     const serial = fakeSerial({
-      responses: ["#\r\n"],
+      responses: ["#\r\n", ...CRSF_SERIALRX_ANSWERS],
       closeError: new Error("close failed"),
     });
     const operation = initializeSerialPassthrough({
@@ -424,7 +576,7 @@ describe("serial passthrough protocol and resource safety", () => {
       code: "CLEANUP_UNCONFIRMED",
     });
 
-    await flushUntil(() => serial.writes.length === 2);
+    await flushUntil(() => serial.writes.length === 5);
     await vi.advanceTimersByTimeAsync(350);
 
     await rejection;
