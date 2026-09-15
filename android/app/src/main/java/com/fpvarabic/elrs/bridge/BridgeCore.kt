@@ -67,7 +67,14 @@ class BridgeCore(
     )
 
     /** A reply that can be sent exactly once, from any thread. */
-    private class PendingCall(val callId: String, private val sink: (String) -> Unit) {
+    private class PendingCall(
+        val callId: String,
+        /** The operation this call is running, so a broad rejection can spare
+         * the calls a given event has no business touching — a document export
+         * is not the USB port's to cancel when the device is unplugged. */
+        val operation: String,
+        private val sink: (String) -> Unit,
+    ) {
         private val answered = AtomicBoolean(false)
         fun answer(payload: String): Boolean {
             if (!answered.compareAndSet(false, true)) return false
@@ -120,7 +127,7 @@ class BridgeCore(
     }
 
     private fun accept(request: BridgeRequest.Valid, reply: (String) -> Unit) {
-        val call = PendingCall(request.callId, reply)
+        val call = PendingCall(request.callId, request.operation, reply)
         pending[request.callId] = call
 
         // Write authority does not survive the host leaving the screen. The
@@ -448,7 +455,14 @@ class BridgeCore(
         val active = session ?: return
         if (active.connection.deviceId != deviceId) return
         releaseSession(active)
-        rejectPending(Reason.DETACHED, "the device was disconnected")
+        // Only the USB side goes with the device. A recovery export the
+        // operator is still choosing a location for, or streaming bytes into,
+        // writes to storage the operator owns and has nothing to do with the
+        // port — and it is exactly the safety net that must survive an unplug,
+        // so its pending call is left alone rather than failed with DETACHED.
+        rejectPending(Reason.DETACHED, "the device was disconnected") {
+            it.operation !in DOCUMENT_OPERATIONS
+        }
     }
 
     /** The Activity is going away. Nothing survives it. */
@@ -488,9 +502,15 @@ class BridgeCore(
         return call.answer(payload)
     }
 
-    private fun rejectPending(reason: String, message: String, except: String? = null) {
+    private fun rejectPending(
+        reason: String,
+        message: String,
+        except: String? = null,
+        predicate: (PendingCall) -> Boolean = { true },
+    ) {
         for ((callId, call) in pending) {
             if (callId == except) continue
+            if (!predicate(call)) continue
             if (pending.remove(callId, call)) {
                 call.answer(BridgeRequest.error(callId, reason, message))
             }
@@ -522,6 +542,16 @@ class BridgeCore(
          */
         val VISIBLE_ONLY_OPERATIONS = AUTHORITY_OPERATIONS + setOf(
             "documentCreate", "documentWrite", "documentCommit", "documentPick",
+        )
+
+        /**
+         * The document operations, which stream to storage the operator owns
+         * rather than to the USB port. A device detach takes the port and every
+         * USB call with it, but must leave these untouched — a recovery export
+         * mid-picker is the safety net a detach exists to preserve.
+         */
+        val DOCUMENT_OPERATIONS = setOf(
+            "documentCreate", "documentWrite", "documentCommit", "documentRead", "documentPick",
         )
     }
 }

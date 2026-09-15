@@ -15,8 +15,15 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class FakeUsbBackend : UsbBackend {
 
-    /** What the operator will do the next time permission is asked for. */
-    enum class PermissionAnswer { GRANT, DENY, DISMISS, NEVER_ANSWER }
+    /**
+     * What the operator will do the next time permission is asked for.
+     *
+     * `DEFER` captures the callback instead of answering, so a test can drive
+     * an intervening event — the host going to the background, the device being
+     * unplugged — and only then answer, the way a real permission dialog can
+     * outlive the moment it was raised.
+     */
+    enum class PermissionAnswer { GRANT, DENY, DISMISS, NEVER_ANSWER, DEFER }
 
     var devices: MutableList<UsbDeviceSummary> = mutableListOf(cdcDevice(DEFAULT_DEVICE))
     var permissions: MutableMap<String, UsbDeviceGate.Permission> = mutableMapOf()
@@ -27,6 +34,9 @@ class FakeUsbBackend : UsbBackend {
 
     val openCount = AtomicInteger(0)
     val connections = ConcurrentLinkedQueue<FakeConnection>()
+
+    /** A permission callback captured by [PermissionAnswer.DEFER], if any. */
+    @Volatile private var deferredPermission: Pair<String, (UsbDeviceGate.Permission) -> Unit>? = null
 
     /** Everything written, in the order the backend saw it. */
     val written = ConcurrentLinkedQueue<ByteArray>()
@@ -63,7 +73,28 @@ class FakeUsbBackend : UsbBackend {
             // operator to go and change a system setting.
             PermissionAnswer.DISMISS -> onResult(UsbDeviceGate.Permission.UNKNOWN)
             PermissionAnswer.NEVER_ANSWER -> Unit
+            // Hold the answer. The dialog is up; a test will resolve it after
+            // whatever it wants to happen while it is up has happened.
+            PermissionAnswer.DEFER -> {
+                deferredPermission = deviceId to onResult
+            }
         }
+    }
+
+    /**
+     * Answers a permission request captured by [PermissionAnswer.DEFER], as the
+     * operator finally tapping the dialog would. Safe to call when nothing is
+     * captured; it does nothing then.
+     */
+    fun answerDeferredPermission(permission: UsbDeviceGate.Permission) {
+        val captured = deferredPermission ?: return
+        deferredPermission = null
+        if (permission == UsbDeviceGate.Permission.GRANTED) {
+            permissions[captured.first] = UsbDeviceGate.Permission.GRANTED
+        } else if (permission == UsbDeviceGate.Permission.DENIED) {
+            permissions[captured.first] = UsbDeviceGate.Permission.DENIED
+        }
+        captured.second(permission)
     }
 
     override fun open(deviceId: String, baudRate: Int): UsbConnection {

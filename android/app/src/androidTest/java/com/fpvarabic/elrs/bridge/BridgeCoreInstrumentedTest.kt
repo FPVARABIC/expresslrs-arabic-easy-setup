@@ -169,6 +169,58 @@ class BridgeCoreInstrumentedTest {
         assertFalse(result.getBoolean("granted"))
     }
 
+    // ---- the USB permission dialog outliving the moment ------------------
+    //
+    // These are driven at the core against FakeUsbBackend: an emulator has no
+    // USB host and cannot raise Android's real permission dialog, so what is
+    // proven here is the rule — a permission request that is interrupted by the
+    // host leaving the screen is rejected, a late grant is dropped rather than
+    // acted on, and a resumed host can ask again. That the dialog itself only
+    // *pauses* the host (keeping the port) is the separate, real-Activity claim
+    // in HostLifecycleInstrumentedTest.
+
+    @Test
+    fun aPendingPermissionRequestIsRejectedWhenTheHostGoesToTheBackground() {
+        backend.permissionAnswer = FakeUsbBackend.PermissionAnswer.DEFER
+        val asking = pendingCall("requestPermission") { it.put("deviceId", DEVICE) }
+
+        // Home, the lock screen, another app: the operator left while Android's
+        // USB permission dialog was still up.
+        core.onHostBackgrounded()
+
+        assertEquals(BridgeCore.Reason.HOST_NOT_VISIBLE, asking.await().getString("reason"))
+        assertTrue(core.awaitIdle(AWAIT_MILLIS))
+        assertEquals("nothing may be left waiting", 0, core.pendingCallCount)
+    }
+
+    @Test
+    fun aPermissionGrantedAfterTheHostLeftIsDroppedNotActedOn() {
+        backend.permissionAnswer = FakeUsbBackend.PermissionAnswer.DEFER
+        val asking = pendingCall("requestPermission") { it.put("deviceId", DEVICE) }
+        core.onHostBackgrounded()
+        assertEquals(BridgeCore.Reason.HOST_NOT_VISIBLE, asking.await().getString("reason"))
+
+        // The operator taps Grant on a dialog whose page is already gone. The
+        // late answer must not reach a second reply or resurrect the call.
+        backend.answerDeferredPermission(UsbDeviceGate.Permission.GRANTED)
+        assertTrue(core.awaitIdle(AWAIT_MILLIS))
+        assertEquals(0, core.pendingCallCount)
+    }
+
+    @Test
+    fun aResumedHostCanAskForPermissionAgainAfterOneWasInterrupted() {
+        backend.permissionAnswer = FakeUsbBackend.PermissionAnswer.DEFER
+        val interrupted = pendingCall("requestPermission") { it.put("deviceId", DEVICE) }
+        core.onHostBackgrounded()
+        assertEquals(BridgeCore.Reason.HOST_NOT_VISIBLE, interrupted.await().getString("reason"))
+        backend.answerDeferredPermission(UsbDeviceGate.Permission.GRANTED)
+
+        core.onHostForegrounded()
+        backend.permissionAnswer = FakeUsbBackend.PermissionAnswer.GRANT
+        val result = call("requestPermission") { it.put("deviceId", DEVICE) }.getJSONObject("result")
+        assertTrue(result.getBoolean("granted"))
+    }
+
     @Test
     fun listsAnUndrivableDeviceWithItsReasonRatherThanHidingIt() {
         backend.devices.add(FakeUsbBackend.hidDevice("/dev/bus/usb/001/003"))

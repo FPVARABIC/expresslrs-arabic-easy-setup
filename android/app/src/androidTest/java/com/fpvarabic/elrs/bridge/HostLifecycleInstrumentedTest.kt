@@ -138,6 +138,33 @@ class HostLifecycleInstrumentedTest {
         }
     }
 
+    @Test
+    fun aStopThatIsNotBehindAPickerVoidsTheSessionSoAResumedPageMustOpenAgain() {
+        // Home or the lock screen, with no picker of the host's own in front:
+        // this is the ordinary stop, and write authority ends with it. Proven
+        // here end to end through the real Activity and the real page bridge —
+        // the port closes and the page, which still holds the old session id,
+        // is made to open again.
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.awaitApplication()
+            val sessionId = scenario.openFakePort()
+            val connection = requireNotNull(backend.lastConnection())
+
+            scenario.moveToState(Lifecycle.State.CREATED)
+            assertEquals("a stop closes the port", 1, connection.closeCount.get())
+            scenario.moveToState(Lifecycle.State.RESUMED)
+
+            val stale = scenario.bridgeCall(
+                """{"callId":"stale","operation":"write","sessionId":"$sessionId","bytes":[1]}""",
+            )
+            assertFalse(stale.toString(), stale.getBoolean("ok"))
+            assertEquals("SESSION_NOT_OPEN", stale.getString("reason"))
+
+            val reopened = scenario.openFakePort()
+            assertFalse("a resumed host gets a fresh session", sessionId == reopened)
+        }
+    }
+
     // ---- helpers ---------------------------------------------------------
 
     private fun ActivityScenario<MainActivity>.awaitApplication() {
@@ -163,13 +190,17 @@ class HostLifecycleInstrumentedTest {
         )
     }
 
-    /** Opens the fake device through the page's own bridge, as the app would. */
-    private fun ActivityScenario<MainActivity>.openFakePort() {
+    /**
+     * Opens the fake device through the page's own bridge, as the app would,
+     * and returns the session id the bridge assigned. A fresh call id each time
+     * so a second open in one test is not confused with the first.
+     */
+    private fun ActivityScenario<MainActivity>.openFakePort(): String {
         val reply = bridgeCall(
-            """{"callId":"open","operation":"open","deviceId":"${FakeUsbBackend.DEFAULT_DEVICE}"}""",
+            """{"callId":"open${openCallId++}","operation":"open","deviceId":"${FakeUsbBackend.DEFAULT_DEVICE}"}""",
         )
         assertTrue(reply.toString(), reply.getBoolean("ok"))
-        assertEquals(1, backend.openCount.get())
+        return reply.getJSONObject("result").getString("sessionId")
     }
 
     private fun ActivityScenario<MainActivity>.bridgeCall(request: String): JSONObject {
@@ -214,6 +245,8 @@ class HostLifecycleInstrumentedTest {
         assertTrue("the script never returned", latch.await(AWAIT_SECONDS, TimeUnit.SECONDS))
         return result.get() ?: "null"
     }
+
+    private var openCallId = 0
 
     private companion object {
         const val AWAIT_SECONDS = 30L

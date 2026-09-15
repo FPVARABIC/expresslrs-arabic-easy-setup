@@ -234,16 +234,57 @@ weaker one — and the page is told the exact reason, which the build banner sho
 | WebView confinement and bridge injection | `EMULATOR_VERIFIED` | `WebViewHostInstrumentedTest`, on a real WebView |
 | The bundled application renders in both locales, in the real Activity | `EMULATOR_VERIFIED` | `PackagedApplicationInstrumentedTest` |
 
-All three suites: **42 tests, 0 skipped, 0 failed**, on an API 34 `google_apis`
-x86_64 emulator. Green on three consecutive heads — runs
+At the R-series review, the instrumentation suites were **42 tests, 0 skipped,
+0 failed**, on an API 34 `google_apis` x86_64 emulator, green on three
+consecutive heads — runs
 [34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483),
 [34421520061](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34421520061)
 and
-[34422431912](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34422431912),
-the last of which is the head under review. The suite sources are unchanged
-across all three, so the later runs are repeats rather than new coverage; they
-are recorded because a green result on the head being reviewed is worth more
-than one on its ancestor.
+[34422431912](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34422431912).
+Round L adds four instrumentation tests, so that count no longer holds; the new
+green count is re-established on the Round L final SHA and recorded in the Round
+L report. The additions are:
+
+- a USB detach while a recovery-export picker is open leaves the export alone
+  (`DocumentBridgeInstrumentedTest`, against `FakeUsbBackend`/`FakeDocumentStore`);
+- a pending USB permission request is rejected when the host is backgrounded, a
+  late grant is dropped, and a resumed host can ask again (three tests in
+  `BridgeCoreInstrumentedTest`, against `FakeUsbBackend`);
+- an ordinary stop that is not behind the host's own picker voids the session,
+  so a resumed page must open again (`HostLifecycleInstrumentedTest`, real
+  Activity and real page bridge).
+
+The first two encode a real fix: `onDeviceDetached` used to reject every pending
+call, so unplugging the device while the Storage Access Framework picker was
+open cancelled the recovery export and abandoned its half-written file — the one
+operation a detach must not touch. It now rejects only the USB-side calls.
+
+#### Which tests run against a fake, and which through real Android
+
+The user asked for this line to be explicit, because "the Android path is
+tested" means two different things and only one of them involves Android's own
+components. Every row below runs on the emulator; the distinction is whether the
+thing under test is a real Android component or a fake standing in for hardware
+the emulator does not have.
+
+| Suite | Drives | What stands in, and why |
+| --- | --- | --- |
+| `UsbDeviceGateTest` (JVM unit) | The gate's pure rules | Nothing — no Android types; it is a plain JVM test |
+| `BridgeCoreInstrumentedTest` | The bridge's rules: origin, frame, validation, session ownership, cancellation, the lifecycle and permission-dialog rules | `FakeUsbBackend` for USB (no USB host on an emulator). Runs as instrumentation only so `org.json` is the real parser, not the JVM stub |
+| `DocumentBridgeInstrumentedTest` | The durable-recovery document rules, including a USB detach during the picker | `FakeUsbBackend` and `FakeDocumentStore` — no picker, no storage, no device |
+| `HostLifecycleInstrumentedTest` | **Real** `MainActivity` moved through the **real** lifecycle by `ActivityScenario`; the SAF picker in two tests is the **real** one | Only the USB port is a fake device; the Activity, the lifecycle transitions and the picker are real |
+| `WebViewHostInstrumentedTest` | A **real** `WebView`: origin matching on the message listener, main-frame reporting, navigation interception, enforced by Chromium | `FakeUsbBackend` for the bridge behind it |
+| `PackagedApplicationInstrumentedTest` | The **real** bundled `index.html` rendering in the **real** Activity, in both locales | None for the rendering; a fake backend behind the bridge |
+| `UpdatePersistenceInstrumentedTest` | Two **real** APK installs across an update, keeping the tester's data | None — it is a real install-over-install on the emulator |
+
+So the permission-dialog and USB-detach *rules* are proven against a fake
+(`BridgeCoreInstrumentedTest`, `DocumentBridgeInstrumentedTest`); that the
+lifecycle transitions actually call those rules, and that the real SAF picker
+stops the host the way the rules assume, is proven through the real Activity
+(`HostLifecycleInstrumentedTest`). What is **not** proven anywhere on the
+emulator is a real USB permission dialog or a real device detach, because an
+emulator has no USB host — those stay for the physical run (rows A3–A6, A14,
+A17–A19 below).
 
 Reaching that took four defects in the job itself and two real defects the
 tests then found, all recorded here because each was a genuine fault rather
@@ -436,6 +477,12 @@ Not one of these has been run. None may be marked passed from CI.
 | A11 | Recovery after an interrupted write, on Android | UNVERIFIED |
 | A12 | Arabic and English, RTL and LTR, at phone width | UNVERIFIED |
 | A13 | No feature is hidden merely because the platform is Android | UNVERIFIED |
+| A14 | Press *Identify* **before** granting, then grant in the dialog Android shows — the same attempt continues to a read, no second press | UNVERIFIED |
+| A15 | A second USB serial adapter attached alongside the device — a refusal saying more than one is attached; nothing opened | UNVERIFIED |
+| A16 | Leave the app in front past the screen timeout — the screen stays on | UNVERIFIED |
+| A17 | Home or the lock screen **while the real recovery-export picker is open** — the host stops, the port and the pending export both survive, and the export completes when the app returns | UNVERIFIED |
+| A18 | **Unplug the device while the recovery-export picker is open** — the port is released, but the export is untouched and still completes to storage | UNVERIFIED |
+| A19 | Home or the lock screen while Android's **USB permission dialog** is up, then return — the request is re-asked rather than the app appearing stuck | UNVERIFIED |
 
 See [PHYSICAL_VALIDATION_HANDOFF.md](hardware/PHYSICAL_VALIDATION_HANDOFF.md)
 for how to install this APK, verify it, and run these rows.

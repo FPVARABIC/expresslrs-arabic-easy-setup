@@ -306,7 +306,62 @@ class DocumentBridgeInstrumentedTest {
         assertEquals(0, documents.committedCount)
     }
 
+    // ---- a USB detach must not touch a document --------------------------
+
+    @Test
+    fun aUsbDetachWhileTheRecoveryExportPickerIsOpenLeavesTheExportAlone() {
+        // The recovery export writes to storage the operator owns, over the
+        // Storage Access Framework — it never touches the port. Unplugging the
+        // device it is meant to protect must not cancel it: that is the one
+        // moment the safety net has to survive. An earlier revision rejected
+        // *every* pending call on a detach, including a documentCreate parked
+        // in the picker, which cancelled the export and abandoned its file.
+        val sessionId = openUsbPort()
+
+        // Park a documentCreate inside the picker wait, the way the real SAF
+        // picker parks the worker thread until the operator answers.
+        val gate = CountDownLatch(1)
+        documents.blockCreate = gate
+        val creating = pendingCall("documentCreate") { it.put("suggestedName", "recovery.zip") }
+
+        // A USB write queued behind it, to show the port really did go.
+        val doomedWrite = pendingCall("write") {
+            it.put("sessionId", sessionId).put("bytes", bytesOf(byteArrayOf(1)))
+        }
+
+        // The device is pulled while the picker is still up.
+        core.onDeviceDetached(FakeUsbBackend.DEFAULT_DEVICE)
+
+        // The USB side is gone...
+        assertFalse(core.hasOpenPort)
+        assertEquals(BridgeCore.Reason.DETACHED, doomedWrite.await().getString("reason"))
+
+        // ...but the export is untouched. The picker answers, the document is
+        // created, and it can be written and committed.
+        documents.blockCreate = null
+        gate.countDown()
+        val created = creating.await()
+        assertTrue(created.toString(), created.getBoolean("ok"))
+        val location = created.getJSONObject("result").getString("location")
+        assertTrue(
+            call("documentWrite") {
+                it.put("location", location)
+                    .put("bytes", bytesOf(byteArrayOf(7, 8, 9)))
+                    .put("offset", 0)
+            }.getBoolean("ok"),
+        )
+        assertTrue(call("documentCommit") { it.put("location", location) }.getBoolean("ok"))
+        assertEquals(1, documents.committedCount)
+    }
+
     // ---- helpers ----------------------------------------------------------
+
+    private fun openUsbPort(): String {
+        backend.permissions[FakeUsbBackend.DEFAULT_DEVICE] = UsbDeviceGate.Permission.GRANTED
+        val reply = call("open") { it.put("deviceId", FakeUsbBackend.DEFAULT_DEVICE) }
+        assertTrue(reply.toString(), reply.getBoolean("ok"))
+        return reply.getJSONObject("result").getString("sessionId")
+    }
 
     private fun createDocument(name: String): String {
         val reply = call("documentCreate") { it.put("suggestedName", name) }
