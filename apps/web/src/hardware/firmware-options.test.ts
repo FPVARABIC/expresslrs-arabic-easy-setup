@@ -17,6 +17,7 @@ const target: OfficialTarget = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "download"],
     minVersion: null,
     customLayout: {},
@@ -42,6 +43,8 @@ const options: ExpressLrsFirmwareOptions = {
   r9mmMiniSbus: false,
   rxAsTxMode: "off",
   airportEnabled: false,
+  buzzerMode: "default-tune",
+  buzzerMelody: "",
 };
 
 describe("firmware option validation", () => {
@@ -256,5 +259,62 @@ describe("firmware option validation", () => {
         options: { ...options, rxAsTxMode: "internal", airportEnabled: false },
       }),
     ).toMatchObject({ rxAsTxMode: "internal", airportEnabled: false });
+  });
+
+  it("refuses a custom buzzer tune the firmware cannot hold, but only for a Target that carries the buzzer", () => {
+    const buzzerTx: OfficialTarget = {
+      ...target,
+      config: {
+        ...target.config,
+        platform: "stm32",
+        raw: { features: ["buzzer"] },
+      },
+    };
+    const espRx: OfficialTarget = {
+      ...target,
+      role: "rx",
+      radioKey: "rx_2400",
+      config: { ...target.config, platform: "esp8285" },
+    };
+    const tooMany = `${Array.from({ length: 33 }, () => "A4 4").join(" ")}|120|0`;
+    expect(() =>
+      validateFirmwareOptions({
+        target: buzzerTx,
+        options: {
+          ...options,
+          buzzerMode: "custom-tune",
+          buzzerMelody: tooMany,
+        },
+      }),
+    ).toThrowError(/BUZZER_MELODY_INVALID \(TOO_MANY_TONES/u);
+    expect(() =>
+      validateFirmwareOptions({
+        target: buzzerTx,
+        options: { ...options, buzzerMode: "custom-tune", buzzerMelody: "" },
+      }),
+    ).toThrowError(/BUZZER_MELODY_INVALID \(EMPTY/u);
+    expect(
+      validateFirmwareOptions({
+        target: buzzerTx,
+        options: {
+          ...options,
+          buzzerMode: "custom-tune",
+          buzzerMelody: "A4 4|120|0",
+        },
+      }).buzzerMode,
+    ).toBe("custom-tune");
+    // An ESP receiver never carries the tune, so a stray value does not block its build.
+    expect(
+      validateFirmwareOptions({
+        target: espRx,
+        options: { ...options, buzzerMode: "custom-tune", buzzerMelody: "" },
+      }).buzzerMode,
+    ).toBe("custom-tune");
+    expect(() =>
+      validateFirmwareOptions({
+        target: espRx,
+        options: { ...options, buzzerMode: "loud" as never },
+      }),
+    ).toThrowError(/buzzerMode must be one of/u);
   });
 });

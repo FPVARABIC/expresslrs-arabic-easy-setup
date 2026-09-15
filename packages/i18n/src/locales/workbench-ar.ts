@@ -30,7 +30,69 @@ export const workbenchAr = {
   "wb.method.edgetx": "عبر جهاز التحكم",
   "wb.method.passthru": "Passthrough جاهز",
   "wb.method.wifi": "Wi-Fi",
-  "wb.method.stlink": "STM32 DFU",
+  "wb.method.stlink": "مسبار ST-Link (SWD)",
+  "wb.method.dfu": "STM32 DFU (محمّل الإقلاع عبر USB)",
+  "wb.ui.startStLink": "بدء الكتابة عبر ST-Link",
+  "wb.flash.stlinkPlatformMismatch": "ST-Link لا يطابق منصة Target المختار.",
+  "wb.passthrough.SERIALRX_PROVIDER":
+    "متحكم الطيران يبلغ {setting} = {observed}، بينما يحتاج ExpressLRS إلى {expected}. في CLI الخاص بـBetaflight نفّذ `set serialrx_provider = CRSF` ثم `save` وأعد المحاولة.",
+  "wb.passthrough.SERIALRX_INVERTED":
+    "متحكم الطيران يبلغ {setting} = {observed}؛ يجب ألا يكون UART المستقبل معكوسًا. في CLI الخاص بـBetaflight نفّذ `set serialrx_inverted = OFF` ثم `save` وأعد المحاولة.",
+  "wb.passthrough.SERIALRX_HALFDUPLEX":
+    "متحكم الطيران يبلغ {setting} = {observed}؛ يحتاج ExpressLRS إلى الاتصال ثنائي الاتجاه الكامل ({expected}). في CLI الخاص بـBetaflight نفّذ `set serialrx_halfduplex = OFF` ثم `save` وأعد المحاولة.",
+  "wb.passthrough.SPI_RECEIVER":
+    "متحكم الطيران يبلغ rx_spi_protocol = EXPRESSLRS: هذا المستقبل مدمج داخل متحكم الطيران ويُحدَّث من Betaflight نفسه، لا عبر Passthrough على UART.",
+  "wb.passthrough.UART_NOT_FOUND":
+    "قائمة `serial` في متحكم الطيران لا تحتوي UART بوظيفة Serial RX. عيّن UART المستقبل من تبويب Ports في Betaflight واحفظ ثم أعد المحاولة.",
+  "wb.passthrough.TIMEOUT":
+    "لم يجب CLI متحكم الطيران في الوقت المحدد ({detail}). أغلق Betaflight Configurator وأعد تشغيل متحكم الطيران ثم أعد المحاولة.",
+  "wb.passthrough.UNEXPECTED_RESPONSE":
+    "أجاب CLI متحكم الطيران بشكل غير متوقع ({detail}).",
+  "wb.xmodem.HANDSHAKE_TIMEOUT":
+    "لم يفتح محمّل إقلاع STM32 نقل XMODEM أبدًا ({detail}). ربما لم يدخل المستقبل إلى محمّل الإقلاع؛ أعد تشغيله بالطاقة ثم أعد المحاولة.",
+  "wb.xmodem.TRANSFER_TIMEOUT":
+    "توقف محمّل إقلاع STM32 عن الإجابة أثناء نقل XMODEM ({detail}). لم يُتحقق من شيء؛ شغّل الاستعادة.",
+  "wb.xmodem.TRANSFER_REJECTED":
+    "رفض محمّل إقلاع STM32 نقل XMODEM ({detail}). لم يُتحقق من شيء؛ شغّل الاستعادة.",
+  "wb.stlink.UNSUPPORTED":
+    "هذا المتصفح لا يعرض WebUSB، فلا يمكن الوصول إلى مسبار ST-Link من هنا.",
+  "wb.stlink.CANCELLED": "لم يُختر أي مسبار ST-Link.",
+  "wb.stlink.PROBE_UNSUPPORTED":
+    "المسبار المختار ليس ST-Link/V2 ولا V2-1 ({probe})؛ هذان هما المسباران الوحيدان اللذان يدعمهما هذا المسار والفلاشر الرسمي.",
+  "wb.stlink.PROBE_FIRMWARE_OLD":
+    "برنامج المسبار قديم جدًا ({probe}). حدّثه عبر STM32CubeProgrammer ثم أعد المحاولة.",
+  "wb.stlink.TARGET_VOLTAGE_LOW":
+    "يقيس المسبار {voltage} فولت على الجهاز؛ تحتاج برمجة الذاكرة إلى 2.0 فولت على الأقل. شغّل الجهاز بالطاقة وافحص سلك VCC.",
+  "wb.stlink.CPU_NOT_CONNECTED":
+    "لا يرى المسبار أي معالج على SWD. افحص SWDIO وSWCLK وGND وتأكد أن الجهاز مزوّد بالطاقة.",
+  "wb.stlink.CPU_UNSUPPORTED":
+    "القطعة المتصلة ({detected}) ليست مما يستطيع هذا المسار برمجته ({detail}).",
+  "wb.stlink.CPU_MISMATCH":
+    "الـTarget مبني لـ{expected}، لكن القطعة على المسبار هي {detected}. لم يُمسح شيء.",
+  "wb.stlink.FLASH_LOCKED":
+    "بقيت وحدة تحكم الذاكرة مقفلة بعد مفاتيح الفتح؛ قد تكون القطعة محمية ضد القراءة.",
+  "wb.stlink.FLASH_ERROR":
+    "أبلغت وحدة تحكم الذاكرة عن خطأ (الحالة {status}). أُعيد قفل الذاكرة؛ شغّل الاستعادة.",
+  "wb.stlink.VERIFY_FAILED":
+    "القراءة الرجعية عبر SWD تختلف عن الصورة عند {address}. الكتابة غير متحقق منها؛ شغّل الاستعادة.",
+  "workbench.options.buzzer": "الصفّارة عند التشغيل",
+  "workbench.options.buzzerMelody": "لحن مخصص (`notes|bpm|transpose` أو RTTTL)",
+  "workbench.buzzer.mode.quiet": "صامت",
+  "workbench.buzzer.mode.one-beep": "صفير واحد",
+  "workbench.buzzer.mode.beep-tune": "صفير قصير من نغمتين",
+  "workbench.buzzer.mode.default-tune":
+    "اللحن الافتراضي (افتراضي الفلاشر الرسمي)",
+  "workbench.buzzer.mode.custom-tune": "لحن مخصص",
+  "workbench.buzzer.NOT_A_TRANSMITTER":
+    "{target} جهاز استقبال؛ الصفّارة موجودة في أجهزة الإرسال فقط.",
+  "workbench.buzzer.PLATFORM_HAS_NO_BUZZER_OPTION":
+    "{target} ({platform}) لا يحمل حقل صفّارة في خياراته: مُهيّئ Firmware يرمّز لحن الصفّارة لأجهزة إرسال STM32 فقط.",
+  "workbench.buzzer.NO_BUZZER_FEATURE":
+    "{target} لا يذكر صفّارة ضمن ميزاته في الكتالوج، لذلك لا يكتب الفلاشر الرسمي خيارات صفّارة له، وكذلك هذا التطبيق.",
+  "wb.need.buzzerTarget":
+    "خيارات الصفّارة تحتاج Target لجهاز إرسال STM32 مزوّد بصفّارة؛ {target} ({platform}) لا يملك واحدة.",
+  "wb.flash.wifiHandoffPrior":
+    "نُزّل ملف OTA وفُتح 10.0.0.1. اختر الملف المنزّل داخل صفحة الجهاز نفسها. إذا أبلغ الجهاز أن Target الحالي هو {prior} فهذا هو الاسم السابق لهذا الـTarget ({target})؛ مُهيّئ Firmware نفسه يقبله، فتابع.",
   "wb.method.download": "تنزيل فقط",
 
   // --- receiver as transmitter (upstream `--rx-as-tx`) --------------------
@@ -232,7 +294,7 @@ export const workbenchAr = {
     "لا يمكن تشغيل الاستعادة دون سجل استعادة موثوق ومقروء.",
   "wb.recovery.needTarget": "اختر Target المطابق قبل تشغيل الاستعادة.",
   "wb.recovery.needDirectPath":
-    "الاستعادة تتطلب مسار كتابة مباشرًا: UART أو Passthrough أو STM32 DFU.",
+    "الاستعادة تتطلب مسار كتابة مباشرًا: UART أو Passthrough أو ST-Link أو STM32 DFU.",
   "wb.recovery.needTargetKey":
     "أكّد مفتاح Target قبل تشغيل الاستعادة؛ منفذ الاستعادة اختيار جديد ولا يرث هوية CRSF السابقة.",
   "wb.recovery.needPower": "أكّد ثبات الطاقة قبل تشغيل الاستعادة.",

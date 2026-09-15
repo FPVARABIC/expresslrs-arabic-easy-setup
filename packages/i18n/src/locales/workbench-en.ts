@@ -41,7 +41,71 @@ export const workbenchEn = {
   "wb.method.edgetx": "Through the radio",
   "wb.method.passthru": "Passthrough ready",
   "wb.method.wifi": "Wi-Fi",
-  "wb.method.stlink": "STM32 DFU",
+  "wb.method.stlink": "ST-Link probe (SWD)",
+  "wb.method.dfu": "STM32 DFU (USB bootloader)",
+  "wb.ui.startStLink": "Start the ST-Link write",
+  "wb.flash.stlinkPlatformMismatch":
+    "ST-Link does not match the chosen Target's platform.",
+  "wb.passthrough.SERIALRX_PROVIDER":
+    "The flight controller reports {setting} = {observed}; ExpressLRS needs {expected}. In the Betaflight CLI run `set serialrx_provider = CRSF`, then `save`, and try again.",
+  "wb.passthrough.SERIALRX_INVERTED":
+    "The flight controller reports {setting} = {observed}; the receiver UART must not be inverted. In the Betaflight CLI run `set serialrx_inverted = OFF`, then `save`, and try again.",
+  "wb.passthrough.SERIALRX_HALFDUPLEX":
+    "The flight controller reports {setting} = {observed}; ExpressLRS needs full duplex ({expected}). In the Betaflight CLI run `set serialrx_halfduplex = OFF`, then `save`, and try again.",
+  "wb.passthrough.SPI_RECEIVER":
+    "The flight controller reports rx_spi_protocol = EXPRESSLRS: this receiver is built into the flight controller and is updated through Betaflight itself, not through a UART passthrough.",
+  "wb.passthrough.UART_NOT_FOUND":
+    "The flight controller's `serial` list has no UART with the Serial RX function. Assign the receiver's UART in Betaflight's Ports tab, save, and try again.",
+  "wb.passthrough.TIMEOUT":
+    "The flight controller's CLI did not answer in time ({detail}). Close Betaflight Configurator, power-cycle the flight controller, and try again.",
+  "wb.passthrough.UNEXPECTED_RESPONSE":
+    "The flight controller's CLI answered unexpectedly ({detail}).",
+  "wb.xmodem.HANDSHAKE_TIMEOUT":
+    "The STM32 bootloader never opened the XMODEM transfer ({detail}). The receiver may not have entered its bootloader; power-cycle it and try again.",
+  "wb.xmodem.TRANSFER_TIMEOUT":
+    "The STM32 bootloader stopped answering during the XMODEM transfer ({detail}). Nothing was verified; run the recovery.",
+  "wb.xmodem.TRANSFER_REJECTED":
+    "The STM32 bootloader rejected the XMODEM transfer ({detail}). Nothing was verified; run the recovery.",
+  "wb.stlink.UNSUPPORTED":
+    "This browser exposes no WebUSB, so an ST-Link probe cannot be reached from here.",
+  "wb.stlink.CANCELLED": "No ST-Link probe was chosen.",
+  "wb.stlink.PROBE_UNSUPPORTED":
+    "The chosen probe is not an ST-Link/V2 or V2-1 ({probe}); those are the only probes this route and the official flasher drive.",
+  "wb.stlink.PROBE_FIRMWARE_OLD":
+    "The probe's firmware is too old ({probe}). Update it with STM32CubeProgrammer, then try again.",
+  "wb.stlink.TARGET_VOLTAGE_LOW":
+    "The probe measures {voltage} V on the target; flash programming needs at least 2.0 V. Power the device and check the VCC wire.",
+  "wb.stlink.CPU_NOT_CONNECTED":
+    "The probe sees no CPU on SWD. Check SWDIO, SWCLK, GND and that the device is powered.",
+  "wb.stlink.CPU_UNSUPPORTED":
+    "The connected part ({detected}) is not one this route can program ({detail}).",
+  "wb.stlink.CPU_MISMATCH":
+    "The Target is built for {expected}, but the part on the probe is {detected}. Nothing was erased.",
+  "wb.stlink.FLASH_LOCKED":
+    "The flash controller stayed locked after the unlock keys; the part may be read-protected.",
+  "wb.stlink.FLASH_ERROR":
+    "The flash controller reported an error (status {status}). The flash is locked again; run the recovery.",
+  "wb.stlink.VERIFY_FAILED":
+    "The SWD read-back differs from the image at {address}. The write is not verified; run the recovery.",
+  "workbench.options.buzzer": "Buzzer at power-on",
+  "workbench.options.buzzerMelody":
+    "Custom tune (`notes|bpm|transpose` or RTTTL)",
+  "workbench.buzzer.mode.quiet": "Quiet",
+  "workbench.buzzer.mode.one-beep": "One beep",
+  "workbench.buzzer.mode.beep-tune": "Short two-note beep",
+  "workbench.buzzer.mode.default-tune":
+    "Default tune (the official flasher's default)",
+  "workbench.buzzer.mode.custom-tune": "Custom tune",
+  "workbench.buzzer.NOT_A_TRANSMITTER":
+    "{target} is a receiver; only transmitters have a buzzer.",
+  "workbench.buzzer.PLATFORM_HAS_NO_BUZZER_OPTION":
+    "{target} ({platform}) has no buzzer field in its options: the firmware's configurator encodes a buzzer melody only for STM32 transmitters.",
+  "workbench.buzzer.NO_BUZZER_FEATURE":
+    "{target} does not list a buzzer among its catalog features, so the official flasher writes no buzzer options for it and neither does this one.",
+  "wb.need.buzzerTarget":
+    "The buzzer options need an STM32 transmitter Target with a buzzer; {target} ({platform}) has none.",
+  "wb.flash.wifiHandoffPrior":
+    "The OTA file was downloaded and 10.0.0.1 opened. Choose the downloaded file inside the device's own page. If the device reports its current target as {prior}, that is this Target's earlier name ({target}); the firmware's own configurator accepts it, so continue.",
   "wb.method.download": "Download only",
 
   // --- receiver as transmitter (upstream `--rx-as-tx`) --------------------
@@ -276,7 +340,7 @@ export const workbenchEn = {
   "wb.recovery.needTarget":
     "Choose the matching Target before running the recovery.",
   "wb.recovery.needDirectPath":
-    "Recovery needs a direct write path: UART, Passthrough or STM32 DFU.",
+    "Recovery needs a direct write path: UART, Passthrough, ST-Link or STM32 DFU.",
   "wb.recovery.needTargetKey":
     "Confirm the Target key before running the recovery; the recovery port is a fresh selection and does not inherit the previous CRSF identity.",
   "wb.recovery.needPower": "Confirm stable power before running the recovery.",

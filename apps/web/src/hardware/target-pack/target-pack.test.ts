@@ -193,6 +193,8 @@ describe("packaging never touches a mutable hardware path", () => {
     r9mmMiniSbus: false,
     rxAsTxMode: "off",
     airportEnabled: false,
+    buzzerMode: "default-tune",
+    buzzerMelody: "",
   };
 
   function esp8285Image(): Uint8Array {
@@ -225,6 +227,7 @@ describe("packaging never touches a mutable hardware path", () => {
       luaName: null,
       layoutFile: layoutName,
       logoFile: null,
+      priorTargetName: null,
       uploadMethods: ["uart"],
       minVersion: "3.0.0",
       customLayout: {},

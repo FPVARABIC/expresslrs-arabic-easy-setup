@@ -1,3 +1,4 @@
+import type { BuzzerMode } from "./buzzer-melody";
 import type { RxAsTxMode } from "./rx-as-tx";
 
 export type ExpressLrsDeviceRole = "tx" | "rx";
@@ -8,7 +9,10 @@ export type ExpressLrsFlashMethod =
   | "edgetx"
   | "passthru"
   | "wifi"
+  /** A debug probe on SWDIO/SWCLK: the route every STM32 Target advertises. */
   | "stlink"
+  /** The MCU's own USB ROM bootloader (DfuSe), which only one Target advertises. */
+  | "dfu"
   | "download";
 
 export interface OfficialRelease {
@@ -25,6 +29,12 @@ export interface OfficialTargetConfig {
   readonly luaName: string | null;
   readonly layoutFile: string | null;
   readonly logoFile: string | null;
+  /**
+   * Upstream `prior_target_name`: the name this Target went by before the
+   * catalog renamed it. The firmware's configurator accepts it when a
+   * device's Wi-Fi updater reports the old name; here it is a matching alias.
+   */
+  readonly priorTargetName: string | null;
   readonly uploadMethods: readonly ExpressLrsFlashMethod[];
   readonly minVersion: string | null;
   readonly customLayout: Readonly<Record<string, unknown>> | null;
@@ -75,6 +85,14 @@ export interface ExpressLrsFirmwareOptions {
    * deliberately not derived from {@link rxAsTxMode}.
    */
   readonly airportEnabled: boolean;
+  /**
+   * The STM32 transmitter buzzer (`buzzer_mode` and `buzzer_melody` in the
+   * firmware's options struct). Encoded only for Targets that have one; the
+   * official flasher's default is the default tune.
+   */
+  readonly buzzerMode: BuzzerMode;
+  /** The `notes|bpm|transpose` or RTTTL text used when {@link buzzerMode} is `custom-tune`. */
+  readonly buzzerMelody: string;
 }
 
 export interface FirmwareSegment {
@@ -95,6 +113,8 @@ export interface PreparedFirmwarePackage {
     readonly wifiConfigured: boolean;
     readonly rxAsTxMode: RxAsTxMode;
     readonly airportEnabled: boolean;
+    /** The buzzer choice compiled in, or null when the Target has no buzzer. */
+    readonly buzzerMode: BuzzerMode | null;
   }>;
   readonly segments: readonly FirmwareSegment[];
   readonly primaryFileName: string;

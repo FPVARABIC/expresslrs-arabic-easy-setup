@@ -162,6 +162,7 @@ export const acceptanceEn = {
   "accp.op.recovery": "Recovery",
   "accp.op.rxAsTx": "Receiver as transmitter",
   "accp.op.airport": "AirPort",
+  "accp.op.buzzer": "Transmitter buzzer",
   "accp.captureContext": "Capture the current state",
   "accp.exportJson": "Export JSON",
   "accp.exportMarkdown": "Export a Markdown report",

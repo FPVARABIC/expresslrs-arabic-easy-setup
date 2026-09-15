@@ -15,6 +15,7 @@ import {
 } from "../diagnostics/diagnostics";
 import { readBackMatches } from "../easy/easyOperations";
 import { evaluateAirportSupport } from "./airport-support";
+import { evaluateBuzzerSupport } from "./buzzer-melody";
 import {
   bandFamilyForRadioKey,
   bandKnownToMismatch,
@@ -62,6 +63,8 @@ import {
 import {
   initializeSerialPassthrough,
   PASSTHROUGH_FLASH_BAUD,
+  PassthroughError,
+  type PassthroughErrorCode,
   requestHardwarePort,
   requestReceiverBootloaderThroughPassthrough,
   type PassthroughMethod,
@@ -104,7 +107,9 @@ export type DeviceOperation =
   | "firmwareWrite"
   | "recovery"
   | "rxAsTx"
-  | "airport";
+  | "airport"
+  /** The STM32 transmitter buzzer options: a Target with a buzzer, nothing else. */
+  | "buzzer";
 
 /**
  * Whether one operation can run right now, and if not, every live prerequisite
@@ -134,6 +139,11 @@ import type { HardwareSerialPort } from "./serial";
 import { verifyReconnectTarget } from "./reconnect-target-verification";
 import { flashStm32DfuFirmware } from "./stm32-dfu";
 import {
+  flashStm32StlinkFirmware,
+  Stm32StlinkError,
+  type Stm32StlinkErrorCode,
+} from "./stm32-stlink";
+import {
   matchHardwareIdentityToOfficialTargets,
   type TargetMatchResult,
 } from "./target-match";
@@ -145,7 +155,7 @@ import {
   type UserHardwareSession,
   type WritableCrsfParameter,
 } from "./userSession";
-import { flashXmodemFirmware } from "./xmodem";
+import { flashXmodemFirmware, XmodemError } from "./xmodem";
 import {
   DeviceWriteAuthority,
   deviceFingerprint,
@@ -191,6 +201,8 @@ const DEFAULT_OPTIONS: ExpressLrsFirmwareOptions = Object.freeze({
   r9mmMiniSbus: false,
   rxAsTxMode: "off",
   airportEnabled: false,
+  buzzerMode: "default-tune",
+  buzzerMelody: "",
 });
 
 export const METHOD_LABEL_KEYS: Readonly<
@@ -202,8 +214,67 @@ export const METHOD_LABEL_KEYS: Readonly<
   passthru: "wb.method.passthru",
   wifi: "wb.method.wifi",
   stlink: "wb.method.stlink",
+  dfu: "wb.method.dfu",
   download: "wb.method.download",
 });
+
+/**
+ * Driver refusals, named for the operator in their language. A code with no
+ * entry here is shown as the driver's own text; nothing is swallowed.
+ */
+const PASSTHROUGH_FAILURE_KEYS: Partial<
+  Record<PassthroughErrorCode, MessageKey>
+> = Object.freeze({
+  SERIALRX_PROVIDER: "wb.passthrough.SERIALRX_PROVIDER",
+  SERIALRX_INVERTED: "wb.passthrough.SERIALRX_INVERTED",
+  SERIALRX_HALFDUPLEX: "wb.passthrough.SERIALRX_HALFDUPLEX",
+  SPI_RECEIVER: "wb.passthrough.SPI_RECEIVER",
+  UART_NOT_FOUND: "wb.passthrough.UART_NOT_FOUND",
+  TIMEOUT: "wb.passthrough.TIMEOUT",
+  UNEXPECTED_RESPONSE: "wb.passthrough.UNEXPECTED_RESPONSE",
+});
+const XMODEM_FAILURE_KEYS: Partial<Record<XmodemError["code"], MessageKey>> =
+  Object.freeze({
+    HANDSHAKE_TIMEOUT: "wb.xmodem.HANDSHAKE_TIMEOUT",
+    TRANSFER_TIMEOUT: "wb.xmodem.TRANSFER_TIMEOUT",
+    TRANSFER_REJECTED: "wb.xmodem.TRANSFER_REJECTED",
+  });
+const STLINK_FAILURE_KEYS: Partial<Record<Stm32StlinkErrorCode, MessageKey>> =
+  Object.freeze({
+    UNSUPPORTED: "wb.stlink.UNSUPPORTED",
+    CANCELLED: "wb.stlink.CANCELLED",
+    PROBE_UNSUPPORTED: "wb.stlink.PROBE_UNSUPPORTED",
+    PROBE_FIRMWARE_OLD: "wb.stlink.PROBE_FIRMWARE_OLD",
+    TARGET_VOLTAGE_LOW: "wb.stlink.TARGET_VOLTAGE_LOW",
+    CPU_NOT_CONNECTED: "wb.stlink.CPU_NOT_CONNECTED",
+    CPU_UNSUPPORTED: "wb.stlink.CPU_UNSUPPORTED",
+    CPU_MISMATCH: "wb.stlink.CPU_MISMATCH",
+    FLASH_LOCKED: "wb.stlink.FLASH_LOCKED",
+    FLASH_ERROR: "wb.stlink.FLASH_ERROR",
+    VERIFY_FAILED: "wb.stlink.VERIFY_FAILED",
+  });
+
+function localizedDriverFailure(error: unknown): ControllerMessage | null {
+  if (error instanceof PassthroughError) {
+    const key = PASSTHROUGH_FAILURE_KEYS[error.code];
+    return key === undefined
+      ? null
+      : message(key, { ...error.detail, detail: safeMessage(error) });
+  }
+  if (error instanceof XmodemError) {
+    const key = XMODEM_FAILURE_KEYS[error.code];
+    return key === undefined
+      ? null
+      : message(key, { detail: safeMessage(error) });
+  }
+  if (error instanceof Stm32StlinkError) {
+    const key = STLINK_FAILURE_KEYS[error.code];
+    return key === undefined
+      ? null
+      : message(key, { ...error.detail, detail: safeMessage(error) });
+  }
+  return null;
+}
 
 /**
  * A message the controller wants shown, named rather than written.
@@ -519,10 +590,13 @@ export function useDeviceController({
    * `Error.message` alone here showed the operator the raw message *key* of
    * every refusal raised inside a write.
    */
-  const failureDetail = (error: unknown): string =>
-    error instanceof ControllerError
-      ? renderMessage(error.controllerMessage)
-      : safeMessage(error);
+  const failureDetail = (error: unknown): string => {
+    if (error instanceof ControllerError) {
+      return renderMessage(error.controllerMessage);
+    }
+    const localized = localizedDriverFailure(error);
+    return localized === null ? safeMessage(error) : renderMessage(localized);
+  };
   const [catalog, setCatalog] = useState<OfficialCatalog | null>(null);
   const [catalogState, setCatalogState] = useState<
     "idle" | "loading" | "ready" | "failed"
@@ -710,6 +784,7 @@ export function useDeviceController({
   // tick survives in `storedOptions`, so moving back to an ESP Target
   // restores it.
   const airportSupport = evaluateAirportSupport(selectedTarget);
+  const buzzerSupport = evaluateBuzzerSupport(selectedTarget);
   const options: ExpressLrsFirmwareOptions =
     storedOptions.airportEnabled && !airportSupport.supported
       ? Object.freeze({ ...storedOptions, airportEnabled: false })
@@ -977,6 +1052,18 @@ export function useDeviceController({
                   modes: rxAsTxSupport.availableModes.join(", "),
                 },
               ),
+        ] as const,
+      ]),
+      buzzer: readinessFrom([
+        targetChosen,
+        [
+          buzzerSupport.supported,
+          buzzerSupport.supported
+            ? message("wb.need.target")
+            : message("wb.need.buzzerTarget", {
+                target: buzzerSupport.targetName,
+                platform: buzzerSupport.platform,
+              }),
         ] as const,
       ]),
       airport: readinessFrom([
@@ -2457,7 +2544,16 @@ export function useDeviceController({
     if (method === "wifi") {
       downloadFirmware();
       window.open("http://10.0.0.1/", "_blank", "noopener,noreferrer");
-      const reported = message("wb.flash.wifiHandoff");
+      // A renamed Target: the device's own updater may report the old name
+      // and call the upload a mismatch, which the firmware's configurator
+      // accepts for exactly this name (`prior_target_name`).
+      const reported =
+        selectedTarget.config.priorTargetName === null
+          ? message("wb.flash.wifiHandoff")
+          : message("wb.flash.wifiHandoffPrior", {
+              prior: selectedTarget.config.priorTargetName,
+              target: selectedTarget.config.firmware,
+            });
       setStatus(reported);
       return Object.freeze({ verified: false, message: reported });
     }
@@ -2483,9 +2579,15 @@ export function useDeviceController({
         throw new ControllerError(message("wb.flash.platformUnsupported"));
       }
       await saveCheckpoint(prepared, "BOOTLOADER");
-      if (method === "stlink") {
+      if (method === "dfu" || method === "stlink") {
         if (family !== "stm32") {
-          throw new ControllerError(message("wb.flash.dfuPlatformMismatch"));
+          throw new ControllerError(
+            message(
+              method === "dfu"
+                ? "wb.flash.dfuPlatformMismatch"
+                : "wb.flash.stlinkPlatformMismatch",
+            ),
+          );
         }
         const firmware = prepared.segments.find(
           (segment) => segment.name === "firmware.bin",
@@ -2494,12 +2596,22 @@ export function useDeviceController({
           throw new ControllerError(message("wb.flash.stm32MissingFirmware"));
         }
         await saveCheckpoint(prepared, "WRITING");
-        const flashResult = await flashStm32DfuFirmware({
-          target: selectedTarget,
-          segment: firmware,
-          signal: controller.signal,
-          onProgress: setFlashProgress,
-        });
+        // Two different USB transports: the MCU's ROM bootloader, or a debug
+        // probe on its SWD pads. Both read every written byte back.
+        const flashResult =
+          method === "dfu"
+            ? await flashStm32DfuFirmware({
+                target: selectedTarget,
+                segment: firmware,
+                signal: controller.signal,
+                onProgress: setFlashProgress,
+              })
+            : await flashStm32StlinkFirmware({
+                target: selectedTarget,
+                segment: firmware,
+                signal: controller.signal,
+                onProgress: setFlashProgress,
+              });
         if (!flashResult.cleanupVerified) {
           latchUnconfirmedHardwareClose(
             message("wb.flash.stm32CleanupUnproven"),
@@ -2658,9 +2770,15 @@ export function useDeviceController({
         (sum, segment) => sum + segment.bytes.byteLength,
         0,
       );
-      if (method === "stlink") {
+      if (method === "dfu" || method === "stlink") {
         if (family !== "stm32") {
-          throw new ControllerError(message("wb.flash.dfuPlatformMismatch"));
+          throw new ControllerError(
+            message(
+              method === "dfu"
+                ? "wb.flash.dfuPlatformMismatch"
+                : "wb.flash.stlinkPlatformMismatch",
+            ),
+          );
         }
         const firmware = validated.segments.find(
           (segment) => segment.name === "firmware.bin",
@@ -2668,12 +2786,20 @@ export function useDeviceController({
         if (firmware === undefined) {
           throw new ControllerError(message("wb.recovery.missingFirmware"));
         }
-        const flashResult = await flashStm32DfuFirmware({
-          target: selectedTarget,
-          segment: firmware,
-          signal: controller.signal,
-          onProgress: setFlashProgress,
-        });
+        const flashResult =
+          method === "dfu"
+            ? await flashStm32DfuFirmware({
+                target: selectedTarget,
+                segment: firmware,
+                signal: controller.signal,
+                onProgress: setFlashProgress,
+              })
+            : await flashStm32StlinkFirmware({
+                target: selectedTarget,
+                segment: firmware,
+                signal: controller.signal,
+                onProgress: setFlashProgress,
+              });
         if (!flashResult.cleanupVerified) {
           latchUnconfirmedHardwareClose(
             message("wb.recovery.stm32CleanupUnproven"),
@@ -3138,6 +3264,7 @@ export function useDeviceController({
     rxAsTxSupport,
     rxAsTxModeSupport,
     airportSupport,
+    buzzerSupport,
     deviceBand,
     wipeSecretOptions,
     captureDiagnostics,

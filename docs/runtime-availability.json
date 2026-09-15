@@ -64,6 +64,24 @@
       "onFailure": "not applicable"
     },
     {
+      "operation": "buzzer",
+      "surface": "advanced",
+      "transport": "browser",
+      "control": "Buzzer at power-on (select) and its custom tune (text)",
+      "readinessInputs": [
+        "a Target chosen",
+        "an STM32 transmitter whose catalog entry lists the buzzer feature; any other Target closes the control with that reason written beside it"
+      ],
+      "disabledBefore": true,
+      "enabledAfter": true,
+      "handler": "useDeviceController.updateOption('buzzerMode' | 'buzzerMelody')",
+      "driver": "firmware-package: writes buzzer_mode and the 32 tones after the transmitter flags, as the firmware's patch_buzzer does",
+      "writeAuthority": "inherited from firmwareWrite; this only shapes the package",
+      "recoveryCheckpoint": "as for any firmware write",
+      "verification": "the encoded bytes are asserted; the device's buzzer behaviour is not read back",
+      "onFailure": "as for any firmware write"
+    },
+    {
       "operation": "connect",
       "surface": "advanced",
       "transport": "android",

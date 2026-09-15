@@ -211,6 +211,7 @@ const easyCatalog = {
         luaName: "vendor.lua",
         layoutFile: null,
         logoFile: null,
+        priorTargetName: null,
         uploadMethods: ["uart", "edgetx", "passthru", "wifi", "download"],
         minVersion: null,
         customLayout: {},

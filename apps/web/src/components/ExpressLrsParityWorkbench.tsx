@@ -6,6 +6,7 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PhysicalAcceptancePanel } from "./PhysicalAcceptancePanel";
 
 import type { ExpressLrsFlashMethod } from "../hardware/parity-types";
+import { BUZZER_MODES } from "../hardware/buzzer-melody";
 import type { RxAsTxMode } from "../hardware/rx-as-tx";
 import type { DeviceOperation } from "../hardware/useDeviceController";
 import {
@@ -93,6 +94,7 @@ export function ExpressLrsParityWorkbenchView({
     captureDiagnostics,
     rxAsTxModeSupport,
     airportSupport,
+    buzzerSupport,
     readiness,
     captureDiagnosticsWithGrants,
     catalog,
@@ -943,6 +945,55 @@ export function ExpressLrsParityWorkbenchView({
                 />
                 <span>{t("wb.ui.unlockHigherPower")}</span>
               </label>
+              <label>
+                <span>{t("workbench.options.buzzer")}</span>
+                <select
+                  value={options.buzzerMode}
+                  // Closed only by a real condition of the chosen Target: the
+                  // firmware options struct carries the buzzer fields for an
+                  // STM32 transmitter with a buzzer and for nothing else.
+                  disabled={busy || !readiness.buzzer.ready}
+                  data-testid="buzzer-mode"
+                  onChange={(event) =>
+                    updateOption(
+                      "buzzerMode",
+                      event.currentTarget.value as typeof options.buzzerMode,
+                    )
+                  }
+                >
+                  {BUZZER_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {t(`workbench.buzzer.mode.${mode}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {options.buzzerMode === "custom-tune" ? (
+                <label>
+                  <span>{t("workbench.options.buzzerMelody")}</span>
+                  <input
+                    type="text"
+                    value={options.buzzerMelody}
+                    disabled={busy || !readiness.buzzer.ready}
+                    data-testid="buzzer-melody"
+                    placeholder="E5 40 E5 40 C5 120|20|0"
+                    onChange={(event) =>
+                      updateOption("buzzerMelody", event.currentTarget.value)
+                    }
+                  />
+                </label>
+              ) : null}
+              {buzzerSupport.supported ? null : (
+                <p
+                  className="parity-note buzzer-note"
+                  data-buzzer-reason={buzzerSupport.reason}
+                >
+                  {t(`workbench.buzzer.${buzzerSupport.reason}`, {
+                    target: buzzerSupport.targetName,
+                    platform: buzzerSupport.platform,
+                  })}
+                </p>
+              )}
             </>
           ) : (
             <>
@@ -1393,8 +1444,10 @@ export function ExpressLrsParityWorkbenchView({
                 : method === "download"
                   ? t("wb.ui.downloadPackage")
                   : method === "stlink"
-                    ? t("wb.ui.startStm32Dfu")
-                    : t("wb.ui.startRealFlash")}
+                    ? t("wb.ui.startStLink")
+                    : method === "dfu"
+                      ? t("wb.ui.startStm32Dfu")
+                      : t("wb.ui.startRealFlash")}
             </button>
           </>
         )}

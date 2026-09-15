@@ -162,6 +162,7 @@ export const acceptanceAr = {
   "accp.op.recovery": "الاستعادة",
   "accp.op.rxAsTx": "المستقبل كمرسل",
   "accp.op.airport": "AirPort",
+  "accp.op.buzzer": "صفّارة جهاز الإرسال",
   "accp.captureContext": "التقاط الحالة الحالية",
   "accp.exportJson": "تصدير JSON",
   "accp.exportMarkdown": "تصدير تقرير Markdown",

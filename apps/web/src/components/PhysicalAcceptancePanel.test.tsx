@@ -133,6 +133,7 @@ describe("PhysicalAcceptancePanel", () => {
           recovery: { ready: true, missing: [] },
           rxAsTx: { ready: true, missing: [] },
           airport: { ready: true, missing: [] },
+          buzzer: { ready: true, missing: [] },
         }}
         storage={storage()}
         now={fixedNow}
@@ -172,6 +173,7 @@ describe("PhysicalAcceptancePanel", () => {
           recovery: { ready: false, missing: [{ key: "wb.need.idle" }] },
           rxAsTx: { ready: false, missing: [{ key: "wb.need.idle" }] },
           airport: { ready: false, missing: [{ key: "wb.need.idle" }] },
+          buzzer: { ready: false, missing: [{ key: "wb.need.idle" }] },
         }}
         storage={storage()}
         now={fixedNow}

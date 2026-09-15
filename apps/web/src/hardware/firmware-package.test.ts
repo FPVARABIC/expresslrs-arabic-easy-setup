@@ -113,6 +113,7 @@ const target: OfficialTarget = {
     luaName: "example.lua",
     layoutFile: "BETAFPV 2400 Micro 1W.json",
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "edgetx", "wifi", "download"],
     minVersion: "3.0.0",
     customLayout: null,
@@ -159,6 +160,8 @@ const options: ExpressLrsFirmwareOptions = {
   r9mmMiniSbus: false,
   rxAsTxMode: "off",
   airportEnabled: false,
+  buzzerMode: "default-tune",
+  buzzerMelody: "",
 };
 
 const stm32Options: ExpressLrsFirmwareOptions = {
@@ -778,6 +781,76 @@ describe("official firmware package preparation", () => {
       ).toBe(options.telemetryInterval);
     },
   );
+
+  it("writes the buzzer mode and 32 tones after the TX flags for a Target that lists the buzzer feature, and nothing for one that does not", async () => {
+    const buzzerTarget: OfficialTarget = {
+      ...stm32Target("tx"),
+      config: {
+        ...stm32Target("tx").config,
+        raw: { stlink: { offset: "0x4000" }, features: ["buzzer", "fan"] },
+      },
+    };
+    const image = () => {
+      const bytes = new Uint8Array(200).fill(0xcc);
+      bytes.set([0xbe, 0xef, 0xba, 0xbe, 0xca, 0xfe, 0xf0, 0x0d]);
+      bytes[8] = 1;
+      bytes[9] = 0;
+      return bytes;
+    };
+    const fetchImplementation = vi.fn(
+      async () => new Response(copyToArrayBuffer(image())),
+    ) as unknown as typeof fetch;
+
+    const withBuzzer = await prepareOfficialFirmwarePackage({
+      release: stm32Release,
+      target: buzzerTarget,
+      options: { ...stm32Options, buzzerMode: "beep-tune", buzzerMelody: "" },
+      fetchImplementation,
+    });
+    const configured = withBuzzer.segments[0]?.bytes;
+    if (configured === undefined) throw new TypeError("missing application");
+    // magic 8, version 2, domain 1, uid flag 1, uid 6, discriminator 4 (>=3.4),
+    // fan runtime 4 (>=3.5), tlm report 4, flags 1 -> the buzzer starts at 31.
+    expect(configured[31]).toBe(2);
+    expect([...configured.slice(32, 40)]).toEqual([
+      440 & 0xff,
+      440 >> 8,
+      200,
+      0,
+      493 & 0xff,
+      493 >> 8,
+      200,
+      0,
+    ]);
+    expect(configured.slice(40, 160).every((byte) => byte === 0)).toBe(true);
+    expect(configured[160]).toBe(0xcc);
+    expect(withBuzzer.optionsSummary.buzzerMode).toBe("beep-tune");
+
+    const quiet = await prepareOfficialFirmwarePackage({
+      release: stm32Release,
+      target: buzzerTarget,
+      options: { ...stm32Options, buzzerMode: "quiet", buzzerMelody: "" },
+      fetchImplementation,
+    });
+    expect(quiet.segments[0]?.bytes[31]).toBe(0);
+    expect(
+      quiet.segments[0]?.bytes.slice(32, 160).every((byte) => byte === 0),
+    ).toBe(true);
+
+    const withoutBuzzer = await prepareOfficialFirmwarePackage({
+      release: stm32Release,
+      target: stm32Target("tx"),
+      options: { ...stm32Options, buzzerMode: "beep-tune", buzzerMelody: "" },
+      fetchImplementation,
+    });
+    // No field in the firmware struct, so the bytes after the flags are untouched.
+    expect(
+      withoutBuzzer.segments[0]?.bytes
+        .slice(31, 160)
+        .every((byte) => byte === 0xcc),
+    ).toBe(true);
+    expect(withoutBuzzer.optionsSummary.buzzerMode).toBeNull();
+  });
 
   it.each([
     {

@@ -44,6 +44,7 @@ const requiredOperations = new Set([
   "recoveryImport",
   "rxAsTx",
   "airport",
+  "buzzer",
 ]);
 
 /** Surfaces that must each be represented by at least one row. */

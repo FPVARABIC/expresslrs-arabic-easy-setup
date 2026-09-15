@@ -42,6 +42,7 @@ function targetOn(
       luaName: null,
       layoutFile: null,
       logoFile: null,
+      priorTargetName: null,
       uploadMethods: ["uart"],
       minVersion: null,
       customLayout: {},

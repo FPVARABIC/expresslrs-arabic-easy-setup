@@ -1,4 +1,11 @@
 import { evaluateAirportSupport } from "./airport-support";
+import {
+  BUZZER_MODES,
+  BuzzerMelodyError,
+  evaluateBuzzerSupport,
+  parseBuzzerMelody,
+  type BuzzerMode,
+} from "./buzzer-melody";
 import { evaluateRxAsTxSupport, RX_AS_TX_ACTIVE_MODES } from "./rx-as-tx";
 import type { RxAsTxActiveMode, RxAsTxMode } from "./rx-as-tx";
 import type {
@@ -25,6 +32,14 @@ function validatedRxAsTxMode(value: unknown): RxAsTxMode {
   throw new FirmwareOptionsError(
     "rxAsTxMode",
     `rxAsTxMode must be one of off, ${RX_AS_TX_ACTIVE_MODES.join(", ")}`,
+  );
+}
+
+function validatedBuzzerMode(value: unknown): BuzzerMode {
+  if (BUZZER_MODES.includes(value as BuzzerMode)) return value as BuzzerMode;
+  throw new FirmwareOptionsError(
+    "buzzerMode",
+    `buzzerMode must be one of ${BUZZER_MODES.join(", ")}`,
   );
 }
 
@@ -134,7 +149,30 @@ export function validateFirmwareOptions(input: {
     // upstream features; deriving one from the other is the defect this
     // replaced.
     airportEnabled: options.airportEnabled === true,
+    buzzerMode: validatedBuzzerMode(options.buzzerMode),
+    buzzerMelody: boundedText("buzzerMelody", options.buzzerMelody, 1024, true),
   });
+
+  if (
+    validated.buzzerMode === "custom-tune" &&
+    evaluateBuzzerSupport(input.target).supported
+  ) {
+    // Only a Target that will carry the melody has it checked; the tune is
+    // parsed the way the firmware's own melodyparser.py reads it, and one the
+    // firmware could not hold is refused rather than silently truncated.
+    try {
+      parseBuzzerMelody(validated.buzzerMelody);
+    } catch (error: unknown) {
+      const reason =
+        error instanceof BuzzerMelodyError
+          ? `${error.code}: ${error.message}`
+          : "invalid";
+      throw new FirmwareOptionsError(
+        "buzzerMelody",
+        `BUZZER_MELODY_INVALID (${reason})`,
+      );
+    }
+  }
 
   if (validated.airportEnabled) {
     // The pinned official web flasher's STM32 configuration writes no AirPort

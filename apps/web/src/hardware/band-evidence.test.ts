@@ -39,6 +39,7 @@ function target(radioKey: string): OfficialTarget {
       luaName: null,
       layoutFile: null,
       logoFile: null,
+      priorTargetName: null,
       uploadMethods: ["uart", "download"],
       minVersion: null,
       customLayout: {},

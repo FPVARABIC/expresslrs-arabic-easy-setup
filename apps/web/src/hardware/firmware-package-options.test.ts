@@ -23,6 +23,7 @@ const target: OfficialTarget = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "download"],
     minVersion: "3.0.0",
     customLayout: {},
@@ -48,6 +49,8 @@ const validOptions = {
   r9mmMiniSbus: false,
   rxAsTxMode: "off",
   airportEnabled: false,
+  buzzerMode: "default-tune",
+  buzzerMelody: "",
 } as const;
 
 function stm32Target(raw: Readonly<Record<string, unknown>>): OfficialTarget {
@@ -87,6 +90,8 @@ describe("firmware package option gate", () => {
           r9mmMiniSbus: false,
           rxAsTxMode: "off",
           airportEnabled: false,
+          buzzerMode: "default-tune",
+          buzzerMelody: "",
         },
         fetchImplementation: fetchImplementation as unknown as typeof fetch,
       }),
@@ -123,6 +128,8 @@ describe("firmware package option gate", () => {
           r9mmMiniSbus: false,
           rxAsTxMode: "internal",
           airportEnabled: false,
+          buzzerMode: "default-tune",
+          buzzerMelody: "",
         },
         fetchImplementation: fetchImplementation as unknown as typeof fetch,
       }),

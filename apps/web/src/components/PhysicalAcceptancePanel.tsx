@@ -66,6 +66,7 @@ const REPORTED_OPERATIONS: readonly ReportedOperation[] = Object.freeze([
   "recovery",
   "rxAsTx",
   "airport",
+  "buzzer",
 ]);
 
 const MAX_IMPORT_FILE_BYTES = 1_000_000;

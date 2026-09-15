@@ -13,6 +13,7 @@ import { recoveryArchiveFor } from "../test/recovery-fixtures";
 
 import { CrsfAddress, type CrsfParameter } from "../hardware/crsf";
 import type {
+  OfficialTarget,
   OfficialCatalog,
   PreparedFirmwarePackage,
 } from "../hardware/parity-types";
@@ -94,6 +95,7 @@ const catalog: OfficialCatalog = {
         luaName: "vendor.lua",
         layoutFile: null,
         logoFile: null,
+        priorTargetName: null,
         uploadMethods: ["uart", "edgetx", "wifi", "download"],
         minVersion: null,
         customLayout: {},
@@ -115,6 +117,7 @@ const catalog: OfficialCatalog = {
         luaName: null,
         layoutFile: null,
         logoFile: null,
+        priorTargetName: null,
         uploadMethods: ["betaflight", "stlink", "download"],
         minVersion: null,
         customLayout: {},
@@ -144,6 +147,7 @@ const espReceiver = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "betaflight", "download"] as const,
     minVersion: null,
     customLayout: {},
@@ -171,6 +175,7 @@ const esp8285Receiver = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "betaflight", "download"] as const,
     minVersion: null,
     customLayout: {},
@@ -197,6 +202,7 @@ const esp900Receiver = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "betaflight", "download"] as const,
     minVersion: null,
     customLayout: {},
@@ -218,6 +224,7 @@ const transportCatalog: OfficialCatalog = {
           "betaflight",
           "passthru",
           "stlink",
+          "dfu",
           "wifi",
           "download",
         ],
@@ -249,6 +256,7 @@ const preparedPackage: PreparedFirmwarePackage = {
     wifiConfigured: false,
     rxAsTxMode: "off" as const,
     airportEnabled: false,
+    buzzerMode: null,
   },
   segments: [
     {
@@ -707,7 +715,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
     expect(build).toBeEnabled();
   });
 
-  it("exposes internal STM32 DFU only when the official Target supports it", async () => {
+  it("offers the ST-Link probe route the official Target advertises, and not the ROM DFU route it does not", async () => {
     const user = userEvent.setup();
     render(<ExpressLrsParityWorkbench />);
     await user.click(
@@ -720,9 +728,93 @@ describe("rebuilt ExpressLRS hardware journey", () => {
         screen.getByRole("option", { name: "Vendor RX" }),
       ).toBeInTheDocument(),
     );
+    // The catalog says `stlink`, which is a debug probe on SWD — not DFU.
     expect(
-      screen.getByRole("option", { name: "STM32 DFU" }),
+      screen.getByRole("option", { name: "مسبار ST-Link (SWD)" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", {
+        name: "STM32 DFU (محمّل الإقلاع عبر USB)",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the buzzer options only for an STM32 transmitter that lists the feature, and hands the tune to the package", async () => {
+    const user = userEvent.setup();
+    const buzzerTx: OfficialTarget = {
+      ...catalog.targets[0]!,
+      id: "vendor/tx_900/r9m",
+      radioKey: "tx_900",
+      targetKey: "r9m",
+      config: {
+        ...catalog.targets[0]!.config,
+        productName: "FrSky R9M",
+        platform: "stm32",
+        firmware: "Frsky_TX_R9M",
+        luaName: null,
+        uploadMethods: ["stlink", "download"],
+        raw: {
+          stlink: { cpus: ["STM32F103C8T6"], offset: "0x4000" },
+          features: ["buzzer", "fan"],
+        },
+      },
+    };
+    mocks.loadCatalog.mockResolvedValueOnce({
+      ...catalog,
+      targets: [catalog.targets[0]!, buzzerTx, catalog.targets[1]!],
+    });
+    render(<ExpressLrsParityWorkbench />);
+    // Closed before any Target is chosen: the buzzer belongs to a Target.
+    expect(screen.getByTestId("buzzer-mode")).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: "تحميل الكتالوج الرسمي" }),
+    );
+    await screen.findByRole("option", { name: "Vendor TX Module" });
+
+    // The ESP transmitter: closed, with the reason beside it.
+    await user.selectOptions(
+      screen.getByLabelText("Target"),
+      catalog.targets[0]!.id,
+    );
+    expect(screen.getByTestId("buzzer-mode")).toBeDisabled();
+    expect(
+      screen.getByText(/يرمّز لحن الصفّارة لأجهزة إرسال STM32 فقط/u),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText("النطاق / العائلة"),
+      buzzerTx.radioKey,
+    );
+    await screen.findByRole("option", { name: "FrSky R9M" });
+    await user.selectOptions(screen.getByLabelText("Target"), buzzerTx.id);
+    expect(screen.getByTestId("buzzer-mode")).toBeEnabled();
+    expect(
+      screen.queryByText(/يرمّز لحن الصفّارة لأجهزة إرسال STM32 فقط/u),
+    ).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByTestId("buzzer-mode"), "custom-tune");
+    await user.type(screen.getByTestId("buzzer-melody"), "A4 4|120|0");
+
+    const region = screen.getByLabelText(
+      "المنطقة التنظيمية",
+    ) as HTMLSelectElement;
+    const regionKey = [...region.options]
+      .map((option) => option.value)
+      .find((value) => value.length > 0);
+    expect(regionKey).toBeDefined();
+    await user.selectOptions(region, regionKey ?? "");
+    await user.click(
+      screen.getByRole("button", { name: "بناء Firmware الرسمي" }),
+    );
+    await waitFor(() => expect(mocks.preparePackage).toHaveBeenCalledTimes(1));
+    expect(mocks.preparePackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: expect.objectContaining({ id: buzzerTx.id }),
+        options: expect.objectContaining({
+          buzzerMode: "custom-tune",
+          buzzerMelody: "A4 4|120|0",
+        }),
+      }),
+    );
   });
 
   it("resets the regulatory choice when the role changes", async () => {
@@ -1213,6 +1305,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       "betaflight",
       "passthru",
       "stlink",
+      "dfu",
     ] as const) {
       await user.selectOptions(
         screen.getByLabelText("طريقة التحديث"),
@@ -1230,7 +1323,7 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       await user.type(confirmation, "wrong-target");
       expect(
         screen.getByRole("button", {
-          name: /بدء التفليش الحقيقي|بدء STM32 DFU/u,
+          name: /بدء التفليش الحقيقي|بدء STM32 DFU|بدء الكتابة عبر ST-Link/u,
         }),
       ).toBeDisabled();
 
@@ -1238,11 +1331,11 @@ describe("rebuilt ExpressLRS hardware journey", () => {
       await user.type(confirmation, "module");
       expect(
         screen.getByRole("button", {
-          name: /بدء التفليش الحقيقي|بدء STM32 DFU/u,
+          name: /بدء التفليش الحقيقي|بدء STM32 DFU|بدء الكتابة عبر ST-Link/u,
         }),
       ).toBeEnabled();
     }
-  });
+  }, 20_000);
 
   // --- bootloader entry per serial path, as the pinned official flasher does it
 

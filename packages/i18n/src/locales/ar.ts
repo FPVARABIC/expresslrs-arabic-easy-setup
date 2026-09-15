@@ -61,7 +61,7 @@ export const ar = {
   "transport.NO_SERIAL_TRANSPORT":
     "هذا المتصفح لا يعرض واجهة Web Serial ولا جسرًا أصليًا، فلا يمكن فتح منفذ جهاز هنا. استخدم Chrome أو Edge أو Opera على حاسوب مكتبي، أو تطبيقًا مضيفًا يوفّر الجسر.",
   "transport.USB_ONLY":
-    "هذا المتصفح يعرض WebUSB دون Web Serial، فلا يمكن تنفيذ تعريف CRSF ولا التفليش التسلسلي هنا. يمكن الوصول فقط إلى جهاز STM32 DFU عبر USB.",
+    "هذا المتصفح يعرض WebUSB دون Web Serial، فلا يمكن تنفيذ تعريف CRSF ولا التفليش التسلسلي هنا. يمكن الوصول فقط إلى جهاز STM32 DFU أو مسبار ST-Link عبر USB.",
   "transport.detected":
     "المرصود: Web Serial {webSerial}، WebUSB {webUsb}، الجسر الأصلي {bridge}، السياق الآمن {secure}.",
   "build.stage": "نسخة تجريبية للتحقق على العتاد",

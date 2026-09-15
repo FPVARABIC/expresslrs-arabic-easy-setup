@@ -640,7 +640,7 @@ export async function flashStm32DfuFirmware(input: {
       "Selected Target is not an STM32 device",
     );
   }
-  if (!input.target.config.uploadMethods.includes("stlink")) {
+  if (!input.target.config.uploadMethods.includes("dfu")) {
     throw new Stm32DfuError(
       "DEVICE_INVALID",
       "Selected Target does not advertise the STM32 DFU route",

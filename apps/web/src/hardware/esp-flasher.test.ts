@@ -73,6 +73,7 @@ const target: OfficialTarget = {
     luaName: "ESP32 Module",
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "download"],
     minVersion: null,
     customLayout: {},

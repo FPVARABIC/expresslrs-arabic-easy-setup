@@ -3,6 +3,7 @@ import { copyToArrayBuffer } from "./byte-utils";
 
 import { expressLrsBindingUid, md5Bytes } from "./bind-phrase";
 import { validateFirmwareOptions } from "./firmware-options";
+import { encodeBuzzerOptions, evaluateBuzzerSupport } from "./buzzer-melody";
 import {
   assertPackMatchesRelease,
   targetPackLayout,
@@ -889,6 +890,18 @@ function configuredStm32Application(input: {
       { mask: 1 << 0, enabled: input.options.uartInverted },
       { mask: 1 << 1, enabled: input.options.unlockHigherPower },
     ]);
+    // `#patch_buzzer`: the mode byte and 32 tones follow the flags on a
+    // transmitter whose catalog entry lists the buzzer feature, and nothing is
+    // written there for one that does not (the firmware struct has no field).
+    if (evaluateBuzzerSupport(input.target).supported) {
+      const buzzer = encodeBuzzerOptions(
+        input.options.buzzerMode,
+        input.options.buzzerMelody,
+      );
+      requireSpace(buzzer.byteLength);
+      configured.set(buzzer, offset);
+      offset += buzzer.byteLength;
+    }
   } else {
     writeU32(input.options.receiverUartBaud);
     writePackedFlags([
@@ -1283,6 +1296,9 @@ export async function prepareOfficialFirmwarePackage(input: {
       // actually built for, not whatever the form happens to show later.
       rxAsTxMode: validatedOptions.rxAsTxMode,
       airportEnabled: validatedOptions.airportEnabled,
+      buzzerMode: evaluateBuzzerSupport(input.target).supported
+        ? validatedOptions.buzzerMode
+        : null,
     }),
     segments,
     primaryFileName,

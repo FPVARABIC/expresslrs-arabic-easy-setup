@@ -67,7 +67,7 @@ export const en = {
   "transport.NO_SERIAL_TRANSPORT":
     "This browser exposes neither the Web Serial API nor a native bridge, so no device port can be opened here. Use a desktop Chrome, Edge or Opera, or a host application that provides the bridge.",
   "transport.USB_ONLY":
-    "This browser exposes WebUSB but not Web Serial, so CRSF identification and serial flashing cannot run here. Only an STM32 DFU device could be reached over USB.",
+    "This browser exposes WebUSB but not Web Serial, so CRSF identification and serial flashing cannot run here. Only an STM32 DFU device or an ST-Link probe could be reached over USB.",
   "transport.detected":
     "Detected: Web Serial {webSerial}, WebUSB {webUsb}, native bridge {bridge}, secure context {secure}.",
   "build.stage": "Hardware validation beta",

@@ -154,11 +154,35 @@ const espTransmitter: OfficialTarget = {
     luaName: "vendor.lua",
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "wifi", "download"],
     minVersion: null,
     customLayout: {},
     overlay: null,
     raw: {},
+  },
+};
+
+/**
+ * An STM32 transmitter whose catalog entry lists the buzzer feature: the one
+ * shape of Target the firmware's configurator writes buzzer options for.
+ */
+const stm32BuzzerTransmitter: OfficialTarget = {
+  ...espTransmitter,
+  id: "vendor/tx_900/stm32-buzzer",
+  radioKey: "tx_900",
+  targetKey: "stm32-buzzer",
+  config: {
+    ...espTransmitter.config,
+    productName: "Vendor STM32 TX with buzzer",
+    platform: "stm32",
+    firmware: "VENDOR_STM32_TX",
+    luaName: null,
+    uploadMethods: ["stlink", "download"],
+    raw: {
+      stlink: { cpus: ["STM32F103C8T6"], offset: "0x4000" },
+      features: ["buzzer", "fan"],
+    },
   },
 };
 
@@ -176,6 +200,7 @@ const espReceiver: OfficialTarget = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "download"],
     minVersion: null,
     customLayout: {},
@@ -207,7 +232,12 @@ const catalog: OfficialCatalog = {
   source: "EXPRESSLRS_WEB_FLASHER_MIRROR",
   loadedAt: "2026-09-09T00:00:00.000Z",
   releases: [{ label: "4.1.0", revision: "release410", channel: "release" }],
-  targets: [espTransmitter, espReceiver, unpackedReceiver],
+  targets: [
+    espTransmitter,
+    stm32BuzzerTransmitter,
+    espReceiver,
+    unpackedReceiver,
+  ],
 };
 
 const preparedPackage: PreparedFirmwarePackage = {
@@ -221,6 +251,7 @@ const preparedPackage: PreparedFirmwarePackage = {
     wifiConfigured: false,
     rxAsTxMode: "off",
     airportEnabled: false,
+    buzzerMode: null,
   },
   segments: [
     {
@@ -1183,6 +1214,65 @@ describe("runtime availability, from the production entry point", () => {
       recoveryCheckpoint: "as for any firmware write",
       verification:
         "the package's option block is asserted, not the device role",
+      onFailure: "as for any firmware write",
+    });
+  });
+
+  it("buzzer: offered for an STM32 transmitter with a buzzer, closed with the reason for every other Target", async () => {
+    mountAdvanced();
+    const before = screen.queryByTestId(
+      "buzzer-mode",
+    ) as HTMLSelectElement | null;
+    const disabledBefore = before === null || before.disabled;
+
+    await loadCatalogAndChooseTarget("tx");
+    // An ESP transmitter has no buzzer field in its options: closed, and the
+    // reason is written beside the control rather than the control hidden.
+    const onEsp = screen.getByTestId("buzzer-mode") as HTMLSelectElement;
+    expect(onEsp.disabled).toBe(true);
+    expect(
+      document
+        .querySelector("[data-buzzer-reason]")
+        ?.getAttribute("data-buzzer-reason"),
+    ).toBe("PLATFORM_HAS_NO_BUZZER_OPTION");
+
+    fireEvent.change(screen.getByLabelText("Band / family"), {
+      target: { value: stm32BuzzerTransmitter.radioKey },
+    });
+    await settle(2);
+    fireEvent.change(targetSelect(), {
+      target: { value: stm32BuzzerTransmitter.id },
+    });
+    await settle(4);
+    expect(targetSelect().value).toBe(stm32BuzzerTransmitter.id);
+    const control = screen.getByTestId("buzzer-mode") as HTMLSelectElement;
+    expect(control.disabled).toBe(false);
+    expect(document.querySelector("[data-buzzer-reason]")).toBeNull();
+    fireEvent.change(control, { target: { value: "custom-tune" } });
+    await settle(2);
+    expect(control.value).toBe("custom-tune");
+    expect(screen.getByTestId("buzzer-melody")).toBeInTheDocument();
+
+    record({
+      operation: "buzzer",
+      surface: "advanced",
+      transport: "browser",
+      control: "Buzzer at power-on (select) and its custom tune (text)",
+      readinessInputs: [
+        "a Target chosen",
+        "an STM32 transmitter whose catalog entry lists the buzzer feature; any other Target closes the control with that reason written beside it",
+      ],
+      disabledBefore,
+      enabledAfter: !control.disabled,
+      handler:
+        "useDeviceController.updateOption('buzzerMode' | 'buzzerMelody')",
+      driver:
+        "firmware-package: writes buzzer_mode and the 32 tones after the transmitter flags, as the firmware's patch_buzzer does",
+      writeAuthority:
+        "inherited from firmwareWrite; this only shapes the package",
+      recoveryCheckpoint: "as for any firmware write",
+      verification:
+        "the encoded bytes are asserted; the device's buzzer behaviour is not read back",
       onFailure: "as for any firmware write",
     });
   });
