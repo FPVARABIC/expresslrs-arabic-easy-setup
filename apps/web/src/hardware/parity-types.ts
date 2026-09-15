@@ -1,3 +1,6 @@
+import type { BuzzerMode } from "./buzzer-melody";
+import type { RxAsTxMode } from "./rx-as-tx";
+
 export type ExpressLrsDeviceRole = "tx" | "rx";
 
 export type ExpressLrsFlashMethod =
@@ -6,7 +9,10 @@ export type ExpressLrsFlashMethod =
   | "edgetx"
   | "passthru"
   | "wifi"
+  /** A debug probe on SWDIO/SWCLK: the route every STM32 Target advertises. */
   | "stlink"
+  /** The MCU's own USB ROM bootloader (DfuSe), which only one Target advertises. */
+  | "dfu"
   | "download";
 
 export interface OfficialRelease {
@@ -23,6 +29,12 @@ export interface OfficialTargetConfig {
   readonly luaName: string | null;
   readonly layoutFile: string | null;
   readonly logoFile: string | null;
+  /**
+   * Upstream `prior_target_name`: the name this Target went by before the
+   * catalog renamed it. The firmware's configurator accepts it when a
+   * device's Wi-Fi updater reports the old name; here it is a matching alias.
+   */
+  readonly priorTargetName: string | null;
   readonly uploadMethods: readonly ExpressLrsFlashMethod[];
   readonly minVersion: string | null;
   readonly customLayout: Readonly<Record<string, unknown>> | null;
@@ -62,7 +74,25 @@ export interface ExpressLrsFirmwareOptions {
   readonly receiverInvertTx: boolean;
   readonly lockOnFirstConnection: boolean;
   readonly r9mmMiniSbus: boolean;
-  readonly receiverAsTransmitter: boolean;
+  /**
+   * Upstream `--rx-as-tx`: flash TX firmware onto receiver hardware so the
+   * device changes role. Independent of {@link airportEnabled}.
+   */
+  readonly rxAsTxMode: RxAsTxMode;
+  /**
+   * Upstream `--airport-baud`: set `is-airport` so the device acts as a
+   * transparent serial bridge. This never changes the RX/TX role, and is
+   * deliberately not derived from {@link rxAsTxMode}.
+   */
+  readonly airportEnabled: boolean;
+  /**
+   * The STM32 transmitter buzzer (`buzzer_mode` and `buzzer_melody` in the
+   * firmware's options struct). Encoded only for Targets that have one; the
+   * official flasher's default is the default tune.
+   */
+  readonly buzzerMode: BuzzerMode;
+  /** The `notes|bpm|transpose` or RTTTL text used when {@link buzzerMode} is `custom-tune`. */
+  readonly buzzerMelody: string;
 }
 
 export interface FirmwareSegment {
@@ -81,6 +111,10 @@ export interface PreparedFirmwarePackage {
     readonly domain: number;
     readonly bindingConfigured: boolean;
     readonly wifiConfigured: boolean;
+    readonly rxAsTxMode: RxAsTxMode;
+    readonly airportEnabled: boolean;
+    /** The buzzer choice compiled in, or null when the Target has no buzzer. */
+    readonly buzzerMode: BuzzerMode | null;
   }>;
   readonly segments: readonly FirmwareSegment[];
   readonly primaryFileName: string;
@@ -121,7 +155,14 @@ export interface FirmwareFlashProgress {
     | "COMPLETE";
   readonly writtenBytes: number;
   readonly totalBytes: number;
+  /** Free technical text from a flasher; already English. */
   readonly detail: string;
+  /**
+   * A catalog key for the step this application itself reports, so the
+   * post-write sequence reads in the operator's language rather than in the
+   * one the controller happened to be written in.
+   */
+  readonly detailKey?: string;
 }
 
 export type FirmwareFlashProgressListener = (

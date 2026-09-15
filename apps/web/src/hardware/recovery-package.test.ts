@@ -22,6 +22,7 @@ const target: OfficialTarget = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "wifi", "download"],
     minVersion: null,
     customLayout: {},

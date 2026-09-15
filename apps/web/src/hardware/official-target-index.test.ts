@@ -52,13 +52,13 @@ describe("official Target parser", () => {
         radioKey: "rx_900",
         targetKey: "receiver",
         config: expect.objectContaining({
-          uploadMethods: ["stlink", "download"],
+          uploadMethods: ["dfu", "download"],
         }),
       }),
     );
   });
 
-  it("does not authorize STM32 DFU for an upstream ST-Link-only Target", () => {
+  it("keeps the catalog's ST-Link and ROM-DFU routes distinct, each under its own name", () => {
     const targets = parseOfficialTargetsFlexible({
       vendor: {
         tx_900: {
@@ -81,11 +81,11 @@ describe("official Target parser", () => {
     expect(
       targets.find((target) => target.targetKey === "probe_only")?.config
         .uploadMethods,
-    ).toEqual(["download"]);
+    ).toEqual(["stlink", "download"]);
     expect(
       targets.find((target) => target.targetKey === "rom_dfu")?.config
         .uploadMethods,
-    ).toEqual(["stlink", "download"]);
+    ).toEqual(["dfu", "stlink", "download"]);
   });
 
   it("rejects traversal-like identifiers and artifact paths", () => {
@@ -191,5 +191,40 @@ describe("flexible official Target hierarchy", () => {
         },
       }),
     ).toThrow(/no bounded TX\/RX definitions/iu);
+  });
+
+  it("keeps the catalog's prior_target_name as a sanitized alias", () => {
+    const targets = parseOfficialTargetsFlexible({
+      vendor: {
+        rx_2400: {
+          renamed: {
+            product_name: "Renamed RX",
+            platform: "esp8285",
+            firmware: "Unified_ESP8285_2400_RX",
+            prior_target_name: "VENDOR_2400_RX",
+            upload_methods: ["uart"],
+          },
+          odd: {
+            product_name: "Odd RX",
+            platform: "esp8285",
+            firmware: "Unified_ESP8285_2400_RX",
+            prior_target_name: "../not a name",
+            upload_methods: ["uart"],
+          },
+          none: {
+            product_name: "Plain RX",
+            platform: "esp8285",
+            firmware: "Unified_ESP8285_2400_RX",
+            upload_methods: ["uart"],
+          },
+        },
+      },
+    });
+    const byKey = (key: string) =>
+      targets.find((target) => target.targetKey === key)?.config
+        .priorTargetName;
+    expect(byKey("renamed")).toBe("VENDOR_2400_RX");
+    expect(byKey("odd")).toBeNull();
+    expect(byKey("none")).toBeNull();
   });
 });

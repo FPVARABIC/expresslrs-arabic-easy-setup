@@ -32,19 +32,22 @@ const runLive =
       Array.isArray(target.config.raw.upload_methods)
         ? target.config.raw.upload_methods
         : [];
+    // Each upstream route keeps its own name: the debug probe is `stlink`,
+    // the ROM bootloader is `dfu`, and neither stands in for the other.
     expect(
       catalog.targets.every(
         (target) =>
-          !target.config.uploadMethods.includes("stlink") ||
-          upstreamMethods(target).includes("dfu"),
+          target.config.uploadMethods.includes("stlink") ===
+            upstreamMethods(target).includes("stlink") &&
+          target.config.uploadMethods.includes("dfu") ===
+            upstreamMethods(target).includes("dfu"),
       ),
     ).toBe(true);
     expect(
       catalog.targets.some(
         (target) =>
-          upstreamMethods(target).includes("stlink") &&
-          !upstreamMethods(target).includes("dfu") &&
-          !target.config.uploadMethods.includes("stlink"),
+          target.config.platform === "stm32" &&
+          target.config.uploadMethods.includes("stlink"),
       ),
     ).toBe(true);
   }, 120_000);

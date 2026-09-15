@@ -23,7 +23,8 @@ const target: OfficialTarget = {
     luaName: null,
     layoutFile: null,
     logoFile: null,
-    uploadMethods: ["stlink", "download"],
+    priorTargetName: null,
+    uploadMethods: ["dfu", "download"],
     minVersion: null,
     customLayout: {},
     overlay: null,
@@ -203,6 +204,7 @@ describe("STM32 WebUSB DFU", () => {
       bytesWritten: firmware.byteLength,
       baseAddress: 0x0800_4000,
       cleanupVerified: true,
+      verification: "DFU_UPLOAD_READ_BACK_MATCHED",
     });
     expect(hardware.erasedPages).toEqual([0x0800_4000]);
     expect(hardware.memory.slice(0x4000, 0x4000 + firmware.byteLength)).toEqual(

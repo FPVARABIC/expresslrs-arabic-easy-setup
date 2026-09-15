@@ -19,6 +19,8 @@ interface MockWriteFlashOptions {
 const mocks = vi.hoisted(() => ({
   transportConstructor: vi.fn<(port: unknown, tracing?: boolean) => void>(),
   loaderConstructor: vi.fn<(options: unknown) => void>(),
+  /** Every loader constructed, so the fields the flasher sets on it can be read back. */
+  loaderInstances: [] as Record<string, unknown>[],
   disconnect: vi.fn<() => Promise<void>>(),
   main: vi.fn<(resetMode?: string) => Promise<string>>(),
   writeFlash: vi.fn<(options: MockWriteFlashOptions) => Promise<void>>(),
@@ -38,6 +40,7 @@ vi.mock("esptool-js", () => ({
   ESPLoader: class {
     public constructor(options: unknown) {
       mocks.loaderConstructor(options);
+      mocks.loaderInstances.push(this as unknown as Record<string, unknown>);
     }
 
     public main(resetMode?: string): Promise<string> {
@@ -54,7 +57,7 @@ vi.mock("esptool-js", () => ({
   },
 }));
 
-import { flashEspFirmware } from "./esp-flasher";
+import { espSerialProfile, flashEspFirmware } from "./esp-flasher";
 
 const target: OfficialTarget = {
   id: "vendor/tx_2400/esp32-module",
@@ -70,6 +73,7 @@ const target: OfficialTarget = {
     luaName: "ESP32 Module",
     layoutFile: null,
     logoFile: null,
+    priorTargetName: null,
     uploadMethods: ["uart", "download"],
     minVersion: null,
     customLayout: {},
@@ -110,6 +114,7 @@ function flash(
 describe("Espressif firmware flashing", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mocks.loaderInstances.length = 0;
     mocks.transportConstructor.mockImplementation(() => undefined);
     mocks.loaderConstructor.mockImplementation(() => undefined);
     mocks.disconnect.mockResolvedValue(undefined);
@@ -259,6 +264,7 @@ describe("Espressif firmware flashing", () => {
       chipName: "ESP32",
       bytesWritten: 3,
       cleanupVerified: false,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
   });
 
@@ -357,6 +363,7 @@ describe("Espressif firmware flashing", () => {
       chipName: "ESP32",
       bytesWritten: 5,
       cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
     });
     expect(mocks.writeFlash).toHaveBeenCalledTimes(1);
     expect(mocks.writeFlash.mock.calls[0]?.[0].fileArray).toEqual([
@@ -380,5 +387,152 @@ describe("Espressif firmware flashing", () => {
     ).toEqual([0, 1, 2, 5]);
     expect(progress.every((update) => update.writtenBytes <= 5)).toBe(true);
     expect(mocks.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // The rates and block sizes below are the pinned official flasher's
+  // (web-flasher espflasher.js connect() and flash()). They are asserted one
+  // by one because each wrong value has a distinct failure on a bench: a ROM
+  // rate change through a flight controller goes silent after the stub
+  // upload, and a 0x4000 flash block through a passthrough overruns it.
+  describe("serial profile per path", () => {
+    it.each([
+      [
+        "betaflight",
+        "esp8285",
+        {
+          baudRate: 420_000,
+          romBaudRate: 420_000,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: 0x800,
+        },
+      ],
+      [
+        "betaflight",
+        "esp32",
+        {
+          baudRate: 420_000,
+          romBaudRate: 420_000,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: 0x800,
+        },
+      ],
+      [
+        "edgetx",
+        "esp32",
+        {
+          baudRate: 230_400,
+          romBaudRate: 230_400,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: 0x800,
+        },
+      ],
+      [
+        "passthru",
+        "esp32",
+        {
+          baudRate: 230_400,
+          romBaudRate: 230_400,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: null,
+        },
+      ],
+      [
+        "uart",
+        "esp32",
+        {
+          baudRate: 460_800,
+          romBaudRate: 115_200,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: null,
+        },
+      ],
+      [
+        "uart",
+        "esp32-c3",
+        {
+          baudRate: 460_800,
+          romBaudRate: 115_200,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: null,
+        },
+      ],
+      [
+        "uart",
+        "esp8285",
+        {
+          baudRate: 460_800,
+          romBaudRate: 460_800,
+          ramBlockBytes: 0x800,
+          flashBlockBytes: null,
+        },
+      ],
+    ] as const)("%s on %s", (path, platform, expected) => {
+      expect(espSerialProfile({ path, platform })).toEqual(expected);
+    });
+
+    it("speaks to the ROM at the passthrough rate and shrinks both blocks behind a flight controller", async () => {
+      await flash({ path: "betaflight", resetMode: "no_reset" });
+
+      expect(mocks.loaderConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ baudrate: 420_000, romBaudrate: 420_000 }),
+      );
+      const loader = mocks.loaderInstances[0]!;
+      expect(loader.romBaudrate).toBe(420_000);
+      expect(loader.ESP_RAM_BLOCK).toBe(0x800);
+      expect(loader.FLASH_WRITE_SIZE).toBe(0x800);
+      expect(mocks.main).toHaveBeenCalledWith("no_reset");
+    });
+
+    it("starts an ESP32 on a direct adapter at 115200 and leaves the flash block alone", async () => {
+      await flash({ path: "uart" });
+
+      expect(mocks.loaderConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ baudrate: 460_800, romBaudrate: 115_200 }),
+      );
+      const loader = mocks.loaderInstances[0]!;
+      expect(loader.romBaudrate).toBe(115_200);
+      expect(loader.ESP_RAM_BLOCK).toBe(0x800);
+      expect(loader.FLASH_WRITE_SIZE).toBeUndefined();
+    });
+
+    it("never asks an ESP8285 receiver on a direct adapter to change rate", async () => {
+      mocks.main.mockResolvedValueOnce("ESP8266");
+      await flash({
+        path: "uart",
+        target: {
+          ...target,
+          config: { ...target.config, platform: "esp8285" },
+        },
+      });
+
+      expect(mocks.loaderConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ baudrate: 460_800, romBaudrate: 460_800 }),
+      );
+    });
+
+    it("uses the EdgeTX module-bay rate", async () => {
+      await flash({ path: "edgetx", resetMode: "no_reset" });
+
+      expect(mocks.loaderConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ baudrate: 230_400, romBaudrate: 230_400 }),
+      );
+      expect(mocks.loaderInstances[0]!.FLASH_WRITE_SIZE).toBe(0x800);
+    });
+
+    it("applies an explicit rate to the ROM as well, so no change is ever requested", async () => {
+      await flash({ path: "betaflight", baudRate: 115_200 });
+
+      expect(mocks.loaderConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ baudrate: 115_200, romBaudrate: 115_200 }),
+      );
+    });
+
+    it("defaults to the direct-adapter profile when no path is named", async () => {
+      await flash();
+
+      expect(mocks.loaderConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ baudrate: 460_800, romBaudrate: 115_200 }),
+      );
+    });
   });
 });

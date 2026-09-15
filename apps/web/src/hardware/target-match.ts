@@ -63,9 +63,15 @@ export function matchHardwareIdentityToOfficialTargets(input: {
       score += 90;
       evidence.push("target-key-exact");
     }
+    const priorName = normalized(target.config.priorTargetName ?? "");
     if (product === firmware && product.length > 0) {
       score += 95;
       evidence.push("firmware-key-exact");
+    } else if (priorName.length > 0 && product === priorName) {
+      // The catalog's own statement that this Target used to be called that:
+      // a device still reporting the old name is this Target.
+      score += 95;
+      evidence.push("prior-target-name-exact");
     } else if (product.includes(firmware) || firmware.includes(product)) {
       if (Math.min(product.length, firmware.length) >= 8) {
         score += 70;
@@ -73,7 +79,7 @@ export function matchHardwareIdentityToOfficialTargets(input: {
       }
     }
     const officialTokens = tokenSet(
-      `${target.config.productName} ${target.targetKey} ${target.config.firmware}`,
+      `${target.config.productName} ${target.targetKey} ${target.config.firmware} ${target.config.priorTargetName ?? ""}`,
     );
     const shared = overlap(productTokens, officialTokens);
     if (shared >= 2) {
@@ -102,9 +108,12 @@ export function matchHardwareIdentityToOfficialTargets(input: {
   }
   const exactCandidates = candidates.filter((candidate) =>
     candidate.evidence.some((item) =>
-      ["product-name-exact", "target-key-exact", "firmware-key-exact"].includes(
-        item,
-      ),
+      [
+        "product-name-exact",
+        "target-key-exact",
+        "firmware-key-exact",
+        "prior-target-name-exact",
+      ].includes(item),
     ),
   );
   if (exactCandidates.length === 1 && exactCandidates[0] !== undefined) {

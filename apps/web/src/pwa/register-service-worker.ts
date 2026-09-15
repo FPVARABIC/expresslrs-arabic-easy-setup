@@ -9,6 +9,11 @@ export interface ServiceWorkerStatePort {
 export interface ServiceWorkerRegistrationView {
   readonly waiting: ServiceWorkerStatePort | null;
   readonly installing: ServiceWorkerStatePort | null;
+  /**
+   * The worker currently running the application, if any. A first install has
+   * none, which is what tells an install apart from an update.
+   */
+  readonly active: ServiceWorkerStatePort | null;
   addEventListener(type: "updatefound", listener: () => void): void;
 }
 
@@ -27,6 +32,8 @@ export interface RegisterSafeServiceWorkerInput {
   readonly secureContext?: boolean;
   readonly documentUrl?: string | null;
   readonly onWaiting?: () => void;
+  /** Whether a worker is already controlling this page. */
+  readonly isControlled?: () => boolean;
 }
 
 function adaptWorker(
@@ -55,10 +62,21 @@ function adaptRegistration(
     get installing() {
       return adaptWorker(registration.installing);
     },
+    get active() {
+      return adaptWorker(registration.active);
+    },
     addEventListener(type, listener) {
       registration.addEventListener(type, listener);
     },
   };
+}
+
+function browserIsControlled(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    "serviceWorker" in navigator &&
+    navigator.serviceWorker.controller !== null
+  );
 }
 
 function browserServiceWorker(): ServiceWorkerRegistrationPort | null {
@@ -84,6 +102,7 @@ function browserDocumentUrl(): string | null {
 function observeWaitingWorker(
   registration: ServiceWorkerRegistrationView,
   onWaiting: (() => void) | undefined,
+  isControlled: () => boolean,
 ): void {
   if (onWaiting === undefined) {
     return;
@@ -92,12 +111,20 @@ function observeWaitingWorker(
   let notified = false;
   const notifyIfWaiting = () => {
     let waiting = false;
+    let replacesRunningShell = false;
     try {
       waiting = registration.waiting !== null;
+      // A first install passes through `waiting` on its way to activating,
+      // with no active worker and no controlled page. Reporting that as an
+      // available update tells the operator their shell is out of date the
+      // very first time they open it, which is false. An update is only
+      // available when a waiting worker would replace one that is running.
+      replacesRunningShell =
+        (registration.active ?? null) !== null || isControlled();
     } catch {
       // A malformed platform view cannot create an update-ready claim.
     }
-    if (notified || !waiting) {
+    if (notified || !waiting || !replacesRunningShell) {
       return;
     }
     notified = true;
@@ -170,7 +197,11 @@ export async function registerSafeServiceWorker(
       scope: scopeUrl.pathname,
       updateViaCache: "none",
     });
-    observeWaitingWorker(registration, onWaiting);
+    observeWaitingWorker(
+      registration,
+      onWaiting,
+      input.isControlled ?? browserIsControlled,
+    );
     return "REGISTERED";
   } catch {
     return "FAILED";

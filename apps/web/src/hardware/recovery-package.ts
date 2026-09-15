@@ -1,4 +1,11 @@
-import { strFromU8, Unzip, UnzipInflate, unzipSync } from "fflate";
+import {
+  strFromU8,
+  strToU8,
+  Unzip,
+  UnzipInflate,
+  unzipSync,
+  zipSync,
+} from "fflate";
 
 import { copyToArrayBuffer } from "./byte-utils";
 import type { FirmwareSegment, OfficialTarget } from "./parity-types";
@@ -31,10 +38,47 @@ export interface RecoveryCheckpoint {
      * and matched afterwards. The checkpoint deliberately survives: a write
      * that completed is not evidence that the device came back.
      */
-    | "RECOVERY_INCOMPLETE";
+    | "RECOVERY_INCOMPLETE"
+    /**
+     * A firmware write finished and the device came back, but what came back
+     * could not be proven to be the device this write intended to produce —
+     * most importantly, a receiver flashed with transmitter firmware that did
+     * not return a transmitter role.
+     *
+     * This is a *verification* state, not a lock. Every operation stays
+     * available; what is withheld is the claim of success. The checkpoint
+     * survives so the original image can still be restored.
+     */
+    | "WRITE_COMPLETED_RECONNECT_UNVERIFIED";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly safeError: string | null;
+}
+
+/**
+ * What the durable copy records about where it came from.
+ *
+ * A recovery archive on its own says which Target and which release it can
+ * restore. That is not enough for a file found months later on a phone that has
+ * since been wiped: this says which *device* it was taken from, which frozen
+ * target pack produced its layout bytes, what was configured into it, and when.
+ * Absent on an archive that was never exported, so it is validated only when
+ * present rather than being required retroactively.
+ */
+export interface RecoveryProvenance {
+  readonly schemaVersion: 1;
+  readonly createdAt: string;
+  readonly device: {
+    readonly productName: string | null;
+    readonly role: string | null;
+    readonly firmwareVersion: string | null;
+  };
+  readonly layoutPack: {
+    readonly packVersion: number;
+    readonly targetsSha: string;
+    readonly targetsJsonSha256: string;
+  };
+  readonly configuration: Readonly<Record<string, string | number | boolean>>;
 }
 
 export interface ValidatedRecoveryPackage {
@@ -46,6 +90,8 @@ export interface ValidatedRecoveryPackage {
   readonly releaseRevision: string;
   readonly packageSha256: string;
   readonly segments: readonly FirmwareSegment[];
+  /** Null when the archive carries no `provenance.json`, or an invalid one. */
+  readonly provenance: RecoveryProvenance | null;
 }
 
 export class RecoveryPackageError extends Error {
@@ -94,7 +140,7 @@ function safeAddress(value: unknown): number | null {
 }
 
 interface RecoveryArchiveEntryMetadata {
-  readonly kind: "manifest" | "segment";
+  readonly kind: "manifest" | "provenance" | "segment";
   readonly originalSize: number;
   readonly compressedSize: number;
   readonly compression: 0 | 8;
@@ -106,6 +152,12 @@ function recoveryArchiveEntry(
 ): Pick<RecoveryArchiveEntryMetadata, "kind" | "maximumSize"> | null {
   if (name === "manifest.json") {
     return { kind: "manifest", maximumSize: MAX_RECOVERY_MANIFEST_BYTES };
+  }
+  // Written when the package is exported to durable storage, which is the
+  // first moment the device identity and the timestamps are known. Optional,
+  // so a package produced before this existed still restores.
+  if (name === "provenance.json") {
+    return { kind: "provenance", maximumSize: MAX_RECOVERY_MANIFEST_BYTES };
   }
   const match = /^segments\/([A-Za-z0-9_.-]{1,160})$/u.exec(name);
   if (match === null || match[1] === "." || match[1] === "..") return null;
@@ -405,7 +457,108 @@ export async function validateRecoveryPackage(input: {
     releaseRevision,
     packageSha256: await sha256Hex(input.bytes),
     segments: Object.freeze(segments),
+    provenance: readProvenance(entries.get("provenance.json")),
   });
+}
+
+function digest64(value: unknown): string | null {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)
+    ? value
+    : null;
+}
+
+/**
+ * Reads `provenance.json` when it is there and well formed, and null otherwise.
+ *
+ * A malformed provenance entry does not fail the package: the firmware and its
+ * hashes are what a restore needs, and refusing to restore a device because a
+ * descriptive sidecar is damaged would be the wrong trade in the one situation
+ * where this file matters. It is reported as absent rather than as fact.
+ */
+function readProvenance(
+  bytes: Uint8Array | undefined,
+): RecoveryProvenance | null {
+  if (bytes === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(strFromU8(bytes));
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed) || parsed.schemaVersion !== 1) return null;
+  const createdAt = safeString(parsed.createdAt, 64);
+  const device = isRecord(parsed.device) ? parsed.device : null;
+  const layoutPack = isRecord(parsed.layoutPack) ? parsed.layoutPack : null;
+  const configuration = isRecord(parsed.configuration)
+    ? parsed.configuration
+    : null;
+  if (
+    createdAt === null ||
+    device === null ||
+    layoutPack === null ||
+    configuration === null
+  ) {
+    return null;
+  }
+  const packVersion = layoutPack.packVersion;
+  const targetsSha = safeString(layoutPack.targetsSha, 64);
+  const targetsJsonSha256 = digest64(layoutPack.targetsJsonSha256);
+  if (
+    !Number.isSafeInteger(packVersion) ||
+    (packVersion as number) < 0 ||
+    targetsSha === null ||
+    targetsJsonSha256 === null
+  ) {
+    return null;
+  }
+  const flattened: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(configuration)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,40}$/u.test(key)) continue;
+    if (typeof value === "boolean") flattened[key] = value;
+    else if (typeof value === "number" && Number.isFinite(value)) {
+      flattened[key] = value;
+    } else {
+      const text = safeString(value, 120);
+      if (text !== null) flattened[key] = text;
+    }
+  }
+  return Object.freeze({
+    schemaVersion: 1,
+    createdAt,
+    device: Object.freeze({
+      productName: safeString(device.productName),
+      role: safeString(device.role, 16),
+      firmwareVersion: safeString(device.firmwareVersion, 64),
+    }),
+    layoutPack: Object.freeze({
+      packVersion: packVersion as number,
+      targetsSha,
+      targetsJsonSha256,
+    }),
+    configuration: Object.freeze(flattened),
+  });
+}
+
+/**
+ * Returns the archive with a `provenance.json` entry added.
+ *
+ * Called at export time rather than at build time because the device identity
+ * and the moment of saving are only known then. The archive is this build's own
+ * output, seconds old, so unpacking and repacking it is safe and costs a
+ * fraction of the write that follows.
+ */
+export function attachRecoveryProvenance(
+  archive: Uint8Array,
+  provenance: RecoveryProvenance,
+): Uint8Array {
+  const entries = unzipSync(archive);
+  const rebuilt: Record<string, Uint8Array> = {};
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (name === "provenance.json") continue;
+    rebuilt[name] = bytes;
+  }
+  rebuilt["provenance.json"] = strToU8(JSON.stringify(provenance, null, 2));
+  return zipSync(rebuilt, { level: 6 });
 }
 
 function indexedDb(): IDBFactory {
@@ -536,6 +689,7 @@ export async function loadRecoveryCheckpoint(): Promise<RecoveryCheckpoint | nul
     "RECONNECTING",
     "RECOVERY_REQUIRED",
     "RECOVERY_INCOMPLETE",
+    "WRITE_COMPLETED_RECONNECT_UNVERIFIED",
   ]);
   const createdAt = safeString(value.createdAt);
   const updatedAt = safeString(value.updatedAt);

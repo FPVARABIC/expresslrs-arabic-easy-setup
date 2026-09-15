@@ -1,6 +1,10 @@
 import type { MessageKey } from "./en";
+import { acceptanceAr } from "./acceptance-ar";
+import { workbenchAr } from "./workbench-ar";
 
 export const ar = {
+  ...workbenchAr,
+  ...acceptanceAr,
   "app.name": "إعداد ExpressLRS بسهولة",
   "app.independent":
     "متوافق مع ExpressLRS — مشروع مجتمعي مستقل، غير تابع أو معتمد من ExpressLRS LLC",
@@ -10,7 +14,8 @@ export const ar = {
   "language.switch": "تغيير اللغة",
   "mode.easy": "الوضع السهل",
   "mode.advanced": "الوضع المتقدم",
-  "mode.advancedHint": "المحاكاة وقراءة الجهاز والتفاصيل التقنية",
+  "mode.advancedHint":
+    "قراءة الجهاز وتجهيز Firmware والاستعادة والتفاصيل التقنية",
   "real.progress.heading": "مراحل القراءة",
   "real.progress.preparing": "نجهّز طلبًا للقراءة فقط",
   "real.progress.discovering": "نحاول الوصول إلى عنوان الجهاز المختار",
@@ -56,7 +61,7 @@ export const ar = {
   "transport.NO_SERIAL_TRANSPORT":
     "هذا المتصفح لا يعرض واجهة Web Serial ولا جسرًا أصليًا، فلا يمكن فتح منفذ جهاز هنا. استخدم Chrome أو Edge أو Opera على حاسوب مكتبي، أو تطبيقًا مضيفًا يوفّر الجسر.",
   "transport.USB_ONLY":
-    "هذا المتصفح يعرض WebUSB دون Web Serial، فلا يمكن تنفيذ تعريف CRSF ولا التفليش التسلسلي هنا. يمكن الوصول فقط إلى جهاز STM32 DFU عبر USB.",
+    "هذا المتصفح يعرض WebUSB دون Web Serial، فلا يمكن تنفيذ تعريف CRSF ولا التفليش التسلسلي هنا. يمكن الوصول فقط إلى جهاز STM32 DFU أو مسبار ST-Link عبر USB.",
   "transport.detected":
     "المرصود: Web Serial {webSerial}، WebUSB {webUsb}، الجسر الأصلي {bridge}، السياق الآمن {secure}.",
   "build.stage": "نسخة تجريبية للتحقق على العتاد",
@@ -66,6 +71,11 @@ export const ar = {
   "build.copyFailed": "تعذّر النسخ. الرقم الكامل موجود في خاصية title للعنصر.",
   "build.unpinned":
     "هذه النسخة لا تحمل هوية Commit، فلا يمكن ربط نتيجة مسجَّلة منها بشجرة واحدة.",
+  "build.host": "التطبيق المثبَّت",
+  "build.hostWeb": "بنية الويب",
+  "build.hostNative": "مصادر المضيف",
+  "build.hostBridgeUnavailable":
+    "لم يتمكّن هذا المضيف من تركيب جسر USB ({reason})، لذا لا يمكن فتح أي جهاز من داخل التطبيق.",
   "diagnostics.heading": "التشخيص",
   "diagnostics.intro":
     "تقرير بما رصدته هذه الجلسة فعلًا: قدرات المتصفح، وما أعلنه الجهاز، والحزمة التي جُهّزت، وحالة الاستعادة.",
@@ -107,6 +117,8 @@ export const ar = {
   "easy.fail.CLEANUP_UNCONFIRMED":
     "تعذر إثبات إغلاق المنفذ السابق. أعد تحميل الصفحة قبل المحاولة مرة أخرى.",
   "easy.fail.CONNECT_FAILED": "تعذر فتح الجهاز.",
+  "easy.fail.MULTIPLE_DEVICES":
+    "أكثر من جهاز USB متصل. وصّل الجهاز الذي تريد إعداده وحده ثم أعد المحاولة.",
   "easy.fail.UNKNOWN": "تعذر التعرف على الجهاز، فلا يُدّعى عنه شيء.",
   "easy.op.binding": "ربط المرسل والمستقبل",
   "easy.op.bindingDescription":
@@ -187,6 +199,22 @@ export const ar = {
     "العبارة مسافات فقط. اتركها فارغة لعدم ضبط عبارة، أو اكتب عبارة تستطيع كتابتها حرفيًا في الطرف الآخر.",
   "easy.fw.bindPhrase.CONTROL_CHARACTER":
     "العبارة تحتوي محرفًا خفيًا. أعد كتابتها نصًا عاديًا.",
+  "easy.fw.bindPhraseWeak":
+    "هذه العبارة سهلة التخمين. ما زالت تعمل، ولا شيء هنا يُمنع بسببها.",
+  "easy.fw.bindPhraseWeakWhy":
+    "الـ UID هو أول ستة بايتات من MD5 غير مملّح لنص ثابت ومعلَن حول عبارتك. من يرى الـ UID في الهواء يستطيع تجربة عبارات مرشّحة دون اتصال بسرعة تنفيذ MD5 على حاسوبه، وكلمة أو اسم أو تاريخ أو رقم قصير يسقط فورًا. واستخراج العبارة يعني القدرة على الارتباط برابطك.",
+  "easy.fw.bindPhraseGenerate": "وَلِّد عبارة قوية",
+  "easy.fw.bindPhraseGenerateHint":
+    "يسحب {bits} بت من مصدر العشوائية التعمياني في المتصفح، بمحارف تصمد عند قراءتها بصوت عالٍ.",
+  "easy.fw.bindPhraseReplaceHeading": "التوليد يستبدل العبارة التي كتبتها.",
+  "easy.fw.bindPhraseReplaceBody":
+    "هناك عبارة في الحقل بالفعل. التوليد يستبدلها، والقديمة لا تُحفظ في أي مكان — إن كان مستقبل مبرمجًا بها فدوّنها أولًا.",
+  "easy.fw.bindPhraseReplaceConfirm": "استبدلها",
+  "easy.fw.bindPhraseReplaceCancel": "أبقِ ما كتبته",
+  "easy.fw.bindPhraseGenerated":
+    "العبارة الجديدة في الحقل. برمِج جهاز الإرسال وجهاز الاستقبال بهذه العبارة نفسها حرفيًا — عبارة مولّدة في طرف واحد فقط تعني أنهما لن يرتبطا.",
+  "easy.fw.bindPhraseReveal": "أظهر العبارة",
+  "easy.fw.bindPhraseHide": "أخفِ العبارة",
   "easy.fw.loadCatalog": "جهّز مصدر التحديث الرسمي",
   "easy.fw.catalogReady":
     "تم تحميل {releases} إصدارًا قابلاً للبناء و{targets} Target رسميًا.",
@@ -201,6 +229,22 @@ export const ar = {
   "easy.fw.prepared":
     "جُهّز {segments} قطاعًا مع SHA-256 لكل قطاع. نزّل حزمة الاستعادة قبل أي كتابة.",
   "easy.fw.downloadRecovery": "نزّل حزمة الاستعادة",
+  "easy.fw.exportDurableRecovery": "احفظ حزمة الاستعادة في مكان يبقى",
+  "easy.fw.importDurableRecovery": "لديّ حزمة استعادة محفوظة بالفعل",
+  "easy.fw.durableRecoveryVerified": "محفوظة ومتحقَّق منها: {location}",
+  "easy.fw.recoveryPassphrase": "عبارة مرور الاستعادة",
+  "easy.fw.recoveryPassphraseConfirm": "أعد كتابة عبارة مرور الاستعادة",
+  "easy.fw.recoveryPassphraseHint":
+    "اكتبها عندك. الملف المحفوظ مشفّر بها، ولا تُحفظ أبدًا، وبدونها لا يمكن فتح الملف مرة أخرى.",
+  "easy.fw.recoveryPassphraseWhy":
+    "حزمة الاستعادة تحتوي على صورة Firmware، وتلك الصورة تحمل اسم شبكة الواي فاي وكلمة سرها ومعرّف الربط المشتق من عبارة الربط.",
+  "easy.fw.pickRecoveryFile": "اختر ملف استعادة محفوظًا",
+  "easy.fw.unlockRecoveryFile": "افتح ملف الاستعادة",
+  "easy.fw.pickedRecovery": "محفوظ من {product} بتاريخ {created}",
+  "easy.fw.importedIdentityHeading": "المُستخرَج من الملف",
+  "easy.fw.restoreFromImported": "استعِد الجهاز من هذه الحزمة",
+  "easy.fw.importedIdentityConfirm":
+    "هذا هو الجهاز الموجود أمامي، وأريد استعادته إلى هذه الصورة",
   "easy.fw.recoverySaved": "تحققت من حفظ حزمة الاستعادة على جهازي",
   "easy.fw.power": "الطاقة ثابتة ولن تنقطع أثناء الكتابة",
   "easy.fw.antenna": "هوائي جهاز الإرسال مركّب",

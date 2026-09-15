@@ -56,15 +56,31 @@ if (
 
 await rejectLinks(distPath);
 const index = await readFile(indexPath, "utf8");
-const policyTagMatch =
-  /<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*>/u.exec(index);
-if (policyTagMatch === null) {
+const policyTags = [
+  ...index.matchAll(
+    /<meta\s[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/giu,
+  ),
+];
+if (policyTags.length === 0) {
   fail("the exact reviewed Pages meta CSP is missing");
 }
-const policyContentMatch = /content=["']([^"']*)["']/u.exec(policyTagMatch[0]);
-const decodedPolicy = policyContentMatch?.[1]
+if (policyTags.length > 1) {
+  fail(
+    `the artifact carries ${policyTags.length} meta CSP tags; two policies ` +
+      "intersect into one that was never reviewed",
+  );
+}
+const policyTagMatch = policyTags[0];
+// The delimiter is captured and back-referenced. `[^"']*` cut the policy at
+// the first apostrophe of `'none'` the moment the tag stopped being
+// HTML-escaped, which it did when the policy moved into index.html itself.
+const policyContentMatch = /content=(["'])([\s\S]*?)\1/u.exec(
+  policyTagMatch[0],
+);
+const decodedPolicy = policyContentMatch?.[2]
   ?.replaceAll("&#39;", "'")
   .replaceAll("&apos;", "'")
+  .replaceAll("&quot;", '"')
   .replaceAll("&amp;", "&");
 if (decodedPolicy !== expectedPolicy) {
   fail("the Pages meta CSP does not exactly match the reviewed policy");

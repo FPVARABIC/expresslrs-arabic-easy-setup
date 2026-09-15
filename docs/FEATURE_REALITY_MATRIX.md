@@ -11,7 +11,8 @@ above the evidence that supports it.
 | Level | What it means | What produces it |
 | --- | --- | --- |
 | `IMPLEMENTED` | The code exists and is reachable from the shipped entry point. Nothing is claimed about running it. | Source plus the write-path and UI-honesty gates |
-| `EMULATOR_VERIFIED` | Behaviour is proven against a stubbed transport in jsdom. | `pnpm test` |
+| `EMULATOR_VERIFIED` | Behaviour is proven against a stubbed transport in jsdom, or — for the Android host — on an emulator against a fake USB backend. | `pnpm test`; `gradle connectedDebugAndroidTest` |
+| `RUNTIME_AVAILABLE` | The control was observed refused, and then observed becoming available once exactly the prerequisites the application names were satisfied — driven through the shipped entry point. | `pnpm check:availability` — see [RUNTIME_AVAILABILITY.md](RUNTIME_AVAILABILITY.md) |
 | `BROWSER_VERIFIED` | Behaviour is proven in a real browser against the built application and its shipped headers. | `pnpm qa:browser` — see [browser QA](testing/browser-qa.md) |
 | `HARDWARE_VERIFIED` | Behaviour is proven against a physical ExpressLRS device. | A recorded physical acceptance session |
 | `UNSUPPORTED_WITH_EVIDENCE` | The path cannot work here, and the evidence for that is recorded. | A named, checkable observation |
@@ -44,7 +45,17 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | Identify my device | `identify` | Opens one CRSF session through the shared controller and reads the device's identity. Refused with a named reason when the browser exposes no serial transport. | `EMULATOR_VERIFIED` |
 | Prepare the official source | `loadCatalog` | Loads the official ExpressLRS release index and Target catalog over HTTPS. | `EMULATOR_VERIFIED` |
 | Prepare and verify the package | `buildFirmware` | Downloads the official artifacts, applies the options, and verifies every segment by SHA-256. The typed binding phrase is compiled in and then dropped from memory. | `EMULATOR_VERIFIED` |
-| Download the recovery package | `downloadRecovery` | Writes the recovery archive to the operator's machine. The application cannot prove it was saved, so the operator confirms it. | `EMULATOR_VERIFIED` |
+| Download the recovery package | `downloadRecovery` | Writes the recovery archive to the operator's machine as a convenience second copy. The page cannot reopen a download, so this does **not** satisfy the firmware-write prerequisite. | `EMULATOR_VERIFIED` |
+| Save the recovery package where it will survive | `exportDurableRecoveryPackage` | Writes the archive, with its provenance sidecar, to storage the operator owns — Android's Storage Access Framework or the File System Access API — then reopens it and hashes it. Only a matching digest satisfies the firmware-write prerequisite. | `EMULATOR_VERIFIED` |
+| Show the phrase / Hide the phrase | `setPhraseVisible` | Reveals the binding phrase in the field. A generated phrase has to be transcribed onto the second device by a person, and one nobody can read cannot be. Affects nothing but this field's input type. | `EMULATOR_VERIFIED` |
+| Generate a strong phrase | `generateBindPhrase`, `updateOption`, `setPhraseVisible`, `setPhraseGenerated`, `setPhraseReplacePending` | Draws 24 characters from `crypto.getRandomValues` by rejection sampling and puts them in the field, revealed. With a phrase already typed it asks first instead of replacing it. Never runs on its own and never rewrites a phrase without the operator saying so. | `EMULATOR_VERIFIED` |
+| Replace it | `generateBindPhrase`, `updateOption`, `setPhraseVisible`, `setPhraseGenerated`, `setPhraseReplacePending` | Confirms replacing a phrase already in the field. The old phrase is not kept anywhere, so this is the last point at which it can be written down. | `EMULATOR_VERIFIED` |
+| Keep what I typed | `setPhraseReplacePending` | Dismisses the replacement prompt. The typed phrase is untouched. | `EMULATOR_VERIFIED` |
+| Recovery passphrase | `setRecoveryPassphrase` | The passphrase the exported package is encrypted with. Held in component state only, never persisted, never sent anywhere, and absent from diagnostics by construction. A field rather than a gate: the export button stays clickable and names the exact reason if it is empty or too short. | `BROWSER_VERIFIED` |
+| Choose a saved recovery file | `pickRecoveryFile` | Opens the operator's storage, reads the file's authenticated identity header **without** a passphrase, and reports which Target and device it was saved from. Nothing is decrypted and nothing reaches hardware. Reads no application state, so it works on a fresh installation. | `EMULATOR_VERIFIED` |
+| Open the recovery file | `unlockRecoveryFile` | Authenticates the file with the operator's passphrase, then validates the archive in full and reconstitutes the checkpoint from its digest. AES-GCM verifies before yielding plaintext, so a failure produces no partial archive and mutates nothing. | `EMULATOR_VERIFIED` |
+| This is the device in front of me… | `confirmImportedRecoveryIdentity` | The operator's confirmation that the identity recovered from the file is the device present. Required before a restore from an imported package, because a package saved from a different unit of the same model passes every automated check. Cleared by picking another file. | `BROWSER_VERIFIED` |
+| Restore the device from this package | `recoverFromImportedPackage` | Writes the imported package back to the device. This is the path that works after a reinstall, when the app-private journal is gone: it carries its own authenticated bytes. Goes through the same single-use RECOVERY capability, the same acknowledgements and the same post-write identity verification as a restore from a picked file. | `EMULATOR_VERIFIED` |
 | Put the device into bind mode | `runBinding` | Sends the bind command the device declares, watching link telemetry across the attempt, and grades the result. | `EMULATOR_VERIFIED` |
 | The link came up / No link yet | `confirmBindObservation` | Records the operator's observation as `USER_CONFIRMED_LINK` or `COMMAND_ACKNOWLEDGED_ONLY`. Never shown as a verified success. | `EMULATOR_VERIFIED` |
 | Apply the change | `runSettingsWrite` | Writes one declared setting and reports it applied only when the device reads the value back. | `EMULATOR_VERIFIED` |
@@ -67,10 +78,49 @@ does nothing, or if an Easy Mode operation hands off instead of completing.
 | Run the real binding | `startBinding` | As Easy Mode's binding, on the same controller and the same evidence grading. | `EMULATOR_VERIFIED` |
 | Build the official firmware | `buildFirmware` | As above. | `EMULATOR_VERIFIED` |
 | Download the firmware | `downloadFirmware` | Hands the verified artifact to the operator; writes nothing to a device. | `EMULATOR_VERIFIED` |
-| Download the recovery package | `downloadRecovery` | As above. | `EMULATOR_VERIFIED` |
+| Download the recovery package | `downloadRecovery` | As above: a second copy, not the gate. | `EMULATOR_VERIFIED` |
+| Save the recovery package to durable storage | `exportDurableRecoveryPackage` | As above. | `EMULATOR_VERIFIED` |
+| Show the phrase / Hide the phrase | `setPhraseVisible` | As Easy Mode. | `EMULATOR_VERIFIED` |
+| Generate a strong phrase | `generateBindPhrase`, `updateOption`, `setPhraseVisible`, `setPhraseGenerated`, `setPhraseReplacePending` | As Easy Mode: the same generator, the same confirmation before replacing, the same alphabet. | `EMULATOR_VERIFIED` |
+| Replace it | `generateBindPhrase`, `updateOption`, `setPhraseVisible`, `setPhraseGenerated`, `setPhraseReplacePending` | As Easy Mode. | `EMULATOR_VERIFIED` |
+| Keep what I typed | `setPhraseReplacePending` | As Easy Mode. | `EMULATOR_VERIFIED` |
+| Recovery passphrase | `setRecoveryPassphrase` | As above. | `BROWSER_VERIFIED` |
+| Choose a saved recovery file | `pickRecoveryFile` | As above. | `EMULATOR_VERIFIED` |
+| Open the recovery file | `unlockRecoveryFile` | As above. | `EMULATOR_VERIFIED` |
+| This is the device in front of me… | `confirmImportedRecoveryIdentity` | As above. | `BROWSER_VERIFIED` |
+| Restore the device from the imported package | `recoverFromImportedPackage` | As above. | `EMULATOR_VERIFIED` |
 | Download the Lua script | `downloadLuaScript` | Fetches the official Lua script for the selected release and Target. | `EMULATOR_VERIFIED` |
 | Start the real flash | `flashPreparedFirmware` | The authorized firmware write, followed by reconnect and verification. Any failure leaves a recovery checkpoint. | `EMULATOR_VERIFIED` |
+| Flash this receiver with transmitter firmware | `updateOption("rxAsTxMode", …)` | Upstream's `--rx-as-tx`. Selects the transmitter build for a receiver and rewrites its hardware layout for the chosen mode. Every mode stays visible; one the Target cannot take is closed with that Target's own reason. | `BROWSER_VERIFIED` |
+| AirPort | `updateOption("airportEnabled", …)` | Upstream's `--airport-baud`. Writes `is-airport` so the device acts as a transparent serial bridge. Independent of the option above; neither derives from the other. | `BROWSER_VERIFIED` |
 | Cancel the operation | `cancelCurrentOperation` | As above. | `EMULATOR_VERIFIED` |
+
+### Every operation, end to end
+
+Control → readiness → driver → write authority → verification → recovery, for
+every operation the shipped application offers. Reachability of each driver
+from `apps/web/src/main.tsx` is enforced by `pnpm check:reachability`.
+
+That gate is static, and a static gate cannot settle the question that matters:
+`disabled={expr}` looks dynamic and can still evaluate false forever.
+[RUNTIME_AVAILABILITY.md](RUNTIME_AVAILABILITY.md) is the runtime half — every
+operation below was driven through the shipped `ProductShell`, observed
+refused, and then observed becoming available once its named prerequisites were
+satisfied. `pnpm check:availability` fails the build if any operation never
+opens, has no recorded row, or turns out to be gated on nothing.
+
+| Operation | Control | Handler | Readiness gate (live prerequisites) | Driver | Write authority | Success requires | On failure |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Identify | Identify over CRSF | `connectHardware` | `connect` — idle, port cleanup proven | `serial.ts` → CRSF Device Info `0x29` | none (read) | A well-formed Device Info with a valid CRC. No identity is shown without one. | Port closed, no identity retained |
+| Diagnostics | Show / copy / download | `captureDiagnostics` | `diagnostics` — always ready | none | none (read) | Not a write. Secrets redacted before the report leaves the page. | — |
+| Settings write | Save with read-back | `writeSetting` | `settingsWrite` — idle, live identity, port clean, journal read, no open checkpoint, a writable parameter chosen | CRSF parameter write | single-use capability, 180 s TTL, bound to session + device fingerprint + operation | The device reads the value back and it matches exactly | Reported unapplied; the prior value stands |
+| Settings restore | Restore the snapshot | `restoreSettings` | `settingsRestore` — as above, plus a backup exists | CRSF parameter write, per parameter | as above | Every restored parameter reads back | Named parameter reported; restore fails |
+| Binding | Run the real binding | `startBinding` | `binding` — as settings, plus the operator's acknowledgement (`bindingPrerequisites` gates the acknowledgement itself) | CRSF command `0x32`, then Link Statistics `0x14` observation | as above | Never `VERIFIED_SUCCESS` from the command. Graded `COMMAND_ACKNOWLEDGED_ONLY` unless the operator confirms a live link → `USER_CONFIRMED_LINK` | Graded down, never up |
+| Firmware write | Start the real flash | `flashPreparedFirmware` | `firmwareWrite` — idle, Target chosen, port clean, journal read, no open checkpoint, package built, recovery archive downloaded, power acknowledged, antenna acknowledged for a TX, Target confirmed where identity does not pin it, live identity for a UART write | esptool-js, STM32 DFU (WebUSB), XMODEM, or passthrough | as above | Reboot, reconnect, read identity, confirm Target, confirm version | Checkpoint kept at the reached stage; recovery offered |
+| Receiver as transmitter | Mode selector, then the flash | `flashPreparedFirmware` with `rxAsTxMode` | `rxAsTx` — a Target upstream builds transmitter firmware for, in the chosen mode | the same flashers, against the `_TX` artifact | as above | Everything a firmware write requires, **and** the rebooted device's CRSF Device Info origin must be `0xEE` | `WRITE_COMPLETED_RECONNECT_UNVERIFIED`; checkpoint kept; the original receiver image is still restorable |
+| AirPort | AirPort switch | `updateOption("airportEnabled", …)` | `airport` — a Target chosen | options block in the packaged firmware | via the firmware write it is part of | The packaged options block carries `is-airport`. Independent of the role. | as firmware write |
+| Recovery | Restore from the package | `recoverFromCheckpoint` | `recovery` — idle, Target chosen, port clean, journal read, a package or an open checkpoint, power acknowledged | the same flashers | as above | Write, reboot, reconnect, read identity, confirm Target, confirm version, then clear the checkpoint | `RECOVERY_INCOMPLETE`; checkpoint kept for another attempt |
+| Cancel | Cancel the operation | `cancelCurrentOperation` | available whenever an operation is in flight | the operation's `AbortSignal` | — | The in-flight operation stops and the port is released | Late results are quarantined, not applied |
 
 ### Diagnostics
 

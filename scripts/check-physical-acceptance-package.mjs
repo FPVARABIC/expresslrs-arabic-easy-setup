@@ -73,8 +73,26 @@ if (!model.includes('"elrs-easy:physical-acceptance:v1"')) {
   }
 }
 
-if (!panel.includes("كل خطوة متاحة من البداية ولا توجد تبعية إجبارية")) {
+// The claim now lives in the shared catalog, so it is checked where it is
+// defined (in both locales) and where the panel renders it.
+if (!panel.includes('t("accp.subheading")')) {
   failures.push("the recorder must state that tests have no sequential lock");
+}
+for (const [locale, file] of [
+  ["Arabic", "packages/i18n/src/locales/acceptance-ar.ts"],
+  ["English", "packages/i18n/src/locales/acceptance-en.ts"],
+]) {
+  const catalog = await readFile(path.join(root, file), "utf8");
+  if (!catalog.includes('"accp.subheading"')) {
+    failures.push(
+      `the ${locale} catalog is missing the no-sequential-lock statement`,
+    );
+  }
+  if (!catalog.includes('"accp.recordingAlwaysOpen"')) {
+    failures.push(
+      `the ${locale} catalog must state the recorder is always open`,
+    );
+  }
 }
 if (!panel.includes("serializePhysicalAcceptanceJson")) {
   failures.push("JSON export is not wired to the recorder");
@@ -109,11 +127,26 @@ const shell = await readFile(
 if (!main.includes("<ProductShell />")) {
   failures.push("the public entrypoint must mount the product shell");
 }
+if (!/<ExpressLrsParityWorkbenchView\b/u.test(shell)) {
+  failures.push("the product shell must mount the canonical workbench");
+}
+// The workbench must render the shell's controller and the operator's chosen
+// locale. It used to hardcode Arabic and `dir="rtl"`, so choosing English left
+// the technical view in the wrong language and the wrong direction.
 if (
-  !shell.includes("<ExpressLrsParityWorkbenchView controller={controller} />")
+  !/<ExpressLrsParityWorkbenchView[\s\S]{0,200}?controller=\{controller\}/u.test(
+    shell,
+  )
 ) {
   failures.push(
-    "the product shell must mount the canonical workbench over the shared controller",
+    "the product shell must mount the workbench over the shared controller",
+  );
+}
+if (
+  !/<ExpressLrsParityWorkbenchView[\s\S]{0,200}?locale=\{locale\}/u.test(shell)
+) {
+  failures.push(
+    "the product shell must pass the chosen locale to the workbench",
   );
 }
 if (!shell.includes("<EasySetup")) {

@@ -54,6 +54,62 @@ describe("Arabic-first message catalogs", () => {
     ).toEqual([]);
   });
 
+  it("gives Easy and Advanced the identical binding-phrase vocabulary, in both languages", () => {
+    // Every string the phrase warning and the generator need, named on both
+    // surfaces. A key present in one namespace and missing from the other is
+    // how the two modes drift apart into "the real one and the simple one",
+    // which is the outcome this pair of lists exists to prevent.
+    const suffixes = [
+      "bindPhraseWeak",
+      "bindPhraseWeakWhy",
+      "bindPhraseGenerate",
+      "bindPhraseGenerateHint",
+      "bindPhraseReplaceHeading",
+      "bindPhraseReplaceBody",
+      "bindPhraseReplaceConfirm",
+      "bindPhraseReplaceCancel",
+      "bindPhraseGenerated",
+      "bindPhraseReveal",
+      "bindPhraseHide",
+    ] as const;
+    const keys = suffixes.flatMap(
+      (suffix) =>
+        [`easy.fw.${suffix}`, `wb.ui.${suffix}`] as readonly MessageKey[],
+    );
+
+    const arabic: Partial<Record<MessageKey, string>> = ar;
+    const english: Partial<Record<MessageKey, string>> = en;
+    expect(
+      keys.filter((key) => (english[key]?.trim().length ?? 0) === 0),
+    ).toEqual([]);
+    expect(
+      keys.filter((key) => (arabic[key]?.trim().length ?? 0) === 0),
+    ).toEqual([]);
+    // And the Arabic is Arabic, not the English string copied across. The two
+    // surfaces may share wording with each other; the two languages may not.
+    expect(keys.filter((key) => arabic[key] === english[key])).toEqual([]);
+    expect(
+      keys.filter((key) => !/\p{Script=Arabic}/u.test(arabic[key] ?? "")),
+    ).toEqual([]);
+  });
+
+  it("states the phrase warning as advice rather than as a refusal", () => {
+    // The wording is the feature here. If this copy ever starts telling an
+    // operator they cannot proceed, the warning has become a lock in all but
+    // implementation, and the implementation is one edit away from following.
+    for (const key of [
+      "easy.fw.bindPhraseWeak",
+      "wb.ui.bindPhraseWeak",
+    ] as const satisfies readonly MessageKey[]) {
+      expect(translate("en", key)).toMatch(/still works/u);
+      expect(translate("en", key)).toMatch(/nothing here is withheld/u);
+      expect(translate("ar", key)).toMatch(/ما زالت تعمل/u);
+    }
+    // And it says why the phrase matters, rather than asserting that it does.
+    expect(translate("en", "wb.ui.bindPhraseWeakWhy")).toMatch(/MD5/u);
+    expect(translate("ar", "wb.ui.bindPhraseWeakWhy")).toMatch(/MD5/u);
+  });
+
   it("retains the explicit English fallback for optional debug text", () => {
     expect(translate("ar", "debug.englishOnly")).toBe(
       "English fallback verified",

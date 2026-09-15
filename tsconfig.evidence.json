@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The runtime availability suite records what it observed to
+    // docs/runtime-availability.json, so it needs Node. It is typechecked
+    // here, and excluded from tsconfig.json, so that browser source never
+    // gains Node globals just because one evidence suite writes a file — the
+    // same split browser-qa already uses.
+    "types": ["node", "vite/client", "vitest/globals"]
+  },
+  // vitest.setup.ts is what registers the jest-dom matchers, so it has to be
+  // in this project too or `toBeEnabled` is unknown here.
+  "include": ["apps/web/src/runtime-availability.test.tsx", "vitest.setup.ts"]
+}

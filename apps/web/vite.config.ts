@@ -1,24 +1,18 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
-import type { Plugin } from "vite";
 
+/**
+ * Only the build-identity check depends on this now. The Content Security
+ * Policy used to be injected here for the Pages build, because GitHub Pages
+ * honours no `_headers` file. It is in `index.html` instead, for every build:
+ * the Android host serves the same document from an asset loader that sets no
+ * headers either, so the policy has to travel with the document rather than
+ * with one deployment target. Injecting it here as well produced a second meta
+ * tag, and two policies intersect into one nobody reviewed.
+ */
 const pagesBuild = process.env.GITHUB_PAGES === "true";
 const configuredBase = process.env.PAGES_BASE_PATH ?? "/";
 const configuredBuildSha = process.env.VITE_BUILD_SHA?.trim() ?? "";
-const pagesContentSecurityPolicy = [
-  "default-src 'none'",
-  "base-uri 'none'",
-  "connect-src 'self' https://expresslrs.github.io http://10.0.0.1",
-  "font-src 'self'",
-  "form-action 'none'",
-  "img-src 'self' data:",
-  "manifest-src 'self'",
-  "object-src 'none'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "worker-src 'self'",
-].join("; ");
-
 function normalizeBase(value: string): string {
   if (value === "/") {
     return value;
@@ -41,34 +35,9 @@ function validatePagesBuildSha(value: string): void {
 
 validatePagesBuildSha(configuredBuildSha);
 
-function pagesSecurityMetaPlugin(): Plugin {
-  return {
-    name: "github-pages-security-meta",
-    apply: "build",
-    transformIndexHtml: {
-      order: "pre",
-      handler() {
-        if (!pagesBuild) {
-          return [];
-        }
-        return [
-          {
-            tag: "meta",
-            attrs: {
-              "http-equiv": "Content-Security-Policy",
-              content: pagesContentSecurityPolicy,
-            },
-            injectTo: "head-prepend",
-          },
-        ];
-      },
-    },
-  };
-}
-
 export default defineConfig({
   base: normalizeBase(configuredBase),
-  plugins: [pagesSecurityMetaPlugin(), react()],
+  plugins: [react()],
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",

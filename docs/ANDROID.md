@@ -155,3 +155,359 @@ In order, each producing evidence rather than an opinion:
 Until one of those produces a report, the honest status for Android is
 `UNSUPPORTED_WITH_EVIDENCE` for every browser in the table that reports `n`,
 and **unverified** for Chrome for Android — not "supported".
+
+## The Android host APK
+
+`android/` is a real Gradle project that CI builds into a debug APK
+(`.github/workflows/android.yml`), with Gradle lint and JVM unit tests.
+
+### Why it is a WebView with a native bridge
+
+Three shapes were possible and only one can drive a device:
+
+| Shape | Web Serial | Can supply a native bridge |
+| --- | --- | --- |
+| Trusted Web Activity / Custom Tab | yes — it *is* Chrome | **no**, the page runs outside this app |
+| Plain WebView | **no** — WebView implements neither Web Serial nor WebUSB | not useful alone |
+| WebView + native USB host bridge | not needed | **yes** |
+
+A Trusted Web Activity would add a launcher icon and nothing else; an operator
+is already better served by installing the PWA in Chrome. A plain WebView would
+be strictly *worse* than the browser, because every device operation would
+fail. So the host is a WebView that supplies `elrsNativeBridge` from Android's
+USB Host API — the seam `apps/web/src/hardware/native-bridge.ts` exists for.
+
+### How the WebView is confined
+
+The WebView that can reach a device must never be pointed at a document this
+APK did not ship. `MainActivity` enforces that, and
+`scripts/check-ci-hygiene.mjs` fails the build if any of it is undone.
+
+| Property | How | Where |
+| --- | --- | --- |
+| Only APK-bundled assets are the document | `WebViewAssetLoader` serving `https://appassets.androidplatform.net/assets/web/` | `MainActivity.onCreate` |
+| The web build is inside the APK, not fetched | `bundleWebAssets` copies `apps/web/dist`, and fails the build if it is empty | `android/app/build.gradle.kts` |
+| No filesystem, no content providers | `allowFileAccess`, `allowContentAccess`, `allowFileAccessFromFileURLs`, `allowUniversalAccessFromFileURLs` all false | `applyHardening` |
+| No plaintext | `MIXED_CONTENT_NEVER_ALLOW` | `applyHardening` |
+| No navigation off the packaged origin | `shouldOverrideUrlLoading`: an `http(s)` link goes to the system browser, which cannot reach the bridge | `HostWebViewClient` |
+| No subframe navigation at all | `shouldOverrideUrlLoading` returns true for every non-main-frame request | `HostWebViewClient` |
+| No foreign subresources | `shouldInterceptRequest` serves the APK, permits **only** `https://expresslrs.github.io` (where the firmware is, and what `connect-src` already names), and returns an empty response for everything else | `HostWebViewClient` |
+| Every certificate error refused | `onReceivedSslError` calls `handler.cancel()`; `proceed()` appears nowhere in the project | `HostWebViewClient` |
+| Debugging only in debug builds | `WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)` | `MainActivity.onCreate` |
+| Safe Browsing on where available | `WebSettingsCompat.setSafeBrowsingEnabled` | `applyHardening` |
+| A strict CSP with no `unsafe-eval` | the same policy `_headers` sends, carried in the document because the asset loader sets no headers | `apps/web/index.html` |
+
+### How the bridge is confined
+
+`addJavascriptInterface` is not called anywhere in this project. It cannot be
+restricted to an origin: it reaches every frame the WebView loads and the callee
+cannot tell which frame called it. The bridge is
+`WebViewCompat.addWebMessageListener`, which supplies the origin and the
+main-frame flag from the WebView rather than from the message.
+
+On a WebView without `WEB_MESSAGE_LISTENER` or `DOCUMENT_START_SCRIPT`
+(Chromium below 88) the bridge is **not installed** — it does not fall back to a
+weaker one — and the page is told the exact reason, which the build banner shows.
+
+| Property | Where |
+| --- | --- |
+| Only the allowed origin may speak | `BridgeCore.handle`, checked before the message is parsed |
+| Only the top-level frame may speak | `BridgeCore.handle`, from the WebView's own `isMainFrame` |
+| Every field validated natively — operation, device id, session id, byte values, transfer size, offset, timeout | `BridgeRequest.parse` |
+| One owner per port | `BridgeCore.open` refuses a second open; `write`/`read`/`close`/`cancel` must present the session that opened it |
+| Chunk ordering | a single worker thread, plus an offset that must equal what the session has written |
+| Cancellation overtakes queued work | `BridgeCore.cancel` runs on the caller's thread, not the queue |
+| A thrown transfer releases the port | `BridgeCore.transfer` |
+| Leaving the screen revokes write authority | `MainActivity.onStop` → `onHostBackgrounded`: the port closes and every pending promise is rejected. A pause that keeps the host visible (Android's own USB permission dialog) and a stop behind a picker this host launched do **not**: the call that opened them is still pending and the worker is parked inside it. Proven by `HostLifecycleInstrumentedTest` |
+| The screen stays on | `FLAG_KEEP_SCREEN_ON` from `MainActivity.onCreate`, so a screen timeout cannot stop the host under a half-written image |
+| Two devices attached | the shim refuses `requestPort` with `MULTIPLE_DEVICES` rather than guessing which one to program |
+| Detach releases the port | a `RECEIVER_NOT_EXPORTED` receiver for `ACTION_USB_DEVICE_DETACHED` |
+| A destroyed Activity keeps nothing open | `MainActivity.onDestroy` → `close` |
+
+### What the APK proves, and what it does not
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Project compiles, lint clean | `IMPLEMENTED` | `gradle lintDebug` in CI |
+| USB permission and interface rules | `EMULATOR_VERIFIED` | `UsbDeviceGateTest`, JVM unit tests in CI |
+| Bridge origin, frame, validation, session, lifecycle rules | `EMULATOR_VERIFIED` | `BridgeCoreInstrumentedTest` against `FakeUsbBackend` |
+| WebView confinement and bridge injection | `EMULATOR_VERIFIED` | `WebViewHostInstrumentedTest`, on a real WebView |
+| The bundled application renders in both locales, in the real Activity | `EMULATOR_VERIFIED` | `PackagedApplicationInstrumentedTest` |
+
+At the R-series review, the instrumentation suites were **42 tests, 0 skipped,
+0 failed**, on an API 34 `google_apis` x86_64 emulator, green on three
+consecutive heads — runs
+[34420741483](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34420741483),
+[34421520061](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34421520061)
+and
+[34422431912](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34422431912).
+Round L adds four instrumentation tests, so that count no longer holds; the new
+green count is re-established on the Round L final SHA and recorded in the Round
+L report. The additions are:
+
+- a USB detach while a recovery-export picker is open leaves the export alone
+  (`DocumentBridgeInstrumentedTest`, against `FakeUsbBackend`/`FakeDocumentStore`);
+- a pending USB permission request is rejected when the host is backgrounded, a
+  late grant is dropped, and a resumed host can ask again (three tests in
+  `BridgeCoreInstrumentedTest`, against `FakeUsbBackend`);
+- an ordinary stop that is not behind the host's own picker voids the session,
+  so a resumed page must open again (`HostLifecycleInstrumentedTest`, real
+  Activity and real page bridge).
+
+The first two encode a real fix: `onDeviceDetached` used to reject every pending
+call, so unplugging the device while the Storage Access Framework picker was
+open cancelled the recovery export and abandoned its half-written file — the one
+operation a detach must not touch. It now rejects only the USB-side calls.
+
+#### Which tests run against a fake, and which through real Android
+
+The user asked for this line to be explicit, because "the Android path is
+tested" means two different things and only one of them involves Android's own
+components. Every row below runs on the emulator; the distinction is whether the
+thing under test is a real Android component or a fake standing in for hardware
+the emulator does not have.
+
+| Suite | Drives | What stands in, and why |
+| --- | --- | --- |
+| `UsbDeviceGateTest` (JVM unit) | The gate's pure rules | Nothing — no Android types; it is a plain JVM test |
+| `BridgeCoreInstrumentedTest` | The bridge's rules: origin, frame, validation, session ownership, cancellation, the lifecycle and permission-dialog rules | `FakeUsbBackend` for USB (no USB host on an emulator). Runs as instrumentation only so `org.json` is the real parser, not the JVM stub |
+| `DocumentBridgeInstrumentedTest` | The durable-recovery document rules, including a USB detach during the picker | `FakeUsbBackend` and `FakeDocumentStore` — no picker, no storage, no device |
+| `HostLifecycleInstrumentedTest` | **Real** `MainActivity` moved through the **real** lifecycle by `ActivityScenario`; the SAF picker in two tests is the **real** one | Only the USB port is a fake device; the Activity, the lifecycle transitions and the picker are real |
+| `WebViewHostInstrumentedTest` | A **real** `WebView`: origin matching on the message listener, main-frame reporting, navigation interception, enforced by Chromium | `FakeUsbBackend` for the bridge behind it |
+| `PackagedApplicationInstrumentedTest` | The **real** bundled `index.html` rendering in the **real** Activity, in both locales | None for the rendering; a fake backend behind the bridge |
+| `UpdatePersistenceInstrumentedTest` | Two **real** APK installs across an update, keeping the tester's data | None — it is a real install-over-install on the emulator |
+
+So the permission-dialog and USB-detach *rules* are proven against a fake
+(`BridgeCoreInstrumentedTest`, `DocumentBridgeInstrumentedTest`); that the
+lifecycle transitions actually call those rules, and that the real SAF picker
+stops the host the way the rules assume, is proven through the real Activity
+(`HostLifecycleInstrumentedTest`). What is **not** proven anywhere on the
+emulator is a real USB permission dialog or a real device detach, because an
+emulator has no USB host — those stay for the physical run (rows A3–A6, A14,
+A17–A19 below).
+
+The real-picker test is also the one whose dismissal was non-deterministic on
+the CI emulator: runs 42, 43 and 44 went red, green, red on identical bytes
+because a single BACK did not always dismiss the real DocumentsUI picker. **Its
+cause is unproven.** A press dropped while the picker was still loading, a
+keyboard in front of the picker, and a picker that opened a level deep and
+needed two presses would each look the same from one press, and the three
+cycles of run 46 each needed exactly one press, so they reproduced none of
+them. The test therefore re-sends BACK only while the host is not resumed,
+records the windows in front (kind, package, title, focus) before every press —
+one `ELRS_PICKER_EVIDENCE` logcat line per cycle, lifted into the job summary —
+and proves directly, at the host's own back-press dispatcher and by the page's
+URL, history depth and load marker, that no BACK reached the host and that the
+page was neither navigated nor reloaded. "unknown" in that record means
+accessibility reported no active window within two seconds, never a window's
+identity.
+
+Reaching that took four defects in the job itself and two real defects the
+tests then found, all recorded here because each was a genuine fault rather
+than a flake:
+
+| Where | Defect |
+| --- | --- |
+| workflow | `yes \| sdkmanager --licenses` is killed by SIGPIPE, and `pipefail` turned that into a failed step two seconds in |
+| workflow | `adb wait-for-device` has no timeout, so a dead emulator spent the job's whole limit looking like a slow one |
+| workflow | `avdmanager` writes to `$HOME/.config/.android/avd` and the `emulator` binary reads `$HOME/.android/avd`; the AVD was created and invisible |
+| workflow | `${{ runner.temp }}` in a job-level `env:` block fails GitHub's validation — the run had zero jobs and was named by its file path |
+| **host** | `BridgeCore` posted replies with `View.post`, which never runs on a view that is not attached to a window; a page's promise would hang forever, neither answered nor rejected |
+| test | the refusal-ordering assertion expected the interface reason where the gate correctly reports the permission reason first |
+| Debug APK produced with a recorded identity | `IMPLEMENTED` | `android.yml` artifact |
+| USB CDC-ACM byte transport | `IMPLEMENTED` | **not executed anywhere** — `AndroidUsbBackend` is the one part a fake stands in for |
+| Anything over real USB OTG | **`UNVERIFIED`** | none |
+
+### What the recovery envelope costs inside the packaged WebView
+
+`crypto.subtle` is only defined in a secure context, and this host serves the
+application from `https://appassets.androidplatform.net/` through
+`WebViewAssetLoader` rather than from a real origin. That it counts as secure
+is not a thing to assume: if it did not, every recovery export on Android would
+fail at the moment of saving, which is the moment an operator is relying on it.
+
+It does, and the instrumentation suite measures what it costs rather than only
+that it works. An export derives a key **twice** — once to seal the file, once
+to open what it wrote and check it is a package that would actually restore the
+device — so this figure is paid twice per export.
+
+Two runs of the identical code on the identical image, because one number from
+a shared CI runner implies a precision it does not have:
+
+| | Run [34547975003](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34547975003) | Run [34549603481](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34549603481) |
+| --- | --- | --- |
+| PBKDF2-HMAC-SHA-256, 600,000 iterations | **252 ms** | **318 ms** |
+| AES-GCM seal, complete | 0.1 ms | 0.2 ms |
+| AES-GCM open, complete | 0 ms | 0.2 ms |
+| Event-loop ticks while the derivation was pending | **10** | **13** |
+| Longest event-loop gap during it | 32 ms | 26 ms |
+| Round trip | intact | intact |
+| Ciphertext with one flipped tag bit | refused | refused |
+
+A quarter of a second either way between two runs minutes apart, on a
+virtualised two-core runner sharing a host with whatever else is on it. Read
+the derivation as **roughly a third of a second here**, not as 252 ms; the
+spread is the measurement, not noise around a true value.
+
+The ten ticks are the load-bearing number. WebCrypto does not block the main
+thread here, so the interface can report progress and stay cancellable across
+both derivations; a blocking implementation would freeze the application for
+roughly half a second per export with no way to say so. That is asserted, not
+just recorded — the test fails if the heartbeat stops.
+
+Measured on:
+
+| | |
+| --- | --- |
+| Image | `system-images;android-34;google_apis;x86_64`, `pixel_6` profile |
+| Fingerprint | `google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys` |
+| ABIs | `x86_64,arm64-v8a` |
+| Cores available to the VM | 2 |
+| GPU | `swiftshader_indirect`, `-no-window`, KVM acceleration on |
+| WebView | `com.google.android.webview 113.0.5672.136` |
+| Runs | [34547975003](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34547975003) and [34549603481](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34549603481) — 67 instrumentation tests each, 0 skipped, 0 failed |
+
+**This is one emulator image on one CI runner, and nothing more.** It is not a
+figure for any particular Android phone: WebView updates independently of the
+system image, so even the same API level can carry a different engine, and a
+low-end device will be slower while a recent one will be faster. Neither has
+been measured, because no physical Android device has run this application.
+
+For scale rather than for comparison, the same probe in desktop Chromium on the
+development machine reported 301 ms for the identical derivation — inside the
+emulator's own run-to-run spread, so the emulator is not even reliably the
+slower of the two. That alone is reason enough not to read any of these
+numbers as a bound for a phone.
+
+### APK identity
+
+Recomputed on every head and never carried over from a previous commit. CI
+writes this record beside the APK as `app-debug.apk.identity.txt`, and refuses
+to publish an APK whose two embedded source digests are missing or `absent`.
+
+| Field | Value |
+| --- | --- |
+| Commit | `a79b19ace1c93ea387f557a3cb8e99c818ce255a` |
+| Workflow run | [34422431912](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/actions/runs/34422431912), attempt 1 |
+| Artifact | `elrs-android-host-debug-a79b19ace1c93ea387f557a3cb8e99c818ce255a`, ID `10131478794` |
+| Artifact ZIP SHA-256 | `9c74140cd5e76db365d11d28d761d74fc231d508c661d710fc8203eaa5246891` |
+| Artifact ZIP bytes | 3,453,318 |
+| APK filename | `app-debug.apk` |
+| APK bytes | 3,760,222 |
+| APK SHA-256 | `45204d46a022be57d6424f1628167ebf77e7f00f238f9bc342f2cdf5bde8ec7e` |
+| Package id | `com.fpvarabic.elrs.bridge` |
+| `versionCode` | 1 |
+| `versionName` | `0.1.0-unverified-debug` |
+| `minSdk` | 24 |
+| `targetSdk` | 35 |
+| `compileSdk` | 35 |
+| Build tools | 37.0.0 |
+| Signing certificate SHA-256 | `d7379486747b4d26d85112de24518b40e055b6b5242459a2dd9d2495cb1f05c0` |
+| Embedded web build SHA-256 | `d7fbc61563324ab10112501431245d4bc5e4bd2407e89ec2a45b11c73f61ba7f` |
+| Embedded native source SHA-256 | `a9c4b14ac2395c7428bc75a99f00c80f3599bb93ac363cb1b390e0c0c797e4f9` |
+
+Two fields were absent from the first attempt at this record and are worth
+naming, because the absence was silent: build-tools 37 renamed the badging
+label for `minSdk`, and the signing digest was being matched by the signer
+heading rather than by its shape. Both are read robustly now.
+
+The last two rows are written into the APK as `assets/source-identity.json`,
+shown in the build banner inside an installed host, and exported in
+diagnostics — so a result reported from a phone names the exact sources behind
+it.
+
+#### What the APK digest does and does not identify
+
+Comparing four consecutive heads makes the distinction concrete, and it is not
+the one you would assume:
+
+| Commit | Changed | APK bytes | APK SHA-256 | Signing certificate | Web build | Native source |
+| --- | --- | --- | --- | --- | --- | --- |
+| `6a225f3` | test sources | 3,760,158 | `bcfde79c…` | `8bb0af82…` | `d7fbc615…` | `abf487f0…` |
+| `73f2e7f` | host sources | 3,760,222 | `e15fe086…` | `be2a7d3e…` | `d7fbc615…` | `a9c4b14a…` |
+| `0861c7b` | Markdown | 3,760,222 | `5f011ce3…` | `ea89565c…` | `d7fbc615…` | `a9c4b14a…` |
+| `a79b19a` | workflow, gate, Markdown | 3,760,222 | `45204d46…` | `d7379486…` | `d7fbc615…` | `a9c4b14a…` |
+
+The last three commits change nothing that goes into the APK. Every input is
+identical across them — both source digests match, as do the byte count, the
+version fields and the SDK levels — and all three APK digests differ, because
+the **signing certificates differ too**. No debug keystore is configured, so
+AGP generates one per runner: four runs, four keys. The APK digest therefore
+identifies **one build**, not one commit; building the same tree again yields a
+different digest.
+
+So the digest is a download-integrity check against `app-debug.apk.sha256` in
+the same artifact, and nothing more. The claim R4 actually asks for — that an
+installed APK can be traced back to its source — rests on the two embedded
+source digests, and those are stable across builds of the same tree, which the
+table above demonstrates rather than asserts.
+
+Two consequences worth knowing before the bench:
+
+- **Builds cannot be installed over one another.** Android rejects an update
+  signed by a different key, so a tester moving between candidates must
+  uninstall first. `docs/hardware/PHYSICAL_VALIDATION_HANDOFF.md` says so, and
+  says what the refusal looks like, because the error text
+  (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) reads like a broken APK and is not.
+- **A stable identity is a release-signing decision, deliberately not taken
+  here.** It would need either a keystore committed to the repository or one
+  generated in CI from a secret. The first is rejected: a private key in a
+  public repository lets anyone build an APK that Android accepts as an update
+  to this one, and for an application with USB write authority over flight
+  hardware, throwing away that protection costs more than the one uninstall
+  step it saves. The second is the right answer for a published build and needs
+  a repository secret that does not exist yet; it is out of scope for bench
+  validation, where every candidate is downloaded from a named CI run anyway.
+
+**This record is for the commit and run named above.** A later commit — or a
+re-run of this one — produces a different APK; CI records its identity the same
+way, and the artifact for a given commit is named after that commit.
+
+This is a **debug** build signed with a generated Android debug key. It is not a
+release artifact and must not be treated as one.
+
+The published APK is also not the same binary the instrumentation suite ran
+against: the two jobs build independently on separate runners. They are builds
+of the same sources, which the identity record is what proves — not the same
+file.
+
+An emulator cannot close this gap: it has no USB host, so no emulator run can
+exercise an OTG path. Only a physical phone or tablet with an OTG cable can.
+
+### Still open — needs a physical Android device
+
+Not one of these has been run. None may be marked passed from CI.
+
+| # | Case | State |
+| --- | --- | --- |
+| A1 | Install the debug APK on a phone or tablet with USB OTG | UNVERIFIED |
+| A2 | Attach an ExpressLRS device; the attach intent offers the app | UNVERIFIED |
+| A3 | USB permission **granted** — a port opens and identity is read | UNVERIFIED |
+| A4 | USB permission **denied** — a named refusal, no port held | UNVERIFIED |
+| A5 | USB permission **revoked** after being granted — the stale handle is refused, not used | UNVERIFIED |
+| A6 | Detach during identify / settings write / binding / firmware write / recovery — each closes the port | UNVERIFIED |
+| A7 | Background and resume mid-operation | UNVERIFIED |
+| A8 | Screen rotation mid-operation | UNVERIFIED |
+| A9 | Cancel an operation and confirm the port is released, not left open | UNVERIFIED |
+| A10 | Firmware file selection through the Android picker | UNVERIFIED |
+| A11 | Recovery after an interrupted write, on Android | UNVERIFIED |
+| A12 | Arabic and English, RTL and LTR, at phone width | UNVERIFIED |
+| A13 | No feature is hidden merely because the platform is Android | UNVERIFIED |
+| A14 | Press *Identify* **before** granting, then grant in the dialog Android shows — the same attempt continues to a read, no second press | UNVERIFIED |
+| A15 | A second USB serial adapter attached alongside the device — a refusal saying more than one is attached; nothing opened | UNVERIFIED |
+| A16 | Leave the app in front past the screen timeout — the screen stays on | UNVERIFIED |
+| A17 | Home or the lock screen **while the real recovery-export picker is open** — the host stops, the port and the pending export both survive, and the export completes when the app returns | UNVERIFIED |
+| A18 | **Unplug the device while the recovery-export picker is open** — the port is released, but the export is untouched and still completes to storage | UNVERIFIED |
+| A19 | Home or the lock screen while Android's **USB permission dialog** is up, then return — the request is re-asked rather than the app appearing stuck | UNVERIFIED |
+
+See [PHYSICAL_VALIDATION_HANDOFF.md](hardware/PHYSICAL_VALIDATION_HANDOFF.md)
+for how to install this APK, verify it, and run these rows.
+
+### Hardware required to close them
+
+| Need | Precise requirement |
+| --- | --- |
+| Phone or tablet | Android 7.0 (API 24) or newer **with USB host/OTG support** — many budget devices omit it; check the device's `android.hardware.usb.host` feature before buying |
+| Cable | USB-C OTG cable, or USB-C to USB-A adapter plus the device's own cable |
+| Device under test | An ExpressLRS TX or RX presenting a **USB CDC-ACM** serial interface — for example an ESP32-S3 or ESP32-C3 based module with native USB |
+| Not yet supported | A module behind a CP210x, CH340 or FTDI bridge chip. The USB filter matches CDC-ACM only, and the application says so rather than appearing to support it. |

@@ -1,3 +1,4 @@
+import { createLegacyBootloaderCommand } from "./crsf";
 import type {
   HardwareSerialPort,
   HardwareSerialReader,
@@ -5,6 +6,24 @@ import type {
 } from "./serial";
 
 export type PassthroughMethod = "edgetx" | "betaflight" | "passthru";
+
+/**
+ * The serial rates the pinned official flasher uses for each path
+ * (`web-flasher/src/js/espflasher.js` `connect()`, `xmodem.js` `connect()`).
+ *
+ * They are not interchangeable. Behind a flight controller the receiver's own
+ * CRSF UART runs at 420000 and the `bl` command has to arrive at that rate;
+ * EdgeTX drives its module bay at 230400; a direct USB-UART adapter takes
+ * 460800. Sending the bootloader command at the wrong rate is not a slower
+ * flash, it is a receiver that never leaves its application firmware.
+ */
+export const PASSTHROUGH_FLASH_BAUD: Readonly<
+  Record<PassthroughMethod, number>
+> = Object.freeze({
+  betaflight: 420_000,
+  edgetx: 230_400,
+  passthru: 230_400,
+});
 
 interface SerialApi {
   requestPort(): Promise<HardwareSerialPort>;
@@ -14,20 +33,33 @@ interface NavigatorWithSerial {
   readonly serial?: SerialApi;
 }
 
+export type PassthroughErrorCode =
+  | "UNSUPPORTED"
+  | "CANCELLED"
+  | "PERMISSION_DENIED"
+  | "MULTIPLE_DEVICES"
+  | "OPEN_FAILED"
+  | "STREAMS_UNAVAILABLE"
+  | "TIMEOUT"
+  | "UNEXPECTED_RESPONSE"
+  | "UART_NOT_FOUND"
+  /** `serialrx_provider` is not CRSF (or ELRS), so the UART carries another protocol. */
+  | "SERIALRX_PROVIDER"
+  /** `serialrx_inverted` is ON: the receiver UART is inverted in the flight controller. */
+  | "SERIALRX_INVERTED"
+  /** `serialrx_halfduplex` is ON: the receiver UART is not full duplex. */
+  | "SERIALRX_HALFDUPLEX"
+  /** `rx_spi_protocol` is EXPRESSLRS: the receiver is inside the flight controller. */
+  | "SPI_RECEIVER"
+  | "CLEANUP_UNCONFIRMED"
+  | "ABORTED";
+
 export class PassthroughError extends Error {
   public constructor(
-    public readonly code:
-      | "UNSUPPORTED"
-      | "CANCELLED"
-      | "PERMISSION_DENIED"
-      | "OPEN_FAILED"
-      | "STREAMS_UNAVAILABLE"
-      | "TIMEOUT"
-      | "UNEXPECTED_RESPONSE"
-      | "UART_NOT_FOUND"
-      | "CLEANUP_UNCONFIRMED"
-      | "ABORTED",
+    public readonly code: PassthroughErrorCode,
     message: string,
+    /** Facts the operator's message is built from, never free text from the device. */
+    public readonly detail: Readonly<Record<string, string>> = {},
   ) {
     super(message);
     this.name = "PassthroughError";
@@ -251,6 +283,12 @@ export async function requestHardwarePort(
         "Serial-port permission was denied",
       );
     }
+    if (name === "MULTIPLE_DEVICES") {
+      throw new PassthroughError(
+        "MULTIPLE_DEVICES",
+        "More than one USB serial device is attached; connect only the device to be programmed",
+      );
+    }
     throw new PassthroughError(
       "OPEN_FAILED",
       "Serial port could not be selected",
@@ -454,6 +492,102 @@ async function initializeEdgeTx(
   await waitForPassthroughReady(signal);
 }
 
+/**
+ * The value Betaflight prints for `get <name>`: the first line of the answer
+ * is `<name> = <value>`, followed by the allowed values and a fresh prompt.
+ * Null when the flight controller does not report the setting at all.
+ */
+function parseCliSetting(output: string, name: string): string | null {
+  const pattern = new RegExp(`^\\s*${name}\\s*=\\s*(\\S+)`, "imu");
+  for (const line of output.split(/\r?\n/u)) {
+    const match = pattern.exec(line);
+    if (match?.[1] !== undefined) return match[1].trim();
+  }
+  return null;
+}
+
+/**
+ * The receiver-UART checks the official flasher performs before it opens the
+ * passthrough (`web-flasher/src/js/passthrough.js` `betaflight()`): the UART
+ * must carry CRSF, must not be inverted, and must be full duplex. A UART that
+ * fails them is not one this passthrough can reach a receiver through, and an
+ * SPI receiver has no UART at all.
+ */
+const BETAFLIGHT_SERIALRX_CHECKS = Object.freeze([
+  Object.freeze({
+    setting: "serialrx_provider",
+    accepted: Object.freeze(["CRSF", "ELRS"]),
+    expected: "CRSF",
+    code: "SERIALRX_PROVIDER" as const,
+  }),
+  Object.freeze({
+    setting: "serialrx_inverted",
+    accepted: Object.freeze(["OFF"]),
+    expected: "OFF",
+    code: "SERIALRX_INVERTED" as const,
+  }),
+  Object.freeze({
+    setting: "serialrx_halfduplex",
+    accepted: Object.freeze(["OFF", "AUTO"]),
+    expected: "OFF or AUTO",
+    code: "SERIALRX_HALFDUPLEX" as const,
+  }),
+]);
+
+async function assertBetaflightReceiverUart(
+  transport: CliSerialTransport,
+  signal?: AbortSignal,
+): Promise<void> {
+  const failures: {
+    readonly setting: string;
+    readonly observed: string;
+    readonly expected: string;
+    readonly code: PassthroughErrorCode;
+  }[] = [];
+  for (const check of BETAFLIGHT_SERIALRX_CHECKS) {
+    const output = await transport.command(
+      `get ${check.setting}\r\n`,
+      /#\s*$/mu,
+      signal,
+    );
+    const observed = parseCliSetting(output, check.setting) ?? "";
+    if (!check.accepted.includes(observed.toLocaleUpperCase("en-US"))) {
+      failures.push({
+        setting: check.setting,
+        observed,
+        expected: check.expected,
+        code: check.code,
+      });
+    }
+  }
+  const first = failures[0];
+  if (first === undefined) return;
+  // A receiver inside the flight controller fails every check above; that is
+  // a different message from a misconfigured UART.
+  const spiOutput = await transport.command(
+    "get rx_spi_protocol\r\n",
+    /#\s*$/mu,
+    signal,
+  );
+  const spiProtocol = parseCliSetting(spiOutput, "rx_spi_protocol") ?? "";
+  if (spiProtocol.toLocaleUpperCase("en-US") === "EXPRESSLRS") {
+    throw new PassthroughError(
+      "SPI_RECEIVER",
+      "Flight controller reports rx_spi_protocol = EXPRESSLRS: the receiver is an SPI receiver updated through Betaflight, not through a UART passthrough",
+      { setting: "rx_spi_protocol", observed: spiProtocol, expected: "" },
+    );
+  }
+  throw new PassthroughError(
+    first.code,
+    `Flight controller reports ${first.setting} = ${first.observed || "(not reported)"}, expected ${first.expected}`,
+    {
+      setting: first.setting,
+      observed: first.observed,
+      expected: first.expected,
+    },
+  );
+}
+
 async function initializeBetaflight(
   transport: CliSerialTransport,
   flashBaud: number,
@@ -461,6 +595,7 @@ async function initializeBetaflight(
   signal?: AbortSignal,
 ): Promise<void> {
   await transport.command("#\r\n", /#\s*$/mu, signal);
+  await assertBetaflightReceiverUart(transport, signal);
   let identifier = uartIdentifier;
   if (identifier === null) {
     const serialOutput = await transport.command(
@@ -522,4 +657,242 @@ export async function initializeSerialPassthrough(input: {
     }
   }
   return input.port;
+}
+
+/** What the receiver said between the `bl` command and its reboot. */
+export interface PassthroughBootloaderResult {
+  /**
+   * The Target name the firmware prints before it reboots
+   * (`rx_main.cpp` `reset_into_bootloader`: `println(&target_name[4])`), or
+   * null when nothing plausible arrived inside the window. The official
+   * flasher then flashes blindly; the caller decides what to do with null.
+   */
+  readonly target: string | null;
+  /** Every non-empty line observed, in order, for the operator's log. */
+  readonly lines: readonly string[];
+  /**
+   * Whether an STM32 bootloader printed `hold down button` and was answered
+   * with the key sequence that keeps it in the bootloader
+   * (`web-flasher/src/js/xmodem.js` `startBootloader`).
+   */
+  readonly bootloaderKeyed: boolean;
+}
+
+/** A line that can be a Target name: the same shape the direct-UART path accepts. */
+const PLAUSIBLE_TARGET_LINE = /^[A-Za-z0-9_.-]{3,80}$/u;
+const BOOTLOADER_LINE_WINDOW_MS = 2_000;
+const BOOTLOADER_PAUSE_MS = 200;
+const BOOTLOADER_WRITE_TIMEOUT_MS = 3_500;
+
+function delayWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(passthroughAborted());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Sends the CRSF bootloader command to a receiver that sits behind a flight
+ * controller whose CLI has already been switched to `serialpassthrough`.
+ *
+ * This is the step the official flasher performs as
+ * `Passthrough.reset_to_bootloader()` right after `betaflight()`, and without
+ * it a receiver behind a flight controller never leaves its application: the
+ * flight controller's passthrough is only a wire, and nothing on that wire
+ * resets the receiver. The sequence is byte-for-byte the official one — the
+ * `07 07 12 20` sync, a 32-byte `0x55` training run, 200 ms, the legacy
+ * `[0xEC 0x04 0x32 'b' 'l' crc]` command — and it is sent at the receiver's
+ * own CRSF rate (420000), because the command is parsed by the application
+ * firmware, not by a bootloader that could auto-baud.
+ *
+ * The receiver answers with its Target name and reboots. That line is
+ * returned for the caller to compare against the chosen Target; an STM32
+ * bootloader that asks for the hold-down key is answered here, the way the
+ * official XMODEM path does, so the caller's XMODEM handshake finds it waiting.
+ *
+ * The port is opened and closed here. Reading runs on its own task and is
+ * buffered, so a line that arrives while no read is outstanding is not lost —
+ * a timed-out `read()` that later resolves with the Target line would
+ * otherwise swallow the one thing this function exists to observe.
+ */
+export async function requestReceiverBootloaderThroughPassthrough(input: {
+  readonly port: HardwareSerialPort;
+  readonly baudRate: number;
+  readonly family: "esp" | "stm32";
+  readonly signal?: AbortSignal;
+}): Promise<PassthroughBootloaderResult> {
+  throwIfAborted(input.signal);
+  const port = input.port;
+  try {
+    await port.open({
+      baudRate: input.baudRate,
+      dataBits: 8,
+      stopBits: 1,
+      parity: "none",
+      bufferSize: 65_536,
+      flowControl: "none",
+    });
+  } catch {
+    throw new PassthroughError(
+      "OPEN_FAILED",
+      "The passthrough port could not be opened for the bootloader command",
+    );
+  }
+  const readable = port.readable;
+  const writable = port.writable;
+  if (readable == null || writable == null) {
+    if (!(await settleCleanupWithin(() => port.close()))) {
+      throw new PassthroughError(
+        "CLEANUP_UNCONFIRMED",
+        "The passthrough port exposed no streams and could not be confirmed closed",
+      );
+    }
+    throw new PassthroughError(
+      "STREAMS_UNAVAILABLE",
+      "The passthrough port does not expose readable and writable streams",
+    );
+  }
+
+  const reader = readable.getReader();
+  const writer = writable.getWriter();
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const waiters = new Set<() => void>();
+  let text = "";
+  let reading = true;
+  let writerNeedsAbort = false;
+  let writerAbortReason: unknown;
+  const readTask = (async () => {
+    try {
+      while (reading) {
+        const result = await reader.read();
+        if (result.done) break;
+        if (result.value !== undefined) {
+          text += decoder.decode(result.value, { stream: true });
+          if (text.length > 65_536) text = text.slice(-32_768);
+          for (const wake of [...waiters]) wake();
+        }
+      }
+    } catch {
+      // The observation window below times out on its own.
+    }
+  })();
+  const waitForData = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        waiters.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, Math.max(1, ms));
+      waiters.add(wake);
+    });
+  const write = async (bytes: Uint8Array): Promise<void> => {
+    try {
+      await writeWithDeadline(
+        writer,
+        bytes,
+        BOOTLOADER_WRITE_TIMEOUT_MS,
+        input.signal,
+      );
+    } catch (error: unknown) {
+      writerNeedsAbort = true;
+      writerAbortReason = error;
+      throw error;
+    }
+  };
+  const close = async (): Promise<boolean> => {
+    reading = false;
+    const abortWriter = (
+      writer as HardwareSerialWriter & {
+        abort?(reason?: unknown): Promise<void>;
+      }
+    ).abort;
+    await Promise.all([
+      settleCleanupWithin(() => reader.cancel()),
+      writerNeedsAbort && typeof abortWriter === "function"
+        ? settleCleanupWithin(() => abortWriter.call(writer, writerAbortReason))
+        : Promise.resolve(true),
+    ]);
+    await settleCleanupWithin(() => readTask);
+    try {
+      reader.releaseLock();
+    } catch {
+      // The browser may already have released the lock.
+    }
+    try {
+      writer.releaseLock();
+    } catch {
+      // The browser may already have released the lock.
+    }
+    return settleCleanupWithin(() => port.close());
+  };
+
+  try {
+    await write(new Uint8Array([0x07, 0x07, 0x12, 0x20]));
+    await write(new Uint8Array(32).fill(0x55));
+    await delayWithAbort(BOOTLOADER_PAUSE_MS, input.signal);
+    // Whatever the flight controller echoed before this point is CLI noise,
+    // not a Target line.
+    text = "";
+    let consumed = 0;
+    // The official frame carries no key: `[0xEC 0x04 0x32 'b' 'l' crc]`
+    // (`Bootloader.get_init_seq('CRSF')`), and `RXEndpoint::handleRaw` matches
+    // on the first two payload bytes alone.
+    await write(createLegacyBootloaderCommand());
+
+    const lines: string[] = [];
+    let target: string | null = null;
+    let bootloaderKeyed = false;
+    const deadline = Date.now() + BOOTLOADER_LINE_WINDOW_MS;
+    observe: while (Date.now() < deadline) {
+      throwIfAborted(input.signal);
+      let newline = text.indexOf("\n", consumed);
+      while (newline !== -1) {
+        const line = text.slice(consumed, newline).replace(/\r$/u, "").trim();
+        consumed = newline + 1;
+        newline = text.indexOf("\n", consumed);
+        if (line.length === 0) continue;
+        lines.push(line);
+        if (/hold down button/iu.test(line)) {
+          // The STM32 bootloader boots the application unless it is told to
+          // stay; the official flasher answers with this exact sequence.
+          await delayWithAbort(100, input.signal);
+          await write(new TextEncoder().encode("bbbbbb"));
+          bootloaderKeyed = true;
+          continue;
+        }
+        if (line.includes("CCC")) break observe;
+        if (target === null && PLAUSIBLE_TARGET_LINE.test(line)) {
+          target = line;
+          // An ESP receiver prints its Target and reboots into the ROM, which
+          // then only speaks garbage at another rate; nothing more to read.
+          if (input.family === "esp") break observe;
+        }
+      }
+      // The XMODEM request is a run of `C` bytes with no line ending; the
+      // official flasher watches for it as a delimiter of its own.
+      if (text.slice(consumed).includes("CCC")) break observe;
+      await waitForData(Math.min(250, deadline - Date.now()));
+    }
+    return Object.freeze({
+      target,
+      lines: Object.freeze(lines),
+      bootloaderKeyed,
+    });
+  } finally {
+    if (!(await close())) {
+      throw new PassthroughError(
+        "CLEANUP_UNCONFIRMED",
+        "The bootloader command was sent, but the browser could not confirm that the port closed",
+      );
+    }
+  }
 }

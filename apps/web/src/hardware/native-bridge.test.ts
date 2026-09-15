@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   nativeBridgeNavigator,
   readNativeHardwareBridge,
+  readNativeHostIdentity,
 } from "./native-bridge";
 import {
   devicePathBlocker,
@@ -196,5 +197,95 @@ describe("device environment reporting", () => {
 
     expect(granted.grantedSerialPorts).toBeNull();
     expect(granted.grantedUsbDevices).toBeNull();
+  });
+});
+
+describe("native host identity", () => {
+  const web =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const native =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  it("is absent in a browser, where there is no host to report one", () => {
+    expect(readNativeHostIdentity({})).toBeNull();
+  });
+
+  it("is absent when a host injects a bridge but reports no identity", () => {
+    expect(readNativeHostIdentity({ elrsNativeBridge: bridge() })).toBeNull();
+  });
+
+  it("reads the digests and bridge state a host reports", () => {
+    const identity = readNativeHostIdentity({
+      elrsNativeBridge: bridge({
+        host: {
+          webBuildSha256: web,
+          nativeSourceSha256: native,
+          bridge: "AVAILABLE",
+        },
+      }),
+    });
+
+    expect(identity).toEqual({
+      webBuildSha256: web,
+      nativeSourceSha256: native,
+      bridge: "AVAILABLE",
+    });
+  });
+
+  it("keeps an unavailable bridge visible with its exact reason", () => {
+    const identity = readNativeHostIdentity({
+      elrsNativeBridge: bridge({
+        host: {
+          webBuildSha256: web,
+          nativeSourceSha256: native,
+          bridge: "WEB_MESSAGE_LISTENER_UNSUPPORTED",
+        },
+      }),
+    });
+
+    expect(identity?.bridge).toBe("WEB_MESSAGE_LISTENER_UNSUPPORTED");
+  });
+
+  it("records a build with no bundled web assets as absent rather than unknown", () => {
+    const identity = readNativeHostIdentity({
+      elrsNativeBridge: bridge({
+        host: { webBuildSha256: "absent", nativeSourceSha256: native },
+      }),
+    });
+
+    expect(identity?.webBuildSha256).toBe("absent");
+  });
+
+  it("drops a field that is not a digest instead of displaying it as one", () => {
+    const identity = readNativeHostIdentity({
+      elrsNativeBridge: bridge({
+        host: {
+          webBuildSha256: web,
+          // Upper-case hex and a free-text reason are a host reporting
+          // something this build does not understand, not an identity.
+          nativeSourceSha256: native.toUpperCase(),
+          bridge: "lowercase is not a reason code",
+        },
+      }),
+    });
+
+    expect(identity).toEqual({
+      webBuildSha256: web,
+      nativeSourceSha256: null,
+      bridge: null,
+    });
+  });
+
+  it("is absent when nothing a host reports survives validation", () => {
+    // Not an object of nulls: a host that reports nothing usable is
+    // indistinguishable from one that reports nothing, and the interface must
+    // not show three empty fields as though they said something.
+    expect(
+      readNativeHostIdentity({
+        elrsNativeBridge: bridge({
+          host: { webBuildSha256: 42, nativeSourceSha256: null, bridge: "" },
+        }),
+      }),
+    ).toBeNull();
   });
 });

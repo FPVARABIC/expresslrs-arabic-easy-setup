@@ -23,6 +23,14 @@ export interface DiagnosticsSnapshot {
     readonly webUsbSupported: boolean;
     /** A native host supplied the serial transport instead of the browser. */
     readonly nativeBridge: boolean;
+    /**
+     * What that native host was built from. A packaged host serves the web
+     * application from inside itself, so this is the only way a report from an
+     * installed build names the sources behind it. Null in a browser.
+     */
+    readonly nativeHostWebBuild: string | null;
+    readonly nativeHostNativeSource: string | null;
+    readonly nativeHostBridge: string | null;
     readonly language: string;
     readonly platform: string;
     readonly standaloneDisplay: boolean;
@@ -72,6 +80,16 @@ export interface DiagnosticsSnapshot {
     readonly packageSegmentHashes: readonly string[];
     readonly bindingPhraseConfigured: boolean;
     readonly recoveryPackageDownloaded: boolean;
+    /**
+     * Whether a copy of the recovery package was written outside this
+     * application, reopened and hashed. The line above records only that a
+     * download was started, which proves nothing about a file existing.
+     */
+    readonly durableRecoveryVerified: boolean;
+    /** Which storage it went to, or null when there is no verified copy. */
+    readonly durableRecoveryBackend: string | null;
+    /** The digest of the copy as it was read back off that storage. */
+    readonly durableRecoverySha256: string | null;
   };
   readonly recovery: {
     readonly journalState: string;
@@ -157,6 +175,15 @@ export function serializeDiagnosticsMarkdown(
       snapshot.environment.grantedUsbDevices,
     ),
     redactedLine("Native bridge", snapshot.environment.nativeBridge),
+    redactedLine(
+      "Native host web build",
+      snapshot.environment.nativeHostWebBuild,
+    ),
+    redactedLine(
+      "Native host native source",
+      snapshot.environment.nativeHostNativeSource,
+    ),
+    redactedLine("Native host bridge", snapshot.environment.nativeHostBridge),
     redactedLine("Service worker", snapshot.environment.serviceWorkerSupported),
     redactedLine("Standalone display", snapshot.environment.standaloneDisplay),
     redactedLine("Platform", snapshot.environment.platform),
@@ -208,6 +235,20 @@ export function serializeDiagnosticsMarkdown(
     redactedLine(
       "Recovery package downloaded",
       snapshot.firmware.recoveryPackageDownloaded,
+    ),
+    redactedLine(
+      "Durable recovery verified",
+      snapshot.firmware.durableRecoveryVerified,
+    ),
+    redactedLine(
+      "Durable recovery storage",
+      snapshot.firmware.durableRecoveryBackend,
+    ),
+    // The location is deliberately not exported: a chosen path can name the
+    // operator or their device. The digest identifies the file without it.
+    redactedLine(
+      "Durable recovery SHA-256",
+      snapshot.firmware.durableRecoverySha256,
     ),
     "",
     "## Recovery",

@@ -631,6 +631,8 @@ export async function flashStm32DfuFirmware(input: {
     bytesWritten: number;
     baseAddress: number;
     cleanupVerified: boolean;
+    /** Every block was uploaded back from the bootloader and compared. */
+    verification: "DFU_UPLOAD_READ_BACK_MATCHED";
   }>
 > {
   const platform = input.target.config.platform.toLocaleLowerCase("en-US");
@@ -640,7 +642,7 @@ export async function flashStm32DfuFirmware(input: {
       "Selected Target is not an STM32 device",
     );
   }
-  if (!input.target.config.uploadMethods.includes("stlink")) {
+  if (!input.target.config.uploadMethods.includes("dfu")) {
     throw new Stm32DfuError(
       "DEVICE_INVALID",
       "Selected Target does not advertise the STM32 DFU route",
@@ -728,6 +730,7 @@ export async function flashStm32DfuFirmware(input: {
     bytesWritten: number;
     baseAddress: number;
     cleanupVerified: boolean;
+    verification: "DFU_UPLOAD_READ_BACK_MATCHED";
   } | null = null;
   let operationFailure: unknown = null;
   try {
@@ -915,6 +918,7 @@ export async function flashStm32DfuFirmware(input: {
       bytesWritten: input.segment.bytes.byteLength,
       baseAddress,
       cleanupVerified: true,
+      verification: "DFU_UPLOAD_READ_BACK_MATCHED",
     };
     return completion;
   } catch (error: unknown) {

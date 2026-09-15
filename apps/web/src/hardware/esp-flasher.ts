@@ -20,6 +20,10 @@ interface EspToolTransport {
 }
 
 interface EspToolLoader {
+  /** Bytes per RAM block while the stub is uploaded. Public on ESPLoader. */
+  ESP_RAM_BLOCK: number;
+  /** Bytes per flash block once the stub runs. Public on ESPLoader. */
+  FLASH_WRITE_SIZE: number;
   main(resetMode?: string): Promise<string>;
   writeFlash(options: {
     readonly fileArray: readonly Readonly<{
@@ -296,10 +300,76 @@ function validatedTotalBytes(
   return total;
 }
 
+/** The serial paths the pinned official flasher distinguishes when it talks to the ROM. */
+export type EspSerialPath = "uart" | "betaflight" | "edgetx" | "passthru";
+
+/**
+ * The rates and block sizes the official flasher uses per path
+ * (`web-flasher/src/js/espflasher.js` `connect()` and `flash()`).
+ *
+ * `romBaudRate` is the rate the ROM is first spoken to and `baudRate` the rate
+ * the stub is asked to switch to. Behind a flight controller or a radio the two
+ * must be equal: the passthrough UART was configured once by the CLI and will
+ * not follow a `CHANGE_BAUDRATE`, so a switch there is a link that goes silent
+ * after the stub upload. Only an ESP32 on a direct adapter starts at 115200.
+ *
+ * `ESP_RAM_BLOCK` is 0x800 everywhere — the official code sets it
+ * unconditionally, "otherwise flashing on BF will fail" — and the flash block
+ * is reduced to 0x800 for the two passthrough paths whose intermediate buffers
+ * cannot hold a 0x4000-byte block.
+ */
+export function espSerialProfile(input: {
+  readonly path: EspSerialPath;
+  readonly platform: string;
+}): Readonly<{
+  baudRate: number;
+  romBaudRate: number;
+  ramBlockBytes: number;
+  flashBlockBytes: number | null;
+}> {
+  switch (input.path) {
+    case "betaflight":
+      return Object.freeze({
+        baudRate: 420_000,
+        romBaudRate: 420_000,
+        ramBlockBytes: 0x800,
+        flashBlockBytes: 0x800,
+      });
+    case "edgetx":
+      return Object.freeze({
+        baudRate: 230_400,
+        romBaudRate: 230_400,
+        ramBlockBytes: 0x800,
+        flashBlockBytes: 0x800,
+      });
+    case "passthru":
+      return Object.freeze({
+        baudRate: 230_400,
+        romBaudRate: 230_400,
+        ramBlockBytes: 0x800,
+        flashBlockBytes: null,
+      });
+    case "uart":
+      return Object.freeze({
+        baudRate: 460_800,
+        romBaudRate: input.platform
+          .toLocaleLowerCase("en-US")
+          .startsWith("esp32")
+          ? 115_200
+          : 460_800,
+        ramBlockBytes: 0x800,
+        flashBlockBytes: null,
+      });
+  }
+}
+
 export async function flashEspFirmware(input: {
   readonly port: HardwareSerialPort;
   readonly target: OfficialTarget;
   readonly segments: readonly FirmwareSegment[];
+  /** Which serial path the port is; decides rates and block sizes. Defaults to a direct adapter. */
+  readonly path?: EspSerialPath;
+  /** Overrides the profile's rate; the ROM is then spoken to at the same rate. */
   readonly baudRate?: number;
   readonly resetMode?: "default_reset" | "no_reset" | "hard_reset";
   readonly eraseAll?: boolean;
@@ -311,6 +381,12 @@ export async function flashEspFirmware(input: {
     chipName: string;
     bytesWritten: number;
     cleanupVerified: boolean;
+    /**
+     * esptool-js compares the MD5 the chip's stub computes over each written
+     * region with the image's own (`calculateMD5Hash` above) and throws on a
+     * mismatch, so a completed write means the device's flash matched.
+     */
+    verification: "DEVICE_FLASH_MD5_MATCHED";
   }>
 > {
   if (isAbortRequested(input.signal)) {
@@ -333,16 +409,25 @@ export async function flashEspFirmware(input: {
     chipName: string;
     bytesWritten: number;
     cleanupVerified: boolean;
+    verification: "DEVICE_FLASH_MD5_MATCHED";
   } | null = null;
   let operationFailure: unknown = null;
+
+  const profile = espSerialProfile({
+    path: input.path ?? "uart",
+    platform: input.target.config.platform,
+  });
+  const baudRate = input.baudRate ?? profile.baudRate;
+  const romBaudRate =
+    input.baudRate === undefined ? profile.romBaudRate : input.baudRate;
 
   try {
     let loader: EspToolLoader;
     try {
       loader = new imported.ESPLoader({
         transport,
-        baudrate: input.baudRate ?? 460_800,
-        romBaudrate: 115_200,
+        baudrate: baudRate,
+        romBaudrate: romBaudRate,
         debugLogging: false,
         terminal: {
           clean() {
@@ -364,12 +449,20 @@ export async function flashEspFirmware(input: {
           : "Espressif loader could not be created",
       );
     }
+    // esptool-js 0.6.0 ignores `romBaudrate` in its constructor options and
+    // keeps 115200; the official flasher assigns the field for that reason,
+    // and so does this.
+    (loader as { romBaudrate?: number }).romBaudrate = romBaudRate;
+    loader.ESP_RAM_BLOCK = profile.ramBlockBytes;
+    if (profile.flashBlockBytes !== null) {
+      loader.FLASH_WRITE_SIZE = profile.flashBlockBytes;
+    }
 
     input.onProgress?.({
       stage: "BOOTLOADER",
       writtenBytes: 0,
       totalBytes: byteCount,
-      detail: "Connecting to the Espressif ROM bootloader",
+      detail: `Connecting to the Espressif ROM bootloader at ${String(romBaudRate)} baud`,
     });
     let chipName: string;
     try {
@@ -466,7 +559,8 @@ export async function flashEspFirmware(input: {
       stage: "VERIFY",
       writtenBytes: byteCount,
       totalBytes: byteCount,
-      detail: "Bootloader accepted the verified image checksums",
+      detail:
+        "The chip computed the MD5 of every written region and it matched the image",
     });
     try {
       await runBoundedOperation({
@@ -488,7 +582,12 @@ export async function flashEspFirmware(input: {
       totalBytes: byteCount,
       detail: "Device reset requested",
     });
-    completion = { chipName, bytesWritten: byteCount, cleanupVerified: true };
+    completion = {
+      chipName,
+      bytesWritten: byteCount,
+      cleanupVerified: true,
+      verification: "DEVICE_FLASH_MD5_MATCHED",
+    };
     return completion;
   } catch (error: unknown) {
     operationFailure = error;

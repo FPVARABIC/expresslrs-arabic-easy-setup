@@ -7,12 +7,15 @@
 | --- | --- |
 | Audit date | 2026-09-09 |
 | Phase | Software feature integration complete; no operation proven on hardware |
-| Branch | `claude/expresslrs-hardware-validation-i073sx` (fast-forward of `feat/m2-real-hardware-first-test`) |
-| Draft PR | [#7](https://github.com/FPVARABIC/expresslrs-arabic-easy-setup/pull/7) — Draft, unmerged |
+| Branch | `claude/expresslrs-advanced-i18n-and-locks` (branched from `main` at `835c5ab`) |
+| Corrective review | Six findings reproduced from `main` at `835c5ab`; all six fixed on this branch and awaiting review |
 | Candidate identity | Branch HEAD; injected at build time as the exact 40-character `VITE_BUILD_SHA` |
 | Software status | `SOFTWARE_FEATURE_INTEGRATION_COMPLETE — HARDWARE UNVERIFIED` |
-| Highest evidence level reached | `BROWSER_VERIFIED` — see the [status vocabulary](docs/FEATURE_REALITY_MATRIX.md#status-vocabulary) |
-| Known integration gaps | None open. Android remains `UNVERIFIED` with the evidence recorded in [ANDROID.md](docs/ANDROID.md); it is an unproven platform, not an unfinished feature |
+| Highest evidence level reached | `BROWSER_VERIFIED` for the web application, `EMULATOR_VERIFIED` for the Android host — see the [status vocabulary](docs/FEATURE_REALITY_MATRIX.md#status-vocabulary) |
+| Android instrumentation | 42 tests, 0 skipped, 0 failed, on an API 34 emulator against a fake USB backend, on the current head — [ANDROID.md](docs/ANDROID.md#what-the-apk-proves-and-what-it-does-not) |
+| Runtime availability | All 10 operations observed becoming available from the shipped entry point — [RUNTIME_AVAILABILITY.md](docs/RUNTIME_AVAILABILITY.md) |
+| Target and layout provenance | Frozen into a hashed, release-scoped pack; nothing mutable is fetched during a write — [PROVENANCE.md](docs/upstream/PROVENANCE.md#determinism-the-pack-not-the-mirror) |
+| Known integration gaps | None open. Receiver-as-transmitter was reimplemented after an earlier version modelled it as AirPort; see [the upstream baseline](docs/upstream/baseline.md#receiver-as-transmitter---rx-as-tx). Android remains `UNVERIFIED` with the evidence recorded in [ANDROID.md](docs/ANDROID.md); it is an unproven platform, not an unfinished feature |
 | Hardware validation | **NONE** — nothing in this build has been proven on a physical device |
 | Public device-changing operations | **ENABLED, evidence-gated** — no project-phase lock; each write requires live device evidence and operator confirmation |
 | Performance / RF claims | **NONE** |
@@ -28,10 +31,13 @@ environment declared in `package.json` `engines`.
 | Command | Result |
 | --- | --- |
 | `pnpm check` | PASS (exit 0) — runs every gate below in one sequence |
-| `pnpm check:ci-hygiene` | PASS — `ci.yml`, `deploy-pages.yml`, one canonical entry chain |
+| `pnpm check:ci-hygiene` | PASS — the four reviewed workflows, one canonical entry chain, and the Android host's WebView confinement |
 | `pnpm check:physical-acceptance` | PASS — 9 files, 19 recorder steps, JSON + Markdown export |
 | `pnpm check:write-path-integrity` | PASS — flashers reachable only through the authorized boundary; no phase lock; no handler-less control |
-| `pnpm check:ui-honesty` | PASS — 5 UI modules; every control has a handler, an action, and a documented reality |
+| `pnpm check:ui-honesty` | PASS — 6 UI modules; every control has a handler, an action, and a documented reality |
+| `pnpm check:ui-reality` | PASS — 122 modules; no Arabic outside the catalog, no pinned locale or direction, no build-stage lock, no dead control, rx-as-tx independent of AirPort |
+| `pnpm check:reachability` | PASS — 58 modules reachable from `main.tsx`; every driver present, no write-switch module in the graph |
+| `pnpm check:availability` | PASS — 12 rows; all 10 operations observed becoming enabled from the production entry point |
 | `pnpm format:check` | PASS |
 | `pnpm lint` | PASS (`--max-warnings=0`) |
 | `pnpm typecheck` | PASS |
@@ -39,11 +45,11 @@ environment declared in `package.json` `engines`.
 | `pnpm check:security-headers` | PASS — source and build output |
 | `pnpm check:pwa-safety` | PASS — source and build output |
 | `pnpm check:visual-theme` | PASS |
-| `pnpm check:links` | PASS — 133 local links across 77 Markdown files |
+| `pnpm check:links` | PASS — 165 local links across 83 Markdown files |
 | `pnpm check:master-plan` | PASS — headings 1–449 in order |
 | `pnpm test` | PASS — see the exact counts below |
 | `pnpm build` | PASS |
-| `pnpm qa:browser` | PASS — 6 browser checks in Chromium against the built app and its shipped headers |
+| `pnpm qa:browser` | PASS — Chromium against the built app and its shipped headers, in both locales at desktop and 320px |
 
 ### Exact test counts
 
@@ -51,10 +57,15 @@ environment declared in `package.json` `engines`.
 
 | Project | Files | Tests |
 | --- | --- | --- |
-| `core` (`packages/**`) | 38 passed | 528 passed |
-| `web-hardware` (`apps/web/src/hardware/**`) | 28 passed + 2 skipped | 303 passed + 5 skipped |
-| `web-ui` (remaining `apps/web/**`) | 11 passed | 108 passed |
-| **Total** | **77 passed + 2 skipped (79)** | **939 passed + 5 skipped (944)** |
+| `core` (`packages/**`) | 37 passed | 519 passed |
+| `web-hardware` (`apps/web/src/hardware/**`) | 31 passed + 2 skipped | 393 passed + 5 skipped |
+| `web-ui` (remaining `apps/web/**`) | 12 passed | 128 passed |
+| **Total** | **80 passed + 2 skipped (82)** | **1040 passed + 5 skipped (1045)** |
+
+The Android host's tests are not in this total. They run under Gradle: JVM unit
+tests for the pure rules, and an instrumentation suite on an emulator against a
+fake USB backend for the bridge and WebView behaviour. See
+[ANDROID.md](docs/ANDROID.md#what-the-apk-proves-and-what-it-does-not).
 
 The `web-ui` figure is lower than an earlier record because the Mock-backed
 `App.tsx` and `view-model/` interface, which was never reachable from the entry
@@ -104,10 +115,28 @@ Verified against the built bundle:
   removed after being shown unreachable from the entry point; Easy Mode was
   never built on them.
 
-Consequently the `realWritesEnabled: false` field in
-`packages/workflows/src/software-readiness.ts` is a field of a reporting
-object. It is **not** the control that keeps the public build read-only, and it
-must not be cited as one.
+`packages/workflows/src/software-readiness.ts` is **deleted**. It carried a
+`realWritesEnabled: false` field in a reporting object; it was never the control
+that kept anything read-only, it was never reachable from `main.tsx`, and
+proving it unreachable was not enough — stale production-shaped code that says
+writes are disabled is misleading whether or not anything imports it today.
+`scripts/check-production-reachability.mjs` fails the build if a module of that
+shape returns, and `check-write-path-integrity` fails on the field itself.
+
+The rest of `packages/workflows` remains, because it is not unused:
+`packages/platform-mock` imports `runReadOnlyDiscovery`, `runEasyBinding`,
+`FoundationExpressLrsModule`, `WorkflowClock` and others from it across eight of
+its own files — six tests, plus `manual-clock.ts` and
+`mock-sensitive-operation-providers.ts`. None of it is reachable from `main.tsx` — the reachability gate proves
+that on every build — so none of it reaches an operator, and deleting a package
+other packages legitimately import would be a different change from the one
+that was asked for.
+
+One marker remains outside the shipped graph:
+`packages/diagnostics/src/read-only-health.ts` emits a
+`KEEP_ALL_REAL_WRITES_DISABLED` finding. It is an `INFO` line in a report
+generated by that package's own tests, in a package unreachable from
+`main.tsx`, and it is recorded here rather than left for someone to find.
 
 ## How device writes are authorized
 

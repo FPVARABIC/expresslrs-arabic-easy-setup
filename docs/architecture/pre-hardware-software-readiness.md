@@ -1,5 +1,12 @@
 # Pre-Hardware Software Readiness
 
+> **Superseded.** The `SOFTWARE_ONLY_READINESS_REPORT` module and its
+> `realWritesEnabled: false` field were deleted. They described a preview in
+> which device writes were globally withheld; that preview no longer exists.
+> Writes are now gated per operation on live evidence — see
+> [the feature matrix](../FEATURE_REALITY_MATRIX.md#every-operation-end-to-end).
+> This document is kept for history and describes a state the code left.
+
 > **Superseded historical record.** This document describes the Milestone 1/5
 > software-readiness model, whose application entry point was `App.tsx` and the
 > `packages/*` Core. The shipped Milestone 2 entry point is

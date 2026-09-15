@@ -1,3 +1,5 @@
+import type { MessageKey } from "@elrs-easy/i18n";
+
 export const PHYSICAL_ACCEPTANCE_SCHEMA_VERSION = 1 as const;
 
 export type PhysicalAcceptanceStepStatus =
@@ -34,9 +36,10 @@ export interface PhysicalAcceptanceStepDefinition {
   readonly id: PhysicalAcceptanceStepId;
   readonly order: number;
   readonly phase: PhysicalAcceptancePhase;
-  readonly title: string;
-  readonly instructions: string;
-  readonly expectedEvidence: string;
+  /** Catalog key for the step's name, so both locales read natively. */
+  readonly titleKey: MessageKey;
+  readonly instructionsKey: MessageKey;
+  readonly expectedEvidenceKey: MessageKey;
   readonly risk: PhysicalAcceptanceRisk;
   readonly optional: boolean;
   readonly destructive: boolean;
@@ -144,11 +147,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "secure_browser",
       order: 1,
       phase: "PREFLIGHT",
-      title: "المتصفح والسياق الآمن",
-      instructions:
-        "افتح النسخة المراجعة عبر HTTPS في Chrome أو Edge وتأكد من ظهور Web Serial.",
-      expectedEvidence:
-        "السياق آمن، Web Serial متاح، ورابط التطبيق وCandidate SHA مسجلان.",
+      titleKey: "acc.step.secure_browser.title",
+      instructionsKey: "acc.step.secure_browser.instructions",
+      expectedEvidenceKey: "acc.step.secure_browser.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -157,11 +158,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "bench_baseline",
       order: 2,
       phase: "PREFLIGHT",
-      title: "خط أساس منصة الاختبار",
-      instructions:
-        "سجل نوع TX/RX والكابل ومصدر الطاقة والهوائي وحالة المراوح قبل أي كتابة.",
-      expectedEvidence:
-        "اسم مختصر للمنصة، مصدر طاقة ثابت، هوائي TX مثبت، والمراوح منزوعة عند الحاجة.",
+      titleKey: "acc.step.bench_baseline.title",
+      instructionsKey: "acc.step.bench_baseline.instructions",
+      expectedEvidenceKey: "acc.step.bench_baseline.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -170,11 +169,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "tx_crsf_identity",
       order: 3,
       phase: "IDENTITY",
-      title: "تعريف TX عبر CRSF",
-      instructions:
-        "اختر TX وافتح المنفذ المباشر وانتظر Device Info صحيحًا وCRC صالحًا.",
-      expectedEvidence:
-        "اسم المنتج، إصدار Firmware، إصدار Hardware، VID/PID إن توفرا، وعدد Parameters.",
+      titleKey: "acc.step.tx_crsf_identity.title",
+      instructionsKey: "acc.step.tx_crsf_identity.instructions",
+      expectedEvidenceKey: "acc.step.tx_crsf_identity.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -183,11 +180,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "rx_crsf_identity",
       order: 4,
       phase: "IDENTITY",
-      title: "تعريف RX عبر CRSF",
-      instructions:
-        "اختر RX وافتح المنفذ المباشر وانتظر Device Info صحيحًا وCRC صالحًا.",
-      expectedEvidence:
-        "اسم المنتج، إصدار Firmware، إصدار Hardware، VID/PID إن توفرا، وعدد Parameters.",
+      titleKey: "acc.step.rx_crsf_identity.title",
+      instructionsKey: "acc.step.rx_crsf_identity.instructions",
+      expectedEvidenceKey: "acc.step.rx_crsf_identity.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -196,10 +191,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "wrong_port_rejected",
       order: 5,
       phase: "IDENTITY",
-      title: "رفض المنفذ الخاطئ",
-      instructions:
-        "اختر عمدًا منفذ Joystick أو منفذًا لا يرسل CRSF وتأكد من عدم إعلان اتصال ناجح.",
-      expectedEvidence: "فشل منظم بلا هوية جهاز وبلا بقاء المنفذ محجوزًا.",
+      titleKey: "acc.step.wrong_port_rejected.title",
+      instructionsKey: "acc.step.wrong_port_rejected.instructions",
+      expectedEvidenceKey: "acc.step.wrong_port_rejected.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -208,10 +202,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "wrong_role_rejected",
       order: 6,
       phase: "IDENTITY",
-      title: "رفض دور TX/RX الخاطئ",
-      instructions: "اختر RX لجهاز TX أو العكس وتأكد من توقف الجلسة مغلقة.",
-      expectedEvidence:
-        "رسالة عدم تطابق الدور، عدم عرض هوية مقبولة، وإغلاق المنفذ.",
+      titleKey: "acc.step.wrong_role_rejected.title",
+      instructionsKey: "acc.step.wrong_role_rejected.instructions",
+      expectedEvidenceKey: "acc.step.wrong_role_rejected.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -220,10 +213,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "reconnect_identity_stable",
       order: 7,
       phase: "IDENTITY",
-      title: "ثبات الهوية بعد الفصل وإعادة الاتصال",
-      instructions: "افصل الجهاز ثم أعد توصيله واقرأ هويته مرة ثانية.",
-      expectedEvidence:
-        "عودة الدور والمنتج وإصدار Hardware والهوية المتوقعة بلا تبديل Target.",
+      titleKey: "acc.step.reconnect_identity_stable.title",
+      instructionsKey: "acc.step.reconnect_identity_stable.instructions",
+      expectedEvidenceKey: "acc.step.reconnect_identity_stable.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -232,11 +224,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "settings_backup_created",
       order: 8,
       phase: "SETTINGS",
-      title: "إنشاء نسخة إعدادات",
-      instructions:
-        "بعد تعريف الجهاز، أنشئ لقطة الإعدادات المرئية القابلة للاستعادة.",
-      expectedEvidence:
-        "وجود Backup مرتبط بهوية الجهاز ولا يحتوي الحقول المخفية أو الحساسة.",
+      titleKey: "acc.step.settings_backup_created.title",
+      instructionsKey: "acc.step.settings_backup_created.instructions",
+      expectedEvidenceKey: "acc.step.settings_backup_created.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -245,11 +235,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "reversible_setting_write",
       order: 9,
       phase: "SETTINGS",
-      title: "كتابة إعداد قابل للعكس",
-      instructions:
-        "غيّر إعدادًا آمنًا واحدًا ضمن حدوده ثم اطلب القراءة الرجعية.",
-      expectedEvidence:
-        "القيمة المقروءة بعد الكتابة تطابق القيمة المطلوبة حرفيًا.",
+      titleKey: "acc.step.reversible_setting_write.title",
+      instructionsKey: "acc.step.reversible_setting_write.instructions",
+      expectedEvidenceKey: "acc.step.reversible_setting_write.evidence",
       risk: "REVERSIBLE_WRITE",
       optional: false,
       destructive: false,
@@ -258,9 +246,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "settings_restored",
       order: 10,
       phase: "SETTINGS",
-      title: "استعادة الإعداد الأصلي",
-      instructions: "استعد لقطة الإعدادات وتحقق من كل قيمة بالقراءة الرجعية.",
-      expectedEvidence: "عودة القيمة الأصلية وعدم وجود فشل أو Parameter ناقص.",
+      titleKey: "acc.step.settings_restored.title",
+      instructionsKey: "acc.step.settings_restored.instructions",
+      expectedEvidenceKey: "acc.step.settings_restored.evidence",
       risk: "REVERSIBLE_WRITE",
       optional: false,
       destructive: false,
@@ -269,10 +257,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "tx_bind_command_ack",
       order: 11,
       phase: "BINDING",
-      title: "إقرار أمر Bind على TX",
-      instructions:
-        "نفذ Command Parameter الحقيقي للربط على TX وانتظر إقرار الجهاز.",
-      expectedEvidence: "إقرار أمر CRSF فقط؛ لا يسجل نجاح RF في هذه الخطوة.",
+      titleKey: "acc.step.tx_bind_command_ack.title",
+      instructionsKey: "acc.step.tx_bind_command_ack.instructions",
+      expectedEvidenceKey: "acc.step.tx_bind_command_ack.evidence",
       risk: "RF",
       optional: false,
       destructive: false,
@@ -281,11 +268,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "rx_bind_command_sent",
       order: 12,
       phase: "BINDING",
-      title: "إرسال أمر Bind إلى RX",
-      instructions:
-        "ضع RX في حالة جاهزة وأرسل أمر الربط الحقيقي أو Legacy fallback الموثق.",
-      expectedEvidence:
-        "تسجيل نوع الأمر واستجابة RX إن توفرت، دون افتراض نجاح الرابط.",
+      titleKey: "acc.step.rx_bind_command_sent.title",
+      instructionsKey: "acc.step.rx_bind_command_sent.instructions",
+      expectedEvidenceKey: "acc.step.rx_bind_command_sent.evidence",
       risk: "RF",
       optional: false,
       destructive: false,
@@ -294,10 +279,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "rf_link_observed",
       order: 13,
       phase: "BINDING",
-      title: "مشاهدة رابط RF من الطرفين",
-      instructions:
-        "تحقق من مؤشرات TX وRX ومن عودة Telemetry أو دليل الرابط المستقل.",
-      expectedEvidence: "دليل منفصل من الطرفين؛ إقرار أمر Bind وحده غير كافٍ.",
+      titleKey: "acc.step.rf_link_observed.title",
+      instructionsKey: "acc.step.rf_link_observed.instructions",
+      expectedEvidenceKey: "acc.step.rf_link_observed.evidence",
       risk: "RF",
       optional: false,
       destructive: false,
@@ -306,11 +290,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "firmware_package_verified",
       order: 14,
       phase: "FIRMWARE",
-      title: "بناء Firmware وحزمة الاستعادة",
-      instructions:
-        "اختر Release وTarget والمنطقة، ابن الحزمة، وتحقق من SHA-256 ثم نزّل Recovery.",
-      expectedEvidence:
-        "Target وRelease وطريقة الرفع وأسماء القطاعات وعناوينها وبصماتها مسجلة.",
+      titleKey: "acc.step.firmware_package_verified.title",
+      instructionsKey: "acc.step.firmware_package_verified.instructions",
+      expectedEvidenceKey: "acc.step.firmware_package_verified.evidence",
       risk: "READ_ONLY",
       optional: false,
       destructive: false,
@@ -319,11 +301,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "bootloader_entry",
       order: 15,
       phase: "FIRMWARE",
-      title: "الدخول إلى Bootloader",
-      instructions:
-        "نفذ طريقة Bootloader المطابقة للـTarget وتأكد من تعرف الأداة على المنصة الصحيحة.",
-      expectedEvidence:
-        "اسم الشريحة أو Target أو واجهة DFU المطابقة قبل المسح.",
+      titleKey: "acc.step.bootloader_entry.title",
+      instructionsKey: "acc.step.bootloader_entry.instructions",
+      expectedEvidenceKey: "acc.step.bootloader_entry.evidence",
       risk: "FIRMWARE_WRITE",
       optional: false,
       destructive: false,
@@ -332,10 +312,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "normal_flash_verified",
       order: 16,
       phase: "FIRMWARE",
-      title: "تفليش طبيعي والتحقق من البايتات",
-      instructions: "نفذ أول Flash طبيعي بطاقة ثابتة ومن دون قطع متعمد.",
-      expectedEvidence:
-        "اكتمال المسح والكتابة وRead-back أو تحقق الأداة من القطاعات.",
+      titleKey: "acc.step.normal_flash_verified.title",
+      instructionsKey: "acc.step.normal_flash_verified.instructions",
+      expectedEvidenceKey: "acc.step.normal_flash_verified.evidence",
       risk: "FIRMWARE_WRITE",
       optional: false,
       destructive: true,
@@ -344,11 +323,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "post_flash_reconnect",
       order: 17,
       phase: "FIRMWARE",
-      title: "إعادة الإقلاع والتحقق من Target والإصدار",
-      instructions:
-        "أعد اختيار الجهاز بعد الإقلاع وتأكد من عودة نفس الهوية وRelease أو Commit المتوقع.",
-      expectedEvidence:
-        "Target verified، إصدار/Commit مطابق، والجلسة قابلة للاستخدام.",
+      titleKey: "acc.step.post_flash_reconnect.title",
+      instructionsKey: "acc.step.post_flash_reconnect.instructions",
+      expectedEvidenceKey: "acc.step.post_flash_reconnect.evidence",
       risk: "FIRMWARE_WRITE",
       optional: false,
       destructive: false,
@@ -357,11 +334,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "recovery_package_restore",
       order: 18,
       phase: "RECOVERY",
-      title: "استعادة عادية بحزمة Recovery",
-      instructions:
-        "على جهاز اختبار، نفذ استعادة الحزمة الموثقة ثم تحقق من العودة الكاملة.",
-      expectedEvidence:
-        "بصمة الحزمة مطابقة، الكتابة ناجحة، والهوية والإصدار عادا كما هو متوقع.",
+      titleKey: "acc.step.recovery_package_restore.title",
+      instructionsKey: "acc.step.recovery_package_restore.instructions",
+      expectedEvidenceKey: "acc.step.recovery_package_restore.evidence",
       risk: "RECOVERY_DRILL",
       optional: false,
       destructive: true,
@@ -370,11 +345,9 @@ export const PHYSICAL_ACCEPTANCE_STEPS: readonly PhysicalAcceptanceStepDefinitio
       id: "interrupted_flash_recovery",
       order: 19,
       phase: "RECOVERY",
-      title: "استعادة بعد انقطاع متعمد",
-      instructions:
-        "اختبار اختياري أخير على جهاز احتياطي فقط: اقطع العملية في مرحلة WRITING ثم استعدها.",
-      expectedEvidence:
-        "ظهور RECOVERY_REQUIRED، استئناف آمن، ثم عودة Target والإصدار المتوقعين.",
+      titleKey: "acc.step.interrupted_flash_recovery.title",
+      instructionsKey: "acc.step.interrupted_flash_recovery.instructions",
+      expectedEvidenceKey: "acc.step.interrupted_flash_recovery.evidence",
       risk: "RECOVERY_DRILL",
       optional: true,
       destructive: true,
@@ -432,6 +405,9 @@ const LATIN_SECRET_LABEL =
  * too. Arabic letters are not `\w`, so `\b` cannot be used around them.
  */
 const ARABIC_SECRET_LABEL =
+  // Arabic here is redaction *data*, not interface text: these patterns match
+  // the Arabic words an operator might type around a secret, so the export can
+  // strip it. They are locale-independent and must not be translated.
   "كلمة\\s+(?:المرور|السر)|عبارة\\s+(?:الربط|ربط)|اسم\\s+الشبكة|الرقم\\s+السري|الرمز\\s+السري";
 
 export function redactSensitiveAcceptanceText(value: unknown): string {
@@ -440,6 +416,8 @@ export function redactSensitiveAcceptanceText(value: unknown): string {
       // A binding UID is written as an octet list. Redact every octet, not just
       // the first one before the separating comma.
       .replace(
+        // The Arabic comma here is redaction data, not interface text: a UID an
+        // operator pasted may be separated by either comma.
         /\b(uid)\b[ \t]*[:=][ \t]*\[?[ \t]*\d{1,3}(?:[ \t]*[,،][ \t]*\d{1,3})*[ \t]*\]?/giu,
         "$1=[REDACTED]",
       )
@@ -1081,74 +1059,87 @@ export function serializePhysicalAcceptanceJson(
   return `${JSON.stringify(exportableSession(session), null, 2)}\n`;
 }
 
-const STATUS_LABELS: Readonly<Record<PhysicalAcceptanceStepStatus, string>> =
-  Object.freeze({
-    NOT_RUN: "لم يبدأ",
-    PASS: "ناجح",
-    FAIL: "فاشل",
-    BLOCKED: "متعذر",
-    SKIPPED: "متجاوز",
-  });
-
 export function serializePhysicalAcceptanceMarkdown(
   session: PhysicalAcceptanceSession,
+  /**
+   * The exported report reads in the operator's own language, so every label
+   * comes from the catalog rather than being frozen into this module.
+   */
+  translate: (
+    key: MessageKey,
+    parameters?: Record<string, string | number>,
+  ) => string,
 ): string {
   const safe = exportableSession(session);
   const summary = summarizePhysicalAcceptance(safe);
+  const t = translate;
+  const statusLabel = (status: PhysicalAcceptanceStepStatus): string =>
+    t(`acc.status.${status}` as MessageKey);
+  const orUnrecorded = (value: string): string =>
+    value || t("acc.md.unrecorded");
   const lines = [
-    "# تقرير القبول الفيزيائي لـExpressLRS TX/RX",
+    `# ${t("acc.md.title")}`,
     "",
     `- Session ID: \`${safe.sessionId}\``,
     `- Candidate SHA: \`${safe.candidateSha || "UNSPECIFIED"}\``,
     `- Created: \`${safe.createdAt}\``,
     `- Updated: \`${safe.updatedAt}\``,
-    `- Operator: ${safe.operatorAlias || "غير مسجل"}`,
-    `- Bench: ${safe.benchLabel || "غير مسجل"}`,
-    `- App: ${safe.appUrl || "غير مسجل"}`,
-    `- Browser: ${safe.userAgent || "غير مسجل"}`,
+    `- ${t("acc.md.operator")}: ${orUnrecorded(safe.operatorAlias)}`,
+    `- ${t("acc.md.bench")}: ${orUnrecorded(safe.benchLabel)}`,
+    `- ${t("acc.md.app")}: ${orUnrecorded(safe.appUrl)}`,
+    `- ${t("acc.md.browser")}: ${orUnrecorded(safe.userAgent)}`,
     "",
-    "## الملخص",
+    `## ${t("acc.md.summary")}`,
     "",
-    `- مكتمل: ${summary.completed}/${summary.total} (${summary.completionPercent}%)`,
-    `- ناجح: ${summary.passed}`,
-    `- فاشل: ${summary.failed}`,
-    `- متعذر: ${summary.blocked}`,
-    `- متجاوز: ${summary.skipped}`,
-    `- لم يبدأ: ${summary.notRun}`,
+    `- ${t("acc.md.completed")}: ${summary.completed}/${summary.total} (${summary.completionPercent}%)`,
+    `- ${t("acc.md.passed")}: ${summary.passed}`,
+    `- ${t("acc.md.failed")}: ${summary.failed}`,
+    `- ${t("acc.md.blocked")}: ${summary.blocked}`,
+    `- ${t("acc.md.skipped")}: ${summary.skipped}`,
+    `- ${t("acc.md.notRun")}: ${summary.notRun}`,
     "",
-    "## النتائج",
+    `## ${t("acc.md.stepsTable")}`,
     "",
-    "| # | الاختبار | المخاطرة | النتيجة | وقت الملاحظة |",
+    `| ${t("acc.md.colOrder")} | ${t("acc.md.colStep")} | ${t("acc.md.colRisk")} | ${t("acc.md.colStatus")} | ${t("acc.md.colObserved")} |`,
     "|---:|---|---|---|---|",
   ];
   for (const definition of PHYSICAL_ACCEPTANCE_STEPS) {
     const result = safe.results[definition.id];
     lines.push(
-      `| ${definition.order} | ${definition.title} | ${definition.risk} | ${STATUS_LABELS[result.status]} | ${result.observedAt ?? "—"} |`,
+      `| ${definition.order} | ${t(definition.titleKey)} | ${definition.risk} | ${statusLabel(result.status)} | ${result.observedAt ?? "—"} |`,
     );
   }
-  lines.push("", "## الأدلة والملاحظات", "");
+  lines.push("", `## ${t("acc.md.evidenceSection")}`, "");
   for (const definition of PHYSICAL_ACCEPTANCE_STEPS) {
     const result = safe.results[definition.id];
-    lines.push(`### ${definition.order}. ${definition.title}`, "");
-    lines.push(`- النتيجة: **${STATUS_LABELS[result.status]}**`);
-    lines.push(`- اختياري: ${definition.optional ? "نعم" : "لا"}`);
-    lines.push(`- مدمر: ${definition.destructive ? "نعم" : "لا"}`);
-    lines.push("", "**الدليل**", "");
-    lines.push(result.evidence || "لا يوجد دليل مسجل.", "");
-    lines.push("**ملاحظات**", "");
-    lines.push(result.notes || "لا توجد ملاحظات.", "");
+    lines.push(`### ${definition.order}. ${t(definition.titleKey)}`, "");
+    lines.push(`- ${t("acc.md.result")}: **${statusLabel(result.status)}**`);
+    lines.push(
+      `- ${t("acc.md.optional")}: ${definition.optional ? t("acc.md.yes") : t("acc.md.no")}`,
+    );
+    lines.push(
+      `- ${t("acc.md.destructive")}: ${definition.destructive ? t("acc.md.yes") : t("acc.md.no")}`,
+    );
+    lines.push("", `**${t("acc.md.evidence")}**`, "");
+    lines.push(result.evidence || t("acc.md.noEvidence"), "");
+    lines.push(`**${t("acc.md.notes")}**`, "");
+    lines.push(result.notes || t("acc.md.noNotes"), "");
   }
   if (safe.lastContext !== null) {
-    lines.push("## آخر لقطة حالة", "", "```text");
+    lines.push(`## ${t("acc.md.lastSnapshot")}`, "", "```text");
     lines.push(acceptanceEvidenceFromContext(safe.lastContext));
     lines.push("```", "");
   }
-  lines.push("## ملاحظات عامة", "", safe.overallNotes || "لا توجد.", "");
   lines.push(
-    "## حد الدليل",
+    `## ${t("acc.md.generalNotes")}`,
     "",
-    "هذا التقرير يسجل ما شاهده المشغل. نجاح CI أو المحاكاة لا يحول أي بند إلى HARDWARE_OBSERVED دون تجربة جهاز فعلية.",
+    safe.overallNotes || t("acc.md.none"),
+    "",
+  );
+  lines.push(
+    `## ${t("acc.md.evidenceLimitTitle")}`,
+    "",
+    t("acc.md.evidenceLimit"),
     "",
   );
   return lines.join("\n");

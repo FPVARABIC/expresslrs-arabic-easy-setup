@@ -34,6 +34,7 @@ function target(id: string, productName: string): OfficialTarget {
       luaName: null,
       layoutFile: null,
       logoFile: null,
+      priorTargetName: null,
       uploadMethods: ["uart", "download"],
       minVersion: null,
       customLayout: {},
@@ -137,5 +138,27 @@ describe("official target matching", () => {
     });
 
     expect(result.confidence).toBe("NOT_FOUND");
+  });
+
+  it("matches a device that still reports a Target's prior name, exactly and only once", () => {
+    const renamed: OfficialTarget = {
+      ...target("vendor/tx_2400/unified", "Vendor Unified TX"),
+      config: {
+        ...target("vendor/tx_2400/unified", "Vendor Unified TX").config,
+        firmware: "Unified_ESP32_2400_TX",
+        priorTargetName: "VENDOR_LEGACY_2400_TX",
+      },
+    };
+    const legacyIdentity: ExpressLrsIdentity = {
+      ...identity,
+      productName: "VENDOR_LEGACY_2400_TX",
+    };
+    const result = matchHardwareIdentityToOfficialTargets({
+      identity: legacyIdentity,
+      targets: [renamed, target("vendor/tx_2400/other", "Vendor Other TX")],
+    });
+    expect(result.confidence).toBe("EXACT");
+    expect(result.selected?.id).toBe(renamed.id);
+    expect(result.candidates[0]?.evidence).toContain("prior-target-name-exact");
   });
 });

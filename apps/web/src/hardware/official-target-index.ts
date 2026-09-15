@@ -44,6 +44,16 @@ function safeDisplay(value: unknown): string | null {
   return typeof value === "string" ? cleanText(value, 200) : null;
 }
 
+/** A Target name as the catalog spells them: letters, digits, `_`, `.`, `-`. */
+function safeTargetName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = cleanText(value, 80);
+  if (normalized === null || !/^[A-Za-z0-9_.-]{1,80}$/u.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
 function safeArtifactName(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string") return null;
@@ -81,13 +91,12 @@ function normalizeMethod(value: unknown): ExpressLrsFlashMethod | null {
     case "wifi":
       return "wifi";
     case "dfu":
-      // The local `stlink` value is the legacy name for the implemented
-      // STM32 ROM DfuSe writer. Upstream ST-Link requires a debug probe and
-      // must not authorize that distinct transport.
-      return "stlink";
+      // The MCU's own USB ROM bootloader. A different transport from the
+      // debug probe below, so it keeps its own name end to end.
+      return "dfu";
     case "stlink":
     case "st-link":
-      return null;
+      return "stlink";
     case "dir":
     case "stock":
     case "download":
@@ -157,6 +166,7 @@ function configFromRecord(
     luaName: safeArtifactName(value.lua_name),
     layoutFile: safeArtifactName(value.layout_file),
     logoFile: safeArtifactName(value.logo_file),
+    priorTargetName: safeTargetName(value.prior_target_name),
     uploadMethods: Object.freeze(uploadMethods),
     minVersion: safeDisplay(value.min_version),
     customLayout: safeRecord(value.custom_layout),
