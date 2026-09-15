@@ -579,6 +579,44 @@ jobs:
             echo "::warning::the WebCrypto measurement did not reach any log the runner kept"
           fi
 
+      # The real-picker test records, per cycle and per BACK press, which
+      # windows were in front and what the host received. Lines, not a
+      # verdict: they are what a cause for the picker non-determinism would
+      # have to explain, and they only count as evidence if they leave the
+      # runner in a form a reader can reach without unpacking an artifact.
+      - name: Report the picker evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          lines=""
+          for source in android-logcat.txt \
+            $(find android/app/build/outputs/androidTest-results -type f 2>/dev/null); do
+            [ -f "$source" ] || continue
+            lines="$(grep -o 'ELRS_PICKER_EVIDENCE.*' "$source" || true)"
+            if [ -n "$lines" ]; then
+              break
+            fi
+          done
+          {
+            echo "### The real SAF picker, per cycle and per BACK press"
+            echo
+            if [ -z "$lines" ]; then
+              echo "No picker evidence was recorded."
+            else
+              echo '```text'
+              echo "$lines"
+              echo '```'
+              echo
+              echo "Recorded by HostLifecycleInstrumentedTest on this emulator image."
+              echo "The window list before each BACK is evidence, not a verdict: the"
+              echo "cause of the picker non-determinism stays unproven until a cycle"
+              echo "that needs more than one press shows which candidate it was."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -z "$lines" ]; then
+            echo "::warning::the picker evidence did not reach any log the runner kept"
+          fi
+
       - name: Preserve the instrumentation reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

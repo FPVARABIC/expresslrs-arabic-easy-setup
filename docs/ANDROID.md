@@ -286,6 +286,22 @@ emulator is a real USB permission dialog or a real device detach, because an
 emulator has no USB host — those stay for the physical run (rows A3–A6, A14,
 A17–A19 below).
 
+The real-picker test is also the one whose dismissal was non-deterministic on
+the CI emulator: runs 42, 43 and 44 went red, green, red on identical bytes
+because a single BACK did not always dismiss the real DocumentsUI picker. **Its
+cause is unproven.** A press dropped while the picker was still loading, a
+keyboard in front of the picker, and a picker that opened a level deep and
+needed two presses would each look the same from one press, and the three
+cycles of run 46 each needed exactly one press, so they reproduced none of
+them. The test therefore re-sends BACK only while the host is not resumed,
+records the windows in front (kind, package, title, focus) before every press —
+one `ELRS_PICKER_EVIDENCE` logcat line per cycle, lifted into the job summary —
+and proves directly, at the host's own back-press dispatcher and by the page's
+URL, history depth and load marker, that no BACK reached the host and that the
+page was neither navigated nor reloaded. "unknown" in that record means
+accessibility reported no active window within two seconds, never a window's
+identity.
+
 Reaching that took four defects in the job itself and two real defects the
 tests then found, all recorded here because each was a genuine fault rather
 than a flake:
