@@ -75,6 +75,10 @@ export const workbenchAr = {
     "أبلغت وحدة تحكم الذاكرة عن خطأ (الحالة {status}). أُعيد قفل الذاكرة؛ شغّل الاستعادة.",
   "wb.stlink.VERIFY_FAILED":
     "القراءة الرجعية عبر SWD تختلف عن الصورة عند {address}. الكتابة غير متحقق منها؛ شغّل الاستعادة.",
+  "wb.stlink.SWD_FAULT":
+    "أبلغ ST-Link عن خطأ SWD أثناء {what} (الحالة {status}). لم تكتمل الكتابة؛ شغّل الاستعادة.",
+  "wb.stlink.SWD_WAIT":
+    "بقي منفذ تصحيح SWD مشغولًا أثناء {what} (الحالة {status}) بعد تجاوز حد إعادة المحاولة. لم تكتمل الكتابة؛ شغّل الاستعادة.",
   "workbench.options.buzzer": "الصفّارة عند التشغيل",
   "workbench.options.buzzerMelody": "لحن مخصص (`notes|bpm|transpose` أو RTTTL)",
   "workbench.buzzer.mode.quiet": "صامت",

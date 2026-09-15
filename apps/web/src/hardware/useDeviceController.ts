@@ -259,6 +259,8 @@ const STLINK_FAILURE_KEYS: Partial<Record<Stm32StlinkErrorCode, MessageKey>> =
     FLASH_LOCKED: "wb.stlink.FLASH_LOCKED",
     FLASH_ERROR: "wb.stlink.FLASH_ERROR",
     VERIFY_FAILED: "wb.stlink.VERIFY_FAILED",
+    SWD_FAULT: "wb.stlink.SWD_FAULT",
+    SWD_WAIT: "wb.stlink.SWD_WAIT",
   });
 
 function localizedDriverFailure(error: unknown): ControllerMessage | null {

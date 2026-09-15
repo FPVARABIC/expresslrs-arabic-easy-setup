@@ -87,6 +87,10 @@ export const workbenchEn = {
     "The flash controller reported an error (status {status}). The flash is locked again; run the recovery.",
   "wb.stlink.VERIFY_FAILED":
     "The SWD read-back differs from the image at {address}. The write is not verified; run the recovery.",
+  "wb.stlink.SWD_FAULT":
+    "The ST-Link reported an SWD fault during {what} (status {status}). The write did not complete; run the recovery.",
+  "wb.stlink.SWD_WAIT":
+    "The SWD debug port stayed busy during {what} (status {status}) past the retry limit. The write did not complete; run the recovery.",
   "workbench.options.buzzer": "Buzzer at power-on",
   "workbench.options.buzzerMelody":
     "Custom tune (`notes|bpm|transpose` or RTTTL)",

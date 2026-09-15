@@ -88,9 +88,23 @@ const DEBUG_APIV2_WRITEREG = 0x34;
 const DEBUG_APIV2_WRITEDEBUGREG = 0x35;
 const DEBUG_APIV2_READDEBUGREG = 0x36;
 const DEBUG_APIV2_SWD_SET_FREQ = 0x43;
+const DEBUG_APIV2_GETLASTRWSTATUS2 = 0x3e;
 const DEBUG_ENTER_SWD = 0xa3;
 /** The 1.8 MHz divisor, the probe's own default. */
 const SWD_FREQ_1800KHZ_DIVISOR = 1;
+
+/**
+ * The SWD access status a command answers in byte 0. `0x80` is success;
+ * `0x10`/`0x14` are the AP/DP WAIT the debug port raises when it is momentarily
+ * busy and mean "ask again", not "done"; anything else is a fault. The pinned
+ * official web-flasher checks this byte only for the frequency command; every
+ * command that carries it is checked here.
+ */
+const STLINK_STATUS_OK = 0x80;
+const STLINK_STATUS_AP_WAIT = 0x10;
+const STLINK_STATUS_DP_WAIT = 0x14;
+const MAX_SWD_WAIT_RETRIES = 4;
+const SWD_WAIT_RETRY_MS = 10;
 
 const COMMAND_SIZE = 16;
 const MAX_TRANSFER_SIZE = 1024;
@@ -177,6 +191,9 @@ const FLASH_DATA_OFFSET = SRAM_START + 256;
 
 const TRANSFER_TIMEOUT_MS = 5_000;
 const CLEANUP_TIMEOUT_MS = 2_000;
+/** A single cleanup transfer's deadline — shorter than an operation transfer,
+ * because cleanup runs after a failure and must not hang the whole page. */
+const CLEANUP_TRANSFER_TIMEOUT_MS = 1_000;
 const ERASE_WAIT_MS = 400;
 const WRITER_WAIT_MS = 400;
 const POLL_INTERVAL_MS = 5;
@@ -381,6 +398,8 @@ export type Stm32StlinkErrorCode =
   | "FLASH_LOCKED"
   | "FLASH_ERROR"
   | "TRANSFER_FAILED"
+  | "SWD_FAULT"
+  | "SWD_WAIT"
   | "TIMEOUT"
   | "VERIFY_FAILED"
   | "ABORTED"
@@ -388,12 +407,19 @@ export type Stm32StlinkErrorCode =
 
 export class Stm32StlinkError extends Error {
   public cleanupVerified = true;
+  /**
+   * What the cleanup after a failure actually managed to confirm, kept apart so
+   * a caller (and the recovery journal) can tell a re-locked flash from a
+   * released USB interface from a left debug session — "yes", "no" or "n/a"
+   * per step.
+   */
+  public cleanupSteps: Readonly<Record<string, string>> = {};
 
   public constructor(
     public readonly code: Stm32StlinkErrorCode,
     message: string,
     /** Facts the operator's message is built from. */
-    public readonly detail: Readonly<Record<string, string>> = {},
+    public detail: Readonly<Record<string, string>> = {},
   ) {
     super(message);
     this.name = "Stm32StlinkError";
@@ -442,10 +468,15 @@ function hex32(value: number): string {
   return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+function hex8(value: number): string {
+  return `0x${(value & 0xff).toString(16).padStart(2, "0")}`;
+}
+
 function withDeadline<T>(
   operation: () => Promise<T>,
   what: string,
   signal: AbortSignal | undefined,
+  timeoutMs: number = TRANSFER_TIMEOUT_MS,
 ): Promise<T> {
   assertNotAborted(signal);
   return new Promise<T>((resolve, reject) => {
@@ -471,7 +502,7 @@ function withDeadline<T>(
             ),
           ),
         ),
-      TRANSFER_TIMEOUT_MS,
+      timeoutMs,
     );
     signal?.addEventListener("abort", onAbort, { once: true });
     let task: Promise<T>;
@@ -540,12 +571,27 @@ class StlinkProbe {
   public versionString = "";
   public jtagVersion = 0;
   public targetVoltage: number | null = null;
+  private activeSignal: AbortSignal | undefined;
+  private transferTimeout = TRANSFER_TIMEOUT_MS;
 
   public constructor(
     private readonly device: UsbStlinkDeviceLike,
     public readonly probeType: (typeof PROBE_TYPES)[number],
-    private readonly signal: AbortSignal | undefined,
-  ) {}
+    signal: AbortSignal | undefined,
+  ) {
+    this.activeSignal = signal;
+  }
+
+  /**
+   * Switch to a cleanup budget: forget the operation's (possibly aborted)
+   * signal and use a shorter per-transfer deadline, so re-locking the flash
+   * and leaving debug after a cancel are actually sent rather than rejected by
+   * the very cancellation that triggered them.
+   */
+  public beginCleanup(): void {
+    this.activeSignal = undefined;
+    this.transferTimeout = CLEANUP_TRANSFER_TIMEOUT_MS;
+  }
 
   public async xfer(
     command: readonly number[] | Uint8Array,
@@ -574,7 +620,8 @@ class StlinkProbe {
             copyToArrayBuffer(bytes),
           ),
         `${what} write`,
-        this.signal,
+        this.activeSignal,
+        this.transferTimeout,
       );
     } catch (error: unknown) {
       if (error instanceof Stm32StlinkError) throw error;
@@ -603,7 +650,8 @@ class StlinkProbe {
       result = await withDeadline(
         () => this.device.transferIn(this.probeType.inEndpoint, readSize),
         "answer read",
-        this.signal,
+        this.activeSignal,
+        this.transferTimeout,
       );
     } catch (error: unknown) {
       if (error instanceof Stm32StlinkError) throw error;
@@ -625,6 +673,62 @@ class StlinkProbe {
       );
     }
     return new DataView(result.data.buffer, result.data.byteOffset, length);
+  }
+
+  /**
+   * Issues a command whose answer carries an SWD status in byte 0, and checks
+   * it. A WAIT (the debug port is momentarily busy) is retried a bounded number
+   * of times; anything other than OK or WAIT is a fault the caller must see —
+   * never silently accepted as success. The whole command is re-sent on WAIT
+   * (each of these is idempotent: reading a register, or writing a value that
+   * is written again), so this never re-runs an operation on a plain failure.
+   */
+  private async statusCommand(
+    command: readonly number[] | Uint8Array,
+    rxLength: number,
+    what: string,
+    data?: Uint8Array,
+  ): Promise<DataView> {
+    for (let attempt = 0; ; attempt += 1) {
+      const rx = await this.xfer(command, { rxLength, data });
+      const status = rx.getUint8(0);
+      if (status === STLINK_STATUS_OK) return rx;
+      const isWait =
+        status === STLINK_STATUS_AP_WAIT || status === STLINK_STATUS_DP_WAIT;
+      if (isWait && attempt < MAX_SWD_WAIT_RETRIES) {
+        await sleep(SWD_WAIT_RETRY_MS, this.activeSignal);
+        continue;
+      }
+      throw new Stm32StlinkError(
+        isWait ? "SWD_WAIT" : "SWD_FAULT",
+        isWait
+          ? `ST-Link ${what} kept answering SWD WAIT (${hex8(status)}) after ${MAX_SWD_WAIT_RETRIES} retries`
+          : `ST-Link ${what} failed with SWD status ${hex8(status)}`,
+        { what, status: hex8(status) },
+      );
+    }
+  }
+
+  /**
+   * The status the probe recorded for the last memory read or write. The debug
+   * port can accept a memory command and only then fault on the bus, so the
+   * transfer completing is not the same as the access succeeding; this reads
+   * `GETLASTRWSTATUS2` and refuses a fault. (More than the pinned web-flasher
+   * checks, which does not query it at all.)
+   */
+  private async assertLastRwOk(what: string): Promise<void> {
+    const rx = await this.xfer([CMD_DEBUG, DEBUG_APIV2_GETLASTRWSTATUS2], {
+      rxLength: 12,
+    });
+    const status = rx.getUint8(0);
+    if (status === STLINK_STATUS_OK) return;
+    const isWait =
+      status === STLINK_STATUS_AP_WAIT || status === STLINK_STATUS_DP_WAIT;
+    throw new Stm32StlinkError(
+      isWait ? "SWD_WAIT" : "SWD_FAULT",
+      `ST-Link ${what} left SWD status ${hex8(status)}`,
+      { what, status: hex8(status) },
+    );
   }
 
   public async readVersion(): Promise<void> {
@@ -665,22 +769,19 @@ class StlinkProbe {
   }
 
   public async setSwdFrequency(): Promise<void> {
-    const rx = await this.xfer(
+    await this.statusCommand(
       [CMD_DEBUG, DEBUG_APIV2_SWD_SET_FREQ, SWD_FREQ_1800KHZ_DIVISOR],
-      { rxLength: 2 },
+      2,
+      "SWD frequency",
     );
-    if (rx.getUint8(0) !== 0x80) {
-      throw new Stm32StlinkError(
-        "TRANSFER_FAILED",
-        "ST-Link refused the SWD frequency",
-      );
-    }
   }
 
   public async enterSwd(): Promise<void> {
-    await this.xfer([CMD_DEBUG, DEBUG_APIV2_ENTER, DEBUG_ENTER_SWD], {
-      rxLength: 2,
-    });
+    await this.statusCommand(
+      [CMD_DEBUG, DEBUG_APIV2_ENTER, DEBUG_ENTER_SWD],
+      2,
+      "enter SWD",
+    );
   }
 
   public async exitDebug(): Promise<void> {
@@ -705,7 +806,7 @@ class StlinkProbe {
     view.setUint8(0, CMD_DEBUG);
     view.setUint8(1, DEBUG_APIV2_READDEBUGREG);
     view.setUint32(2, address >>> 0, true);
-    const rx = await this.xfer(command, { rxLength: 8 });
+    const rx = await this.statusCommand(command, 8, "read debug register");
     return rx.getUint32(4, true);
   }
 
@@ -721,13 +822,15 @@ class StlinkProbe {
     view.setUint8(1, DEBUG_APIV2_WRITEDEBUGREG);
     view.setUint32(2, address >>> 0, true);
     view.setUint32(6, value >>> 0, true);
-    await this.xfer(command, { rxLength: 2 });
+    await this.statusCommand(command, 2, "write debug register");
   }
 
   public async readReg(register: number): Promise<number> {
-    const rx = await this.xfer([CMD_DEBUG, DEBUG_APIV2_READREG, register], {
-      rxLength: 8,
-    });
+    const rx = await this.statusCommand(
+      [CMD_DEBUG, DEBUG_APIV2_READREG, register],
+      8,
+      "read core register",
+    );
     return rx.getUint32(4, true);
   }
 
@@ -738,7 +841,7 @@ class StlinkProbe {
     view.setUint8(1, DEBUG_APIV2_WRITEREG);
     view.setUint8(2, register);
     view.setUint32(3, value >>> 0, true);
-    await this.xfer(command, { rxLength: 2 });
+    await this.statusCommand(command, 2, "write core register");
   }
 
   public async readMem32(address: number, length: number): Promise<Uint8Array> {
@@ -755,7 +858,13 @@ class StlinkProbe {
     view.setUint32(2, address >>> 0, true);
     view.setUint32(6, length, true);
     const rx = await this.xfer(command, { rxLength: length });
-    return new Uint8Array(rx.buffer, rx.byteOffset, rx.byteLength).slice();
+    const bytes = new Uint8Array(
+      rx.buffer,
+      rx.byteOffset,
+      rx.byteLength,
+    ).slice();
+    await this.assertLastRwOk("32-bit memory read");
+    return bytes;
   }
 
   public async writeMem32(address: number, data: Uint8Array): Promise<void> {
@@ -776,6 +885,7 @@ class StlinkProbe {
     view.setUint32(2, address >>> 0, true);
     view.setUint32(6, data.byteLength, true);
     await this.xfer(command, { data });
+    await this.assertLastRwOk("32-bit memory write");
   }
 
   public async writeMem8(address: number, data: Uint8Array): Promise<void> {
@@ -792,6 +902,7 @@ class StlinkProbe {
     view.setUint32(2, address >>> 0, true);
     view.setUint32(6, data.byteLength, true);
     await this.xfer(command, { data });
+    await this.assertLastRwOk("8-bit memory write");
   }
 }
 
@@ -982,6 +1093,28 @@ class FlashController {
     await this.probe.writeDebugReg32(FLASH_CR_REG, FLASH_CR_LOCK);
     this.unlocked = false;
     await this.resetHalt();
+  }
+
+  /**
+   * Re-locks the flash after a cancelled or failed write and reads the control
+   * register back to prove it: LOCK set, and no erase or program bit left
+   * standing (a cancel mid-erase leaves CR at PER|STRT). Throws if it cannot be
+   * confirmed, so the caller reports the cleanup as unverified rather than
+   * assuming a safe device. No reset: a partially written image is not booted.
+   */
+  public async relockAndVerify(): Promise<void> {
+    await this.probe.writeDebugReg32(FLASH_CR_REG, FLASH_CR_LOCK);
+    const control = await this.probe.readDebugReg32(FLASH_CR_REG);
+    const locked = (control & FLASH_CR_LOCK) !== 0;
+    const idle = (control & (FLASH_CR_PER | FLASH_CR_STRT | FLASH_CR_PG)) === 0;
+    this.unlocked = !locked;
+    if (!locked || !idle) {
+      throw new Stm32StlinkError(
+        "FLASH_LOCKED",
+        `The flash controller did not re-lock cleanly after the cancel (CR ${hex32(control)})`,
+        { control: hex32(control) },
+      );
+    }
   }
 
   private async endOfOperation(status: number): Promise<void> {
@@ -1214,6 +1347,9 @@ export async function flashStm32StlinkFirmware(input: {
     verification: "SWD_READ_BACK_MATCHED";
   } | null = null;
   let operationFailure: unknown = null;
+  // What the post-failure cleanup managed to confirm, kept per step.
+  let flashRelocked = "n/a";
+  let debugExited = "n/a";
 
   try {
     progress(
@@ -1379,32 +1515,54 @@ export async function flashStm32StlinkFirmware(input: {
     return completion;
   } catch (error: unknown) {
     operationFailure = error;
-    // A failed write must not leave the flash unlocked or the core parked in
-    // debug; both are best effort and bounded, and neither hides the failure.
+    // Cleanup runs on its own budget, never the operation's signal: after a
+    // cancel that signal is already aborted, and every cleanup transfer would
+    // be rejected before it was sent — which left the flash unlocked mid-erase
+    // (CR at PER|STRT) while we still reported the cleanup as verified.
+    probe.beginCleanup();
+    // Re-lock the flash and confirm it, so a stray program cannot happen and a
+    // half-written image is left inert rather than re-run.
     if (flash.unlocked) {
-      await settleCleanupWithin(() =>
-        probe.writeDebugReg32(FLASH_CR_REG, FLASH_CR_LOCK),
-      );
+      const relocked = await settleCleanupWithin(() => flash.relockAndVerify());
+      flashRelocked = relocked ? "yes" : "no";
+      if (!relocked) markCleanupUnverified(operationFailure);
     }
+    // Leaving debug is a separate step from re-locking the flash.
     if (inDebug) {
-      await settleCleanupWithin(() => probe.exitDebug());
+      const exited = await settleCleanupWithin(() => probe.exitDebug());
+      debugExited = exited ? "yes" : "no";
+      if (!exited) markCleanupUnverified(operationFailure);
     }
     throw error;
   } finally {
+    // Closing USB is a third, separate step; move to the cleanup budget so a
+    // hung transfer is bounded even though release/close do not use the signal.
+    probe.beginCleanup();
+    let usbReleased = "n/a";
     if (claimed) {
-      const releaseVerified = await settleCleanupWithin(() =>
+      const released = await settleCleanupWithin(() =>
         device.releaseInterface(0),
       );
-      if (!releaseVerified) {
+      usbReleased = released ? "yes" : "no";
+      if (!released) {
         if (completion !== null) completion.cleanupVerified = false;
         else markCleanupUnverified(operationFailure);
       }
     }
-    const closeVerified =
+    const closed =
       !device.opened || (await settleCleanupWithin(() => device.close()));
-    if (!closeVerified) {
+    const usbClosed = closed ? "yes" : "no";
+    if (!closed) {
       if (completion !== null) completion.cleanupVerified = false;
       else markCleanupUnverified(operationFailure);
+    }
+    if (operationFailure instanceof Stm32StlinkError) {
+      operationFailure.cleanupSteps = Object.freeze({
+        flashRelocked,
+        debugExited,
+        usbReleased,
+        usbClosed,
+      });
     }
     if (completion !== null) Object.freeze(completion);
   }

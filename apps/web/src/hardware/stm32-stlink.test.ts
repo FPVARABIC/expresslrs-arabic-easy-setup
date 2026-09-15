@@ -37,6 +37,16 @@ interface FakeOptions {
   readonly programmingError?: boolean;
   readonly corruptReadBack?: boolean;
   readonly releaseHangs?: boolean;
+  /** Answer the enter-SWD command with a SWD FAULT (0x81) instead of OK. */
+  readonly faultEnterSwd?: boolean;
+  /** Answer the first N enter-SWD commands with a SWD WAIT (0x14) then OK. */
+  readonly enterSwdWaits?: number;
+  /** Answer the AIRCR write of resetRun (DEMCR already RUN) with a FAULT. */
+  readonly faultResetRun?: boolean;
+  /** Report a SWD fault on the last read/write memory status query. */
+  readonly lastRwFault?: boolean;
+  /** A cleanup write of CR=LOCK does not take effect, so the flash stays open. */
+  readonly relockReadsUnlocked?: boolean;
 }
 
 function fakeStlink(options: FakeOptions = {}) {
@@ -63,6 +73,7 @@ function fakeStlink(options: FakeOptions = {}) {
   ]);
   let dhcsrStatus = 0;
   let keyStage = 0;
+  let enterSwdSeen = 0;
   const commands: Uint8Array[] = [];
   const erasedPages: number[] = [];
   const writerRuns: { source: number; destination: number; length: number }[] =
@@ -150,7 +161,11 @@ function fakeStlink(options: FakeOptions = {}) {
       return;
     }
     if (address === FLASH_CR) {
-      debug.set(FLASH_CR, value);
+      const stored =
+        options.relockReadsUnlocked === true && value === 0x80
+          ? value & ~0x80
+          : value;
+      debug.set(FLASH_CR, stored);
       if ((value & 0x02) !== 0 && (value & 0x40) !== 0) {
         const page = debug.get(FLASH_AR) ?? 0;
         erasedPages.push(page);
@@ -203,8 +218,17 @@ function fakeStlink(options: FakeOptions = {}) {
     } else if (head === 0xf7) {
       answer = new Uint8Array([...u32(voltage[0]), ...u32(voltage[1])]);
     } else if (head === 0xf2) {
-      if (sub === 0x43 || sub === 0x30) answer = new Uint8Array([0x80, 0]);
-      else if (sub === 0x22) answer = u32(coreId);
+      if (sub === 0x43) answer = new Uint8Array([0x80, 0]);
+      else if (sub === 0x30) {
+        enterSwdSeen += 1;
+        let status = 0x80;
+        if (options.faultEnterSwd === true) status = 0x81;
+        else if (enterSwdSeen <= (options.enterSwdWaits ?? 0)) status = 0x14;
+        answer = new Uint8Array([status, 0]);
+      } else if (sub === 0x3e) {
+        answer = new Uint8Array(12);
+        answer[0] = options.lastRwFault === true ? 0x11 : 0x80;
+      } else if (sub === 0x22) answer = u32(coreId);
       else if (sub === 0x36) {
         answer = new Uint8Array([
           0x80,
@@ -214,8 +238,16 @@ function fakeStlink(options: FakeOptions = {}) {
           ...u32(readDebug(view.getUint32(2, true))),
         ]);
       } else if (sub === 0x35) {
-        writeDebug(view.getUint32(2, true), view.getUint32(6, true));
-        answer = new Uint8Array([0x80, 0]);
+        const addr = view.getUint32(2, true);
+        const val = view.getUint32(6, true);
+        const demcrRun = (debug.get(DEMCR_REG) ?? 0) === 0;
+        writeDebug(addr, val);
+        const faulted =
+          options.faultResetRun === true &&
+          addr === AIRCR_REG &&
+          demcrRun &&
+          (val & 0x4) !== 0;
+        answer = new Uint8Array([faulted ? 0x81 : 0x80, 0]);
       } else if (sub === 0x33) {
         answer = new Uint8Array([
           0x80,
@@ -357,6 +389,25 @@ async function attempt(input: Parameters<typeof flashStm32StlinkFirmware>[0]) {
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, error }),
   );
+}
+
+/** Fires the abort as soon as the first flash page has been erased. */
+function abortAfterFirstErase(
+  hardware: ReturnType<typeof fakeStlink>,
+  controller: AbortController,
+): void {
+  let erases = 0;
+  const original = hardware.device.transferOut;
+  (
+    hardware.device as { transferOut: UsbStlinkDeviceLike["transferOut"] }
+  ).transferOut = async (endpoint, source) => {
+    const result = await original(endpoint, source);
+    if (hardware.erasedPages.length > erases) {
+      erases = hardware.erasedPages.length;
+      controller.abort();
+    }
+    return result;
+  };
 }
 
 describe("ST-Link (SWD) STM32 writer", () => {
@@ -718,6 +769,152 @@ describe("ST-Link (SWD) STM32 writer", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ---- M1: the status byte of every command is checked --------------------
+
+  it("refuses to continue when the probe answers enter SWD with a SWD fault", async () => {
+    const hardware = fakeStlink({ faultEnterSwd: true });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(64),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "SWD_FAULT", detail: { status: "0x81" } },
+    });
+    expect(hardware.erasedPages).toEqual([]);
+    expect(hardware.device.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a SWD WAIT during enter SWD within a bounded budget, then continues", async () => {
+    const hardware = fakeStlink({ enterSwdWaits: 2 });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(64),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+    expect(result.ok).toBe(true);
+    const enters = hardware.commands.filter(
+      (command) => command[0] === 0xf2 && command[1] === 0x30,
+    );
+    expect(enters.length).toBe(3); // two WAITs, then the accepted one
+  });
+
+  it("gives up on an endless SWD WAIT instead of looping or reporting success", async () => {
+    const hardware = fakeStlink({ enterSwdWaits: 99 });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(64),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "SWD_WAIT" } });
+    expect(hardware.erasedPages).toEqual([]);
+  });
+
+  it("surfaces a SWD fault raised while resetting into the new firmware, not success", async () => {
+    const hardware = fakeStlink({ faultResetRun: true });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(2000),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "SWD_FAULT" } });
+    expect(hardware.writerRuns.length).toBeGreaterThan(0); // written, but the reset failed
+    expect(hardware.device.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails a write when a memory operation leaves a SWD fault in the last-RW status", async () => {
+    const hardware = fakeStlink({ lastRwFault: true });
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(64),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "SWD_FAULT" } });
+  });
+
+  // ---- M2: cleanup after a cancel is real and honestly reported -----------
+
+  it("re-locks the flash and verifies cleanup after a cancel during the first erase", async () => {
+    const hardware = fakeStlink();
+    const controller = new AbortController();
+    abortAfterFirstErase(hardware, controller);
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(4096),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      signal: controller.signal,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const error = result.error as Stm32StlinkError;
+    expect(error.code).toBe("ABORTED");
+    // Left LOCKED (0x80), not mid-erase (0x42 = PER|STRT).
+    expect((hardware.debug.get(FLASH_CR) ?? 0) & 0x80).toBe(0x80);
+    expect((hardware.debug.get(FLASH_CR) ?? 0) & (0x02 | 0x40)).toBe(0);
+    // Cleanup ran on its own budget, so it is honestly verified.
+    expect(error.cleanupVerified).toBe(true);
+    expect(error.cleanupSteps).toMatchObject({
+      flashRelocked: "yes",
+      debugExited: "yes",
+    });
+    expect(hardware.device.releaseInterface).toHaveBeenCalledWith(0);
+    expect(hardware.device.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unverified cleanup and keeps recovery when the flash will not re-lock", async () => {
+    const hardware = fakeStlink({ relockReadsUnlocked: true });
+    const controller = new AbortController();
+    abortAfterFirstErase(hardware, controller);
+    const result = await attempt({
+      target: target(),
+      segment: {
+        name: "firmware.bin",
+        address: 0x0800_8000,
+        bytes: image(4096),
+        sha256: "0".repeat(64),
+      },
+      navigatorObject: { usb: { requestDevice: hardware.requestDevice } },
+      signal: controller.signal,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    const error = result.error as Stm32StlinkError;
+    expect(error.code).toBe("ABORTED");
+    expect(error.cleanupVerified).toBe(false);
+    expect(error.cleanupSteps).toMatchObject({ flashRelocked: "no" });
   });
 
   it("validates the Target and segment before asking for a probe", async () => {
